@@ -1,13 +1,14 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { isVisible, loadRecipe, plotToSvg, type AnyStep, type ParamDecl, type Recipe } from "@plotlab/engine";
+import { loadRecipe, plotToSvg, type AnyStep, type Recipe } from "@plotlab/engine";
 import { createRegistry } from "@plotlab/steps";
 import { defaultRecipe } from "./defaults.ts";
 import { HelpPanel } from "./Help.tsx";
-import { ParamControl } from "./ParamControl.tsx";
 import { ProjectPanel } from "./ProjectPanel.tsx";
 import { EMPTY_RUN, Runner, type RunState } from "./runner.ts";
 import { decodeFile, loadSample } from "./sample.ts";
+import type { InspectTarget } from "./protocol.ts";
 import { StageView } from "./StageView.tsx";
+import { StepList } from "./StepList.tsx";
 
 const registry = createRegistry();
 const STORAGE_KEY = "plotlab:recipe";
@@ -67,16 +68,20 @@ export function App() {
 
   const apply = (next: Recipe, proxy: boolean, step?: AnyStep) => {
     setRecipe(next);
-    if (!live || step?.cost === "on-demand") {
+    // On-demand steps' own settings wait for their Run button; the worker holds them back.
+    if (!live) {
       setDirty(true);
       return;
     }
     runner.request(next, proxy);
   };
 
-  const setParam = (index: number, name: string, value: unknown, proxy: boolean) => {
-    const steps = recipe.steps.map((s, i) => (i === index ? { ...s, params: { ...s.params, [name]: value } } : s));
-    apply({ ...recipe, steps }, proxy, registry.get(recipe.steps[index]!.step));
+  const [inspect, setInspect] = useState<InspectTarget>(null);
+  const inspectStage = (t: InspectTarget) => {
+    const next = t === inspect ? null : t;
+    setInspect(next);
+    runner.inspect = next;
+    runner.request(recipe, false);
   };
 
   const loadFile = async (file: File) => {
@@ -153,34 +158,22 @@ export function App() {
             working={run.working}
           />
           <h2 className="section">Steps</h2>
-          {recipe.steps.map((rs, index) => {
-            const def = registry.get(rs.step);
-            if (!def) return null;
-            return (
-              <div key={index} className={`card${run.error?.index === index ? " has-error" : ""}`}>
-                <div className="card-head">
-                  <span className="title">{def.title}</span>
-                  <button className="help-btn" onClick={() => setHelp(def)} aria-label={`Help for ${def.title}`}>
-                    ?
-                  </button>
-                </div>
-                <p className="summary">{def.summary}</p>
-                {Object.entries(def.params).map(([name, decl]) =>
-                  isVisible(def.params, name, rs.params) ? (
-                    <ParamControl
-                      key={name}
-                      name={name}
-                      decl={decl as ParamDecl}
-                      value={rs.params[name]}
-                      onDrag={(v) => setParam(index, name, v, true)}
-                      onCommit={(v) => setParam(index, name, v, false)}
-                    />
-                  ) : null,
-                )}
-                {run.error?.index === index && <div className="error">{run.error.message}</div>}
-              </div>
-            );
-          })}
+          <StepList
+            recipe={recipe}
+            registry={registry}
+            steps={run.steps}
+            stale={run.stale}
+            error={run.error}
+            inspect={inspect}
+            onInspect={inspectStage}
+            onChange={(r, proxy, step) => apply(r, proxy, step)}
+            onRun={() => {
+              setDirty(false);
+              runner.request(recipe, false, true);
+            }}
+            onHelp={setHelp}
+            onNotice={setNotice}
+          />
         </section>
 
         <section className="view">

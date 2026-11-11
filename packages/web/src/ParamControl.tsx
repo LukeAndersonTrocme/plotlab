@@ -1,4 +1,4 @@
-import type { ParamDecl } from "@plotlab/engine";
+import { randomSeed, type ParamDecl } from "@plotlab/engine";
 
 const UNIT: Record<string, string> = { "source-units": "px", mm: "mm", "%": "%", deg: "°", px: "px", "": "" };
 
@@ -15,6 +15,28 @@ export function ParamControl(props: {
 }) {
   const { name, decl: d, value } = props;
   const id = `p-${name}-${Math.random().toString(36).slice(2, 7)}`;
+  if (d.type === "number" && d.seed) {
+    return (
+      <div className="param" title={d.help}>
+        <label htmlFor={id}>{d.label}</label>
+        <div className="param-row">
+          <input
+            id={id}
+            className="num seed"
+            type="number"
+            min={d.min}
+            max={d.max}
+            step={1}
+            value={value as number}
+            onChange={(e) => e.target.value !== "" && props.onCommit(Math.round(Math.min(d.max, Math.max(d.min, Number(e.target.value)))))}
+          />
+          <button className="icon" title="New random variation" aria-label="Reroll seed" onClick={() => props.onCommit(randomSeed())}>
+            🎲
+          </button>
+        </div>
+      </div>
+    );
+  }
   if (d.type === "number") {
     const v = value as number;
     return (

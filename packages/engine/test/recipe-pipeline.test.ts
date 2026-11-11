@@ -75,4 +75,24 @@ describe("Pipeline", () => {
     expect(proxied.placed.width).toBeLessThanOrEqual(100);
     expect(proxied.placed.frame).toEqual(expected);
   });
+  it("holds back stale on-demand steps when asked, reusing them when still fresh", async () => {
+    const spy = vi.fn();
+    const slow = defineStep({
+      id: "slow", version: 1, title: "Slow", summary: "", input: "image", output: "image", cost: "on-demand", help: "",
+      params: { k: { type: "number", label: "k", help: "", min: 0, max: 10, default: 1 } },
+      run: (i) => { spy("slow"); return i; },
+    });
+    const reg = new StepRegistry([slow]);
+    const p = new Pipeline(reg);
+    const r = loadRecipe({ ...base, steps: [{ step: "slow" }] }, reg).recipe;
+    const held = await p.run(img, r, { runOnDemand: false });
+    expect(spy).not.toHaveBeenCalled();
+    expect(held.stale).toEqual([0]);
+    expect(held.output.kind).toBe("image");
+    await p.run(img, r); // the person presses Run
+    expect(spy).toHaveBeenCalledTimes(1);
+    const again = await p.run(img, r, { runOnDemand: false });
+    expect(again.stale).toEqual([]);
+    expect(again.results[0]!.cached).toBe(true);
+  });
 });

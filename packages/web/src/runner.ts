@@ -8,6 +8,7 @@ export interface RunState {
   warnings: string[];
   working: { width: number; height: number; mmPerPx: number } | null;
   steps: StepInfo[];
+  stale: number[];
   rasterLayers: RasterView[];
   inspected: InspectView | null;
   underlay: RasterView | null;
@@ -23,6 +24,7 @@ export const EMPTY_RUN: RunState = {
   warnings: [],
   working: null,
   steps: [],
+  stale: [],
   rasterLayers: [],
   inspected: null,
   underlay: null,
@@ -39,7 +41,7 @@ export class Runner {
   private worker = new Worker(new URL("./worker.ts", import.meta.url), { type: "module" });
   private nextId = 1;
   private inFlight: number | null = null;
-  private pending: { recipe: Recipe; proxy: boolean } | null = null;
+  private pending: { recipe: Recipe; proxy: boolean; runOnDemand: boolean } | null = null;
   /** Which stage the view shows; sent with every run. */
   inspect: InspectTarget = null;
   state: RunState = EMPTY_RUN;
@@ -53,19 +55,24 @@ export class Runner {
     this.worker.postMessage(msg);
   }
 
-  /** proxy = true while dragging; false on release / for on-demand updates. */
-  request(recipe: Recipe, proxy: boolean): void {
-    this.pending = { recipe, proxy };
+  /**
+   * proxy = true while dragging; false on release. runOnDemand = also run on-demand steps
+   * (the Run button); otherwise they keep their last output or wait.
+   */
+  request(recipe: Recipe, proxy: boolean, runOnDemand = false): void {
+    // A pending Run press survives being superseded by a later edit.
+    const keep = !proxy && (runOnDemand || (this.pending?.runOnDemand ?? false));
+    this.pending = { recipe, proxy, runOnDemand: keep };
     this.pump();
   }
 
   private pump(): void {
     if (this.inFlight !== null || !this.pending) return;
-    const { recipe, proxy } = this.pending;
+    const { recipe, proxy, runOnDemand } = this.pending;
     this.pending = null;
     const id = this.nextId++;
     this.inFlight = id;
-    const msg: ToWorker = { type: "run", id, recipe, proxy, inspect: this.inspect };
+    const msg: ToWorker = { type: "run", id, recipe, proxy, inspect: this.inspect, runOnDemand };
     this.worker.postMessage(msg);
     this.set({ busy: true });
   }

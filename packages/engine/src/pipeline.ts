@@ -20,6 +20,11 @@ export interface RunOptions {
   /** Proxy runs: cap the working raster's long side (e.g. 400 while dragging). */
   maxSidePx?: number;
   onStep?: (r: StepResult) => void;
+  /**
+   * false = stop before an on-demand step whose cached output is stale (the app shows a
+   * Run button instead). Default true: the CLI and tests run everything.
+   */
+  runOnDemand?: boolean;
 }
 
 export interface RunOutput {
@@ -31,6 +36,8 @@ export interface RunOutput {
   plot: Plot | null;
   /** Project-level warnings (e.g. working resolution capped). */
   warnings: string[];
+  /** Indices of on-demand steps held back because they need re-running (empty or one entry). */
+  stale: number[];
 }
 
 export class StepError extends Error {
@@ -91,6 +98,7 @@ export class Pipeline {
     let key = `${placed.key}|${JSON.stringify(recipe.target)}`;
     let data: StageData = placed.image;
     const results: StepResult[] = [];
+    const stale: number[] = [];
     for (const [index, rs] of recipe.steps.entries()) {
       if (rs.enabled === false) continue;
       const def = this.registry.get(rs.step);
@@ -99,6 +107,10 @@ export class Pipeline {
       key = `${key}>${def.id}@${def.version}${JSON.stringify([rs.params, rs.layers, rs.layerParams])}`;
       if (def.output === "plot") key += inkKey;
       const hit = this.cache.get(index);
+      if (opts.runOnDemand === false && def.cost === "on-demand" && hit?.key !== key) {
+        stale.push(index);
+        break;
+      }
       const t0 = performance.now();
       let cached = false;
       if (hit && hit.key === key) {
@@ -121,6 +133,6 @@ export class Pipeline {
     // Drop cache entries past the end of a shortened recipe.
     for (const k of this.cache.keys()) if (k >= recipe.steps.length) this.cache.delete(k);
     const plot = data.kind === "plot" ? data : data.kind === "geometry" ? toPlot(data, ctx) : null;
-    return { output: data, results, placed: placed.image, plot, warnings: placed.warnings };
+    return { output: data, results, placed: placed.image, plot, warnings: placed.warnings, stale };
   }
 }

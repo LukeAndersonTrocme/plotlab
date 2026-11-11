@@ -33,7 +33,7 @@ export interface StepInfo {
 
 export type ToWorker =
   | { type: "source"; image: RawImage; key: string }
-  | { type: "run"; id: number; recipe: Recipe; proxy: boolean; inspect: InspectTarget };
+  | { type: "run"; id: number; recipe: Recipe; proxy: boolean; inspect: InspectTarget; runOnDemand: boolean };
 
 export type FromWorker =
   | {
@@ -46,6 +46,8 @@ export type FromWorker =
       /** The working raster: what step 1 sees (full-resolution runs only). */
       working: { width: number; height: number; mmPerPx: number };
       steps: StepInfo[];
+      /** On-demand steps that need a Run (their output would be stale). */
+      stale: number[];
       /** Layers that never became lines, ready to composite under the plot. */
       rasterLayers: RasterView[];
       inspected: InspectView | null;

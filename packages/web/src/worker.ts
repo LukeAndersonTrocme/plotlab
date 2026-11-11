@@ -70,9 +70,10 @@ self.onmessage = async (e: MessageEvent<ToWorker>) => {
   if (!src) return;
   try {
     const p = msg.proxy ? proxy : full;
-    const { plot, results, warnings, placed } = await p.run(src.image, msg.recipe, {
+    const { plot, results, warnings, placed, stale } = await p.run(src.image, msg.recipe, {
       sourceKey: src.key,
       maxSidePx: msg.proxy ? PROXY_SIDE : undefined,
+      runOnDemand: msg.runOnDemand && !msg.proxy,
     });
     const estimate = plot && msg.recipe.target.kind === "plotter" ? estimatePlot(plot, getMachine(msg.recipe.machine)) : null;
     const target: InspectTarget = msg.inspect;
@@ -90,6 +91,7 @@ self.onmessage = async (e: MessageEvent<ToWorker>) => {
       estimate,
       warnings,
       working: { width: placed.width, height: placed.height, mmPerPx: placed.frame.widthMm / placed.width },
+      stale,
       steps: results.map((r) => ({ index: r.index, step: r.step, ms: r.ms, cached: r.cached, layers: r.layers })),
       rasterLayers: await layerViews(plot?.rasterLayers, msg.recipe),
       inspected,
