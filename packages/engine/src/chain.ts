@@ -33,13 +33,14 @@ export function checkChain(input: StageKind, steps: RecipeStep[], registry: Step
       issues.push({ index, reason: `Unknown step "${rs.step}".` });
       return;
     }
-    if (def.input !== current) {
+    const needs = def.input as StageKind;
+    if (needs !== current) {
       issues.push({
         index,
-        reason: `${def.title} needs ${STAGE_WORDS[def.input]}, but at that point the chain has ${STAGE_WORDS[current]}. ${advice(def.input, input, registry)}`,
+        reason: `${def.title} needs ${STAGE_WORDS[needs]}, but at that point the chain has ${STAGE_WORDS[current]}. ${advice(needs, input, registry)}`,
       });
     }
-    current = def.output;
+    current = def.output as StageKind;
   });
   return issues;
 }
