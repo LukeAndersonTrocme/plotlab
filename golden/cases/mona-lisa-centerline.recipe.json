@@ -9,7 +9,7 @@
   "steps": [
     { "step": "threshold", "version": 2, "params": { "mode": "fixed", "level": 30 } },
     { "step": "centerline", "version": 2, "params": { "minLength": 1.7, "smoothing": 0.28 } },
-    { "step": "order", "version": 1, "params": { "method": "nearest" } }
+    { "step": "order", "version": 2, "params": { "method": "nearest" } }
   ],
   "fixture": "mona-lisa-600.jpg"
 }

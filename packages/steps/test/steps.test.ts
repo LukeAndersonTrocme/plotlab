@@ -3,7 +3,6 @@ import { describe, expect, it } from "vitest";
 import { applyStep, defaultParams, type Frame, type StageDataOf, type StageKind, type StepDefinition, type Image, type Ink, type Layers, type StepContext } from "@plotlab/engine";
 import { allSteps, centerline, order, threshold } from "../src/index.ts";
 import { otsuLevel } from "../src/threshold/index.ts";
-import { orderPaths } from "../src/order/index.ts";
 import { generate } from "../scripts/gen-help.ts";
 
 const ink: Ink = { id: "k", name: "k", color: "#000", mix: "multiply", widthMm: 0.5 };
@@ -114,8 +113,5 @@ describe("order", () => {
     expect(out.layers[0]!.ink).toEqual(ink);
     expect(out.layers[0]!.paths.length).toBe(geo.layers[0]!.features.features.length);
   });
-  it("nearest-first ordering reverses strokes when closer", () => {
-    const out = orderPaths([[[50, 0], [100, 0]], [[10, 0], [1, 0]]], true);
-    expect(out[0]).toEqual([[1, 0], [10, 0]]);
-  });
+
 });

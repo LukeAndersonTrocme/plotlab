@@ -13,6 +13,8 @@ estimate use the order the strokes were traced in, and say so.
   plot time a lot. "As traced" keeps the order the strokes were made, which can be part of
   the work.
 - **Allow reversing strokes:** lets the pen start a stroke from whichever end is closer.
+- **Polish the order:** after nearest-first, looks for runs of strokes that are quicker to
+  draw in the opposite direction. Usually trims travel by a few more percent.
 
 **Time estimate:** based on the machine profile's speeds, acceleration and pen up/down time,
 plus a pause for each pen change. Treat it as a rough guide until the profile is calibrated
