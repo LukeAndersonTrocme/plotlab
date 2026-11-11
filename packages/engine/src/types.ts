@@ -14,6 +14,14 @@ export interface Extent {
   height: number;
 }
 
+/** Where a raster sits on the paper, in mm. Pixel (0,0)'s top-left corner is at (xMm, yMm). */
+export interface Frame {
+  xMm: number;
+  yMm: number;
+  widthMm: number;
+  heightMm: number;
+}
+
 /** A raster: a grid of pixels with one or more channels (the Z-axis). Values are 0..1. */
 export interface Image {
   kind: "image";
