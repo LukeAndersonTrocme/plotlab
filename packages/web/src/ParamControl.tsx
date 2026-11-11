@@ -1,6 +1,6 @@
 import { randomSeed, type ParamDecl } from "@plotlab/engine";
 
-const UNIT: Record<string, string> = { "source-units": "px", mm: "mm", "%": "%", deg: "°", px: "px", "": "" };
+const UNIT: Record<string, string> = { mm: "mm", "%": "%", deg: "°", px: "px", "": "" };
 
 /**
  * One control generated from a param declaration. Numbers get a slider *and* a numeric

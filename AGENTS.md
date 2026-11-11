@@ -5,6 +5,9 @@
 - Keep `plotlab` renameable: don't hard-code it beyond package names, the CLI binary and
   display strings.
 - Engine code must not import DOM-only or Node-only APIs.
+- Steps work in mm on the paper; rasters carry a `Frame` (`pxToMm`). Never think in source pixels.
+- Randomness only through `createRng(seed)` with a `seedParam()`; never `Math.random()` in a step.
+- Changing the recipe envelope → bump `RECIPE_SCHEMA_VERSION` and add an upgrader in `recipe.ts`.
 - Changing a step's output for the same params → bump its `version`. Renaming a param → add `migrate`.
 - After editing any `help.md`: `pnpm --filter @plotlab/steps gen:help` (a test checks it).
 - Golden output changed on purpose? `pnpm golden:approve` and say so in the commit message.

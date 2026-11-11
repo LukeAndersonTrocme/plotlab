@@ -20,10 +20,12 @@ const fmtTime = (s: number) => {
 };
 
 function describe(def: StepDefinition): string {
-  const lines = [`${def.id} (v${def.version}): ${def.title}`, `  ${def.summary}`, `  ${def.input} → ${def.output}, ${def.cost}`, "", "Parameters:"];
+  const perLayer = def.runLayer ? `, per layer (${(def.accepts ?? ["tone", "categories"]).join(" or ")})` : "";
+  const lines = [`${def.id} (v${def.version}): ${def.title}`, `  ${def.summary}`, `  ${def.input} → ${def.output}, ${def.cost}${perLayer}`, "", "Parameters:"];
+  if (def.runLayer) lines.splice(3, 0, `  In a recipe: "layers": ["id", …] picks layers; "layerParams": { "id": { … } } overrides settings per layer.`);
   for (const [k, d] of Object.entries(def.params)) {
     let range = "";
-    if (d.type === "number") range = `${d.min}..${d.max}${d.unit ? ` ${d.unit}` : ""}`;
+    if (d.type === "number") range = `${d.seed ? "seed " : ""}${d.min}..${d.max}${d.unit ? ` ${d.unit}` : ""}`;
     if (d.type === "enum") range = d.options.map((o) => o.value).join(" | ");
     if (d.type === "boolean") range = "true | false";
     const cond = d.visibleWhen ? `  (only when ${d.visibleWhen.param} = ${d.visibleWhen.equals.join("/")})` : "";
