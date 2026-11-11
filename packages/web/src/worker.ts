@@ -89,6 +89,7 @@ self.onmessage = async (e: MessageEvent<ToWorker>) => {
       plot,
       estimate,
       warnings,
+      working: { width: placed.width, height: placed.height, mmPerPx: placed.frame.widthMm / placed.width },
       steps: results.map((r) => ({ index: r.index, step: r.step, ms: r.ms, cached: r.cached, layers: r.layers })),
       rasterLayers: await layerViews(plot?.rasterLayers, msg.recipe),
       inspected,

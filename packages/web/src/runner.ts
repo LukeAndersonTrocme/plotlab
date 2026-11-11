@@ -6,6 +6,7 @@ export interface RunState {
   plot: Plot | null;
   estimate: PlotEstimate | null;
   warnings: string[];
+  working: { width: number; height: number; mmPerPx: number } | null;
   steps: StepInfo[];
   rasterLayers: RasterView[];
   inspected: InspectView | null;
@@ -20,6 +21,7 @@ export const EMPTY_RUN: RunState = {
   plot: null,
   estimate: null,
   warnings: [],
+  working: null,
   steps: [],
   rasterLayers: [],
   inspected: null,
@@ -72,8 +74,9 @@ export class Runner {
     this.inFlight = null;
     if (m.type === "error") this.set({ error: { message: m.message, index: m.index }, busy: false });
     else {
-      const { type: _t, id: _id, proxy, ...rest } = m;
-      this.set({ ...rest, error: null, busy: false, refining: proxy });
+      const { type: _t, id: _id, proxy, working, ...rest } = m;
+      // The readout describes full-resolution work; proxies would make it flicker.
+      this.set({ ...rest, ...(proxy ? {} : { working }), error: null, busy: false, refining: proxy });
     }
     this.pump();
   }

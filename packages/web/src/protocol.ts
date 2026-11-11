@@ -43,6 +43,8 @@ export type FromWorker =
       plot: Plot | null;
       estimate: PlotEstimate | null;
       warnings: string[];
+      /** The working raster: what step 1 sees (full-resolution runs only). */
+      working: { width: number; height: number; mmPerPx: number };
       steps: StepInfo[];
       /** Layers that never became lines, ready to composite under the plot. */
       rasterLayers: RasterView[];
