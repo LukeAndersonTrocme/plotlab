@@ -1,0 +1,16 @@
+{
+  "name": "@plotlab/steps",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "dependencies": {
+    "@plotlab/engine": "workspace:*",
+    "@plotlab/machines": "workspace:*"
+  },
+  "scripts": {
+    "gen:help": "tsx scripts/gen-help.ts"
+  }
+}

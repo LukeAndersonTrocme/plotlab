@@ -1,0 +1,8 @@
+{
+  "name": "@plotlab/machines",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "exports": { ".": "./src/index.ts" },
+  "dependencies": { "@plotlab/engine": "workspace:*" }
+}

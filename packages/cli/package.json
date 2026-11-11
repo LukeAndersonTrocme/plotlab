@@ -1,0 +1,15 @@
+{
+  "name": "@plotlab/cli",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "bin": { "plotlab": "./bin/plotlab.js" },
+  "dependencies": {
+    "@plotlab/engine": "workspace:*",
+    "@plotlab/machines": "workspace:*",
+    "@plotlab/steps": "workspace:*",
+    "jpeg-js": "^0.4.4",
+    "pngjs": "^7.0.0"
+  },
+  "devDependencies": { "@types/pngjs": "^6.0.5" }
+}

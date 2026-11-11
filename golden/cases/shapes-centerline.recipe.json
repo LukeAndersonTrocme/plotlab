@@ -1,0 +1,13 @@
+{
+  "schemaVersion": 1,
+  "input": "image",
+  "paper": { "widthMm": 210, "heightMm": 148 },
+  "pens": [{ "id": "black", "widthMm": 0.5, "color": "#111111" }],
+  "machine": "generic",
+  "steps": [
+    { "step": "threshold", "version": 1, "params": { "mode": "fixed", "level": 50 } },
+    { "step": "centerline", "version": 1, "params": { "minLength": 4, "smoothing": 1 } },
+    { "step": "plot", "version": 1, "params": { "margin": 15, "order": "nearest" } }
+  ],
+  "fixture": "shapes.png"
+}

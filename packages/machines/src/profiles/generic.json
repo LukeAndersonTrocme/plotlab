@@ -1,0 +1,9 @@
+{
+  "id": "generic",
+  "name": "Generic A3 pen plotter (placeholder numbers)",
+  "bed": { "widthMm": 430, "heightMm": 297 },
+  "origin": "top-left",
+  "pen": { "upS": 0.15, "downS": 0.15, "changeS": 60 },
+  "motion": { "drawMmS": 40, "travelMmS": 120, "accelMmS2": 1000, "cornerSpeedFactor": 0.3 },
+  "protocol": "svg"
+}
