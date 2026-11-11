@@ -5,7 +5,7 @@ import { defaultRecipe, PAPERS } from "./defaults.ts";
 import { HelpPanel } from "./Help.tsx";
 import { ParamControl } from "./ParamControl.tsx";
 import { PlotPreview } from "./PlotPreview.tsx";
-import { Runner, type RunState } from "./runner.ts";
+import { EMPTY_RUN, Runner, type RunState } from "./runner.ts";
 import { decodeFile, loadSample } from "./sample.ts";
 
 const registry = createRegistry();
@@ -46,7 +46,7 @@ const fmtTime = (s: number) => {
 
 export function App() {
   const [recipe, setRecipe] = useState<Recipe>(loadSaved);
-  const [run, setRun] = useState<RunState>({ plot: null, estimate: null, warnings: [], refining: false, busy: false, error: null, timings: [] });
+  const [run, setRun] = useState<RunState>(EMPTY_RUN);
   const [live, setLive] = useState(true);
   const [dirty, setDirty] = useState(false);
   const [help, setHelp] = useState<AnyStep | null>(null);
@@ -250,7 +250,7 @@ export function App() {
               <input type="checkbox" checked={showTravel} onChange={(e) => setShowTravel(e.target.checked)} /> Show pen-up travel
             </label>
           </div>
-          {run.error && <div className="error">{run.error}</div>}
+          {run.error && <div className="error">{run.error.message}</div>}
           {notice && (
             <div className="notice" onClick={() => setNotice(null)}>
               {notice}
@@ -274,7 +274,7 @@ export function App() {
           </div>
           <details className="timings">
             <summary>Step timings</summary>
-            {run.timings.map((t, i) => (
+            {run.steps.map((t, i) => (
               <div key={i}>
                 {t.step}: {t.cached ? "cached" : `${t.ms.toFixed(0)} ms`}
               </div>

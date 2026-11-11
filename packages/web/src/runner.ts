@@ -1,17 +1,33 @@
 import type { Plot, RawImage, Recipe } from "@plotlab/engine";
 import type { PlotEstimate } from "@plotlab/machines";
-import type { FromWorker, ToWorker } from "./protocol.ts";
+import type { FromWorker, InspectTarget, InspectView, RasterView, StepInfo, ToWorker } from "./protocol.ts";
 
 export interface RunState {
   plot: Plot | null;
   estimate: PlotEstimate | null;
   warnings: string[];
+  steps: StepInfo[];
+  rasterLayers: RasterView[];
+  inspected: InspectView | null;
+  underlay: RasterView | null;
   /** True while the preview shows a low-res proxy result (full resolution comes on release). */
   refining: boolean;
   busy: boolean;
-  error: string | null;
-  timings: Array<{ step: string; ms: number; cached: boolean }>;
+  error: { message: string; index?: number } | null;
 }
+
+export const EMPTY_RUN: RunState = {
+  plot: null,
+  estimate: null,
+  warnings: [],
+  steps: [],
+  rasterLayers: [],
+  inspected: null,
+  underlay: null,
+  refining: false,
+  busy: false,
+  error: null,
+};
 
 /**
  * Talks to the pipeline worker. Coalesces requests: at most one run in flight, and only
@@ -22,7 +38,9 @@ export class Runner {
   private nextId = 1;
   private inFlight: number | null = null;
   private pending: { recipe: Recipe; proxy: boolean } | null = null;
-  state: RunState = { plot: null, estimate: null, warnings: [], refining: false, busy: false, error: null, timings: [] };
+  /** Which stage the view shows; sent with every run. */
+  inspect: InspectTarget = null;
+  state: RunState = EMPTY_RUN;
 
   constructor(private onChange: (s: RunState) => void) {
     this.worker.onmessage = (e: MessageEvent<FromWorker>) => this.receive(e.data);
@@ -45,15 +63,18 @@ export class Runner {
     this.pending = null;
     const id = this.nextId++;
     this.inFlight = id;
-    const msg: ToWorker = { type: "run", id, recipe, proxy };
+    const msg: ToWorker = { type: "run", id, recipe, proxy, inspect: this.inspect };
     this.worker.postMessage(msg);
     this.set({ busy: true });
   }
 
   private receive(m: FromWorker): void {
     this.inFlight = null;
-    if (m.type === "error") this.set({ error: m.message, busy: false });
-    else this.set({ plot: m.plot, estimate: m.estimate, warnings: m.warnings, timings: m.timings, error: null, busy: false, refining: m.proxy });
+    if (m.type === "error") this.set({ error: { message: m.message, index: m.index }, busy: false });
+    else {
+      const { type: _t, id: _id, proxy, ...rest } = m;
+      this.set({ ...rest, error: null, busy: false, refining: proxy });
+    }
     this.pump();
   }
 

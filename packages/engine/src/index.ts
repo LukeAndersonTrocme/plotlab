@@ -10,3 +10,4 @@ export * from "./layout.ts";
 export * from "./project.ts";
 export * from "./layers.ts";
 export * from "./chain.ts";
+export * from "./render.ts";
