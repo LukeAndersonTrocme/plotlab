@@ -16,7 +16,8 @@ const STAGES: Array<{ name: string; produces: StageKind[] }> = [
   { name: "Input", produces: [] },
   { name: "Image", produces: ["image"] },
   { name: "Layers", produces: ["layers"] },
-  { name: "Output", produces: ["geometry", "plot"] },
+  { name: "Lines", produces: ["geometry"] },
+  { name: "Plot", produces: ["plot"] },
 ];
 
 function loadSaved(): Recipe {
@@ -45,7 +46,7 @@ const fmtTime = (s: number) => {
 
 export function App() {
   const [recipe, setRecipe] = useState<Recipe>(loadSaved);
-  const [run, setRun] = useState<RunState>({ plot: null, refining: false, busy: false, error: null, timings: [] });
+  const [run, setRun] = useState<RunState>({ plot: null, estimate: null, warnings: [], refining: false, busy: false, error: null, timings: [] });
   const [live, setLive] = useState(true);
   const [dirty, setDirty] = useState(false);
   const [help, setHelp] = useState<AnyStep | null>(null);
@@ -188,14 +189,14 @@ export function App() {
                         min={0.05}
                         max={5}
                         step={0.05}
-                        value={recipe.pens[0]!.widthMm}
-                        onChange={(e) => apply({ ...recipe, pens: [{ ...recipe.pens[0]!, widthMm: Number(e.target.value) || 0.5 }] }, false)}
+                        value={recipe.inks[0]!.widthMm}
+                        onChange={(e) => apply({ ...recipe, inks: [{ ...recipe.inks[0]!, widthMm: Number(e.target.value) || 0.5 }] }, false)}
                       />
                       <span className="unit">mm</span>
                       <input
                         type="color"
-                        value={recipe.pens[0]!.color}
-                        onChange={(e) => apply({ ...recipe, pens: [{ ...recipe.pens[0]!, color: e.target.value }] }, false)}
+                        value={recipe.inks[0]!.color}
+                        onChange={(e) => apply({ ...recipe, inks: [{ ...recipe.inks[0]!, color: e.target.value }] }, false)}
                       />
                     </div>
                   </div>
@@ -237,10 +238,10 @@ export function App() {
           <div className="stats">
             {plot && (
               <>
-                <span className="big">~{fmtTime(plot.timeEstimateS)}</span>
+                {run.estimate && <span className="big">~{fmtTime(run.estimate.totalS)}</span>}
                 <span>{plot.layers.reduce((n, l) => n + l.paths.length, 0)} strokes</span>
-                <span>{(plot.layers.reduce((n, l) => n + l.drawLengthMm, 0) / 1000).toFixed(1)} m drawn</span>
-                <span>{(plot.layers.reduce((n, l) => n + l.travelLengthMm, 0) / 1000).toFixed(1)} m travel</span>
+                <span>{((run.estimate?.passes.reduce((n, l) => n + l.drawLengthMm, 0) ?? 0) / 1000).toFixed(1)} m drawn</span>
+                <span>{((run.estimate?.passes.reduce((n, l) => n + l.travelLengthMm, 0) ?? 0) / 1000).toFixed(1)} m travel</span>
               </>
             )}
             {run.refining && <span className="refining">low-res preview…</span>}

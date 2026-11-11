@@ -1,13 +1,15 @@
 {
-  "schemaVersion": 1,
+  "schemaVersion": 2,
   "input": "image",
+  "target": { "kind": "plotter" },
   "paper": { "widthMm": 210, "heightMm": 148 },
-  "pens": [{ "id": "black", "widthMm": 0.5, "color": "#111111" }],
+  "layout": { "fit": "fit", "marginMm": 15, "position": [0.5, 0.5] },
+  "inks": [{ "id": "black", "name": "Black", "color": "#111111", "mix": "multiply", "widthMm": 0.5 }],
   "machine": "generic",
   "steps": [
-    { "step": "threshold", "version": 1, "params": { "mode": "fixed", "level": 50 } },
-    { "step": "centerline", "version": 1, "params": { "minLength": 4, "smoothing": 1 } },
-    { "step": "plot", "version": 1, "params": { "margin": 15, "order": "nearest" } }
+    { "step": "threshold", "version": 2, "params": { "mode": "fixed", "level": 50 } },
+    { "step": "centerline", "version": 2, "params": { "minLength": 4, "smoothing": 1 } },
+    { "step": "order", "version": 1, "params": { "method": "nearest" } }
   ],
   "fixture": "shapes.png"
 }

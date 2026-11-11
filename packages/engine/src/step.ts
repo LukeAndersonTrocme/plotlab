@@ -1,5 +1,6 @@
 import type { ParamDecls, ParamValues } from "./params.ts";
-import type { Paper, Pen, StageDataOf, StageKind } from "./types.ts";
+import type { PassOrder, Target } from "./project.ts";
+import type { Ink, Paper, StageDataOf, StageKind } from "./types.ts";
 
 /**
  * Cost hint for the UI. `live` steps recompute while a slider is dragged; `on-demand`
@@ -10,8 +11,14 @@ export type StepCost = "live" | "on-demand";
 /** What a step can see besides its input: project-level settings from the recipe. */
 export interface StepContext {
   paper: Paper;
-  pens: Pen[];
-  machine: string;
+  target: Target;
+  inks: Ink[];
+  /**
+   * The ink for a layer id. Only steps that output a plot should depend on inks: the
+   * pipeline leaves ink changes out of other steps' cache keys so recolouring is instant.
+   */
+  inkFor(layerId: string): Ink;
+  passOrder: PassOrder;
   /** Report progress 0..1 for slow steps. */
   progress?: (fraction: number) => void;
 }

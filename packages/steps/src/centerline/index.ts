@@ -1,4 +1,4 @@
-import { defineStep, type Geometry, type Layer, type LineFeature, type Position } from "@plotlab/engine";
+import { defineStep, pxToMm, type Frame, type Geometry, type LineFeature, type Position } from "@plotlab/engine";
 import { help } from "../help.generated.ts";
 
 /** Zhang–Suen thinning. Returns a new mask, 1 = skeleton. */
@@ -106,17 +106,17 @@ export function simplify(pts: Position[], tol: number): Position[] {
 
 const length = (p: Position[]) => p.reduce((s, q, i) => (i ? s + Math.hypot(q[0] - p[i - 1]![0], q[1] - p[i - 1]![1]) : 0), 0);
 
-export function centerlineLayer(layer: Layer, sx: number, sy: number, minLength: number, tol: number): LineFeature[] {
-  const { width: w, height: h } = layer;
-  const skel = thin(layer.mask, w, h);
+/** Trace one 0/1 mask laid over `frame` into strokes in paper mm. */
+export function centerlineMask(mask: Uint8Array, w: number, h: number, frame: Frame, minLengthMm: number, tolMm: number): LineFeature[] {
+  const skel = thin(mask, w, h);
   const out: LineFeature[] = [];
   for (const ids of traceSkeleton(skel, w, h)) {
     let pts: Position[] = ids.map((i) => {
       const x = i % w;
-      return [(x + 0.5) * sx, ((i - x) / w + 0.5) * sy];
+      return pxToMm(frame, w, h, x, (i - x) / w);
     });
-    pts = simplify(pts, tol);
-    if (length(pts) < minLength) continue; // also drops 1–2 pixel specks
+    pts = simplify(pts, tolMm);
+    if (length(pts) < minLengthMm) continue; // also drops 1–2 pixel specks
     out.push({ type: "Feature", geometry: { type: "LineString", coordinates: pts }, properties: {} });
   }
   return out;
@@ -124,7 +124,7 @@ export function centerlineLayer(layer: Layer, sx: number, sy: number, minLength:
 
 export const centerline = defineStep({
   id: "centerline",
-  version: 1,
+  version: 2,
   title: "Centerline",
   summary: "Draw one stroke down the middle of each shape, like tracing it with a single pen line.",
   input: "layers",
@@ -136,36 +136,44 @@ export const centerline = defineStep({
       label: "Minimum length",
       help: "Drop strokes shorter than this. Cleans up specks and fuzz.",
       min: 0,
-      max: 200,
-      step: 1,
-      default: 4,
-      unit: "source-units",
+      max: 50,
+      step: 0.1,
+      default: 2,
+      unit: "mm",
     },
     smoothing: {
       type: "number",
       label: "Simplify",
       help: "Straighten small wiggles. Higher = fewer, straighter segments.",
       min: 0,
-      max: 10,
-      step: 0.1,
-      default: 1,
-      unit: "source-units",
+      max: 5,
+      step: 0.05,
+      default: 0.2,
+      unit: "mm",
     },
   },
   help: help.centerline ?? "",
-  run(input, p): Geometry {
+  run(input, p, ctx): Geometry {
+    const n = input.width * input.height;
     return {
       kind: "geometry",
-      extent: input.extent,
-      layers: input.layers.map((l) => ({
-        id: l.id,
-        name: l.name,
-        pen: l.pen,
-        features: {
-          type: "FeatureCollection",
-          features: centerlineLayer(l, input.extent.width / l.width, input.extent.height / l.height, p.minLength, p.smoothing),
-        },
-      })),
+      paper: ctx.paper,
+      layers: input.layers.map((l) => {
+        if (l.values.kind !== "tone") {
+          throw new Error(`Centerline traces tone layers, but "${l.name}" holds categories. Add a step that turns categories into tone before it.`);
+        }
+        const mask = new Uint8Array(n);
+        for (let i = 0; i < n; i++) mask[i] = l.values.data[i]! >= 0.5 ? 1 : 0;
+        return {
+          id: l.id,
+          name: l.name,
+          features: { type: "FeatureCollection", features: centerlineMask(mask, input.width, input.height, input.frame, p.minLength, p.smoothing) },
+        };
+      }),
     };
   },
+  migrate: (params) => ({
+    params,
+    note: "Minimum length and Simplify are now in mm on the paper (they were source pixels). Check the result.",
+  }),
 });

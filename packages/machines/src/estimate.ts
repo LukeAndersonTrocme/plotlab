@@ -1,4 +1,4 @@
-import type { Position } from "@plotlab/engine";
+import type { Plot, Position } from "@plotlab/engine";
 import type { MachineProfile } from "./profile.ts";
 
 /**
@@ -56,4 +56,24 @@ export function estimateLayer(paths: Position[][], m: MachineProfile): LayerEsti
   travel += home;
   t += moveTime(home, travelMmS, accelMmS2);
   return { drawLengthMm: draw, travelLengthMm: travel, timeS: t };
+}
+
+export interface PassEstimate extends LayerEstimate {
+  layerId: string;
+}
+
+export interface PlotEstimate {
+  passes: PassEstimate[];
+  /** Pen changes between passes that draw something. */
+  penChanges: number;
+  totalS: number;
+}
+
+/** Time readout for a plot on a machine: each pass, plus a pause per pen change (ADR 0011). */
+export function estimatePlot(plot: Plot, m: MachineProfile): PlotEstimate {
+  const passes = plot.layers.map((l) => ({ layerId: l.id, ...estimateLayer(l.paths, m) }));
+  const drawing = plot.layers.filter((l) => l.paths.some((p) => p.length > 0)).length;
+  const penChanges = Math.max(0, drawing - 1);
+  const totalS = passes.reduce((t, p) => t + p.timeS, 0) + penChanges * m.pen.changeS;
+  return { passes, penChanges, totalS };
 }

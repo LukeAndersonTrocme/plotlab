@@ -7,7 +7,7 @@ import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from 
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
-import { loadRecipe, Pipeline, plotToSvg, type Plot } from "@plotlab/engine";
+import { loadRecipe, Pipeline, plotToSvg } from "@plotlab/engine";
 import { createRegistry } from "@plotlab/steps";
 import { readImage } from "../packages/cli/src/io.ts";
 
@@ -23,8 +23,9 @@ describe("golden", () => {
       const registry = createRegistry();
       const { fixture, ...recipeJson } = raw;
       const { recipe } = loadRecipe(recipeJson, registry);
-      const { output } = await new Pipeline(registry).run(readImage(join(root, "fixtures", fixture)), recipe);
-      const svg = plotToSvg(output as Plot, { recipe });
+      const { plot } = await new Pipeline(registry).run(readImage(join(root, "fixtures", fixture)), recipe);
+      if (!plot) throw new Error(`${name} does not end in lines`);
+      const svg = plotToSvg(plot, { recipe });
       const approved = join(root, "approved", `${name}.svg`);
       if (update || !existsSync(approved)) {
         if (!update) throw new Error(`no approved output for ${name}; run pnpm golden:approve and review it`);

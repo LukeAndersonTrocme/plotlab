@@ -1,13 +1,15 @@
 {
-  "schemaVersion": 1,
+  "schemaVersion": 2,
   "input": "image",
+  "target": { "kind": "plotter" },
   "paper": { "widthMm": 210, "heightMm": 297 },
-  "pens": [{ "id": "black", "widthMm": 0.3, "color": "#111111" }],
+  "layout": { "fit": "fit", "marginMm": 20, "position": [0.5, 0.5] },
+  "inks": [{ "id": "black", "name": "Black", "color": "#111111", "mix": "multiply", "widthMm": 0.3 }],
   "machine": "generic",
   "steps": [
-    { "step": "threshold", "version": 1, "params": { "mode": "fixed", "level": 30 } },
-    { "step": "centerline", "version": 1, "params": { "minLength": 6, "smoothing": 1 } },
-    { "step": "plot", "version": 1, "params": { "margin": 20, "order": "nearest" } }
+    { "step": "threshold", "version": 2, "params": { "mode": "fixed", "level": 30 } },
+    { "step": "centerline", "version": 2, "params": { "minLength": 1.7, "smoothing": 0.28 } },
+    { "step": "order", "version": 1, "params": { "method": "nearest" } }
   ],
   "fixture": "mona-lisa-600.jpg"
 }

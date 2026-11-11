@@ -1,5 +1,6 @@
 /// <reference lib="webworker" />
-import { downscale, Pipeline, type Image, type Plot } from "@plotlab/engine";
+import { Pipeline, StepError, type RawImage } from "@plotlab/engine";
+import { estimatePlot, getMachine } from "@plotlab/machines";
 import { createRegistry } from "@plotlab/steps";
 import type { FromWorker, ToWorker } from "./protocol.ts";
 
@@ -9,14 +10,14 @@ const PROXY_SIDE = 400;
 const registry = createRegistry();
 const full = new Pipeline(registry);
 const proxy = new Pipeline(registry);
-let src: { full: Image; proxy: Image; key: string } | null = null;
+let src: { image: RawImage; key: string } | null = null;
 
 const post = (m: FromWorker) => (self as unknown as DedicatedWorkerGlobalScope).postMessage(m);
 
 self.onmessage = async (e: MessageEvent<ToWorker>) => {
   const msg = e.data;
   if (msg.type === "source") {
-    src = { full: msg.image, proxy: downscale(msg.image, PROXY_SIDE), key: msg.key };
+    src = { image: msg.image, key: msg.key };
     full.reset();
     proxy.reset();
     return;
@@ -24,18 +25,26 @@ self.onmessage = async (e: MessageEvent<ToWorker>) => {
   if (!src) return;
   try {
     const p = msg.proxy ? proxy : full;
-    const { output, results } = await p.run(msg.proxy ? src.proxy : src.full, msg.recipe, {
-      sourceKey: `${src.key}${msg.proxy ? ":proxy" : ""}`,
+    const { plot, results, warnings } = await p.run(src.image, msg.recipe, {
+      sourceKey: src.key,
+      maxSidePx: msg.proxy ? PROXY_SIDE : undefined,
     });
-    if (output.kind !== "plot") throw new Error(`recipe ends at ${output.kind}, not a plot`);
+    const estimate = plot && msg.recipe.target.kind === "plotter" ? estimatePlot(plot, getMachine(msg.recipe.machine)) : null;
     post({
       type: "result",
       id: msg.id,
       proxy: msg.proxy,
-      plot: output as Plot,
+      plot,
+      estimate,
+      warnings,
       timings: results.map((r) => ({ step: r.step, ms: r.ms, cached: r.cached })),
     });
   } catch (err) {
-    post({ type: "error", id: msg.id, message: err instanceof Error ? err.message : String(err) });
+    post({
+      type: "error",
+      id: msg.id,
+      index: err instanceof StepError ? err.index : undefined,
+      message: err instanceof Error ? err.message : String(err),
+    });
   }
 };

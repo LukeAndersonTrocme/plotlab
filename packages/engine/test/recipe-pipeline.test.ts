@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
-import { defineStep, loadRecipe, Pipeline, RecipeError, StepRegistry, type Image, type Layers } from "../src/index.ts";
+import { defineStep, loadRecipe, Pipeline, placeOnPaper, RecipeError, StepRegistry, type Layers, type RawImage } from "../src/index.ts";
 
-const img: Image = { kind: "image", width: 1, height: 1, channels: 1, data: new Float32Array([0]), extent: { width: 1, height: 1 } };
+const img: RawImage = { width: 1, height: 1, channels: 1, data: new Float32Array([0]) };
 
 function makeRegistry(spy = vi.fn()) {
   const a = defineStep({
@@ -12,12 +12,12 @@ function makeRegistry(spy = vi.fn()) {
   });
   const b = defineStep({
     id: "b", version: 1, title: "B", summary: "", input: "image", output: "layers", cost: "live", help: "", params: {},
-    run: (i): Layers => { spy("b"); return { kind: "layers", layers: [], extent: i.extent }; },
+    run: (i): Layers => { spy("b"); return { kind: "layers", width: i.width, height: i.height, layers: [], frame: i.frame }; },
   });
   return new StepRegistry([a, b]);
 }
 
-const base = { schemaVersion: 1, paper: { widthMm: 100, heightMm: 100 }, pens: [{ id: "p", widthMm: 0.5, color: "#000" }] };
+const base = { schemaVersion: 2, paper: { widthMm: 100, heightMm: 100 }, inks: [{ id: "p", widthMm: 0.5, color: "#000" }] };
 
 describe("loadRecipe", () => {
   it("migrates old step versions with a warning", () => {
@@ -57,5 +57,22 @@ describe("Pipeline", () => {
     const r2 = loadRecipe({ ...base, steps: [{ step: "a", params: { k: 2 } }, { step: "b" }] }, reg).recipe;
     await p.run(img, r2);
     expect(spy.mock.calls.flat()).toEqual(["a", "b"]);
+  });
+  it("places the source on paper before step 1, at full or proxy resolution", async () => {
+    const seen: Array<{ width: number; frame: unknown }> = [];
+    const probe = defineStep({
+      id: "probe", version: 1, title: "Probe", summary: "", input: "image", output: "image", cost: "live", help: "", params: {},
+      run: (i) => { seen.push({ width: i.width, frame: i.frame }); return i; },
+    });
+    const reg = new StepRegistry([probe]);
+    const big: RawImage = { width: 400, height: 200, channels: 1, data: new Float32Array(400 * 200) };
+    const recipe = loadRecipe({ ...base, workingMmPerPx: 0.1, steps: [{ step: "probe" }] }, reg).recipe;
+    const { placed } = await new Pipeline(reg).run(big, recipe);
+    const expected = placeOnPaper(big, recipe.paper, recipe.layout).frame;
+    expect(seen[0]!.frame).toEqual(expected);
+    expect(placed.width).toBe(400);
+    const proxied = await new Pipeline(reg).run(big, recipe, { maxSidePx: 100 });
+    expect(proxied.placed.width).toBeLessThanOrEqual(100);
+    expect(proxied.placed.frame).toEqual(expected);
   });
 });

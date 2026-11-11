@@ -11,7 +11,7 @@ export function PlotPreview(props: { plot: Plot | null; showTravel: boolean }) {
       <rect x={0} y={0} width={w} height={h} className="paper" />
       {plot.layers.map((l) => (
         <g key={l.id}>
-          <path d={l.paths.map(d).join("")} fill="none" stroke={l.pen.color} strokeWidth={l.pen.widthMm} strokeLinecap="round" strokeLinejoin="round" />
+          <path d={l.paths.map(d).join("")} fill="none" stroke={l.ink.color} strokeWidth={l.ink.widthMm} style={{ mixBlendMode: l.ink.mix === "multiply" ? "multiply" : "normal" }} strokeLinecap="round" strokeLinejoin="round" />
           {props.showTravel && (
             <path
               d={l.paths
