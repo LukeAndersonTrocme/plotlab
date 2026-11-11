@@ -8,6 +8,10 @@ image, choose how it becomes lines, see the plot on paper with a time estimate, 
 SVG. Built by Luke Anderson-Trocmé and Nicolas Oligny (bosny) for a CALQ-FRQ Arts-Sciences
 project.
 
+Think of a modular synth: complex inside, but you can have fun turning the knobs without
+knowing the theory. Plotters are one output; pure digital work and print prep (riso,
+screen print, relief, intaglio) are equally supported.
+
 **Status:** early scaffold. First slice works end to end:
 image → threshold → centerline → place on paper (+ time estimate) → SVG, with live sliders.
 

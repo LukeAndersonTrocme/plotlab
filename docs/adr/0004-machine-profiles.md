@@ -1,5 +1,7 @@
 # 4. Machine profiles turn a Plot into machine output
 
+(Applies to the Plotter output target; see ADR 0007.)
+
 Status: accepted (provisional, 2026-11-10)
 
 ## Context
