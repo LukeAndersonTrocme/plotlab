@@ -68,11 +68,20 @@ export interface LineFeature {
   properties: Record<string, unknown>;
 }
 
+/** GeoJSON polygon: first ring is the outline, the rest are holes. Rings need not repeat their first point. */
+export interface PolygonFeature {
+  type: "Feature";
+  geometry: { type: "Polygon"; coordinates: Position[][] };
+  properties: Record<string, unknown>;
+}
+
+export type GeoFeature = LineFeature | PolygonFeature;
+
 export interface GeometryLayer {
   id: string;
   name: string;
   /** GeoJSON FeatureCollection, so geometry can round-trip to R/QGIS. */
-  features: { type: "FeatureCollection"; features: LineFeature[] };
+  features: { type: "FeatureCollection"; features: GeoFeature[] };
 }
 
 export interface Geometry {

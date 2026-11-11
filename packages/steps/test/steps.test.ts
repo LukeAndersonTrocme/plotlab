@@ -1,6 +1,6 @@
 import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
-import { applyStep, defaultParams, type Frame, type StageDataOf, type StageKind, type StepDefinition, type Image, type Ink, type Layers, type StepContext } from "@plotlab/engine";
+import { applyStep, defaultParams, featurePaths, type Frame, type StageDataOf, type StageKind, type StepDefinition, type Image, type Ink, type Layers, type StepContext } from "@plotlab/engine";
 import { allSteps, centerline, order, threshold } from "../src/index.ts";
 import { otsuLevel } from "../src/threshold/index.ts";
 import { generate } from "../scripts/gen-help.ts";
@@ -71,7 +71,7 @@ describe("centerline", () => {
     const geo = await apply(centerline, maskLayers(40, 11, (x, y) => x >= 2 && x < 38 && y >= 3 && y < 8), defaultParams(centerline.params), ctx);
     const feats = geo.layers[0]!.features.features;
     expect(feats).toHaveLength(1);
-    const ys = feats[0]!.geometry.coordinates.map((c) => c[1]);
+    const ys = featurePaths(feats[0]!)[0]!.map((c) => c[1]);
     for (const y of ys) expect(Math.abs(y - 5.5)).toBeLessThanOrEqual(1.5);
   });
   it("a ring becomes a closed loop", async () => {
@@ -82,7 +82,7 @@ describe("centerline", () => {
     );
     const feats = geo.layers[0]!.features.features;
     expect(feats).toHaveLength(1);
-    const c = feats[0]!.geometry.coordinates;
+    const c = featurePaths(feats[0]!)[0]!;
     expect(Math.hypot(c[0]![0] - c[c.length - 1]![0], c[0]![1] - c[c.length - 1]![1])).toBeLessThan(1.5);
   });
 });
@@ -92,7 +92,7 @@ describe("centerline on paper", () => {
     const layers = maskLayers(40, 11, (x, y) => x >= 2 && x < 38 && y >= 3 && y < 8);
     layers.frame = { xMm: 100, yMm: 50, widthMm: 20, heightMm: 5.5 }; // 0.5 mm per pixel
     const geo = await apply(centerline, layers, { minLength: 2, smoothing: 0.2 }, ctx);
-    for (const [x, y] of geo.layers[0]!.features.features[0]!.geometry.coordinates) {
+    for (const [x, y] of featurePaths(geo.layers[0]!.features.features[0]!)[0]!) {
       expect(x).toBeGreaterThanOrEqual(100);
       expect(x).toBeLessThanOrEqual(120);
       expect(Math.abs(y - 52.75)).toBeLessThanOrEqual(0.75);

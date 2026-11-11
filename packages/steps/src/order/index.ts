@@ -1,4 +1,4 @@
-import { defineStep, toPlot, type Plot } from "@plotlab/engine";
+import { defineStep, featurePaths, toPlot, type Plot } from "@plotlab/engine";
 import { orderPaths } from "./sort.ts";
 
 export { orderPaths, travelLength } from "./sort.ts";
@@ -41,7 +41,7 @@ export const order = defineStep({
   help: help.order ?? "",
   run(geo, p, ctx): Plot {
     const paths = geo.layers.map((l) => {
-      const ps = l.features.features.map((f) => f.geometry.coordinates);
+      const ps = l.features.features.flatMap(featurePaths);
       return p.method === "nearest" ? orderPaths(ps, { allowReverse: p.allowReverse, improve: p.improve }) : ps;
     });
     return toPlot(geo, ctx, paths);
