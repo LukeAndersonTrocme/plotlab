@@ -46,6 +46,8 @@ export function App() {
   const [showTravel, setShowTravel] = useState(false);
   const [sourceName, setSourceName] = useState("sample");
   const [notice, setNotice] = useState<string | null>(null);
+  const [showSource, setShowSource] = useState(false);
+  const [hidden, setHidden] = useState<Set<string>>(new Set());
   const runner = useMemo(() => new Runner(setRun), []);
   const recipeRef = useRef(recipe);
   recipeRef.current = recipe;
@@ -107,6 +109,16 @@ export function App() {
   };
 
   const plot = run.plot;
+  // What the view shows: an inspected stage, or the end result (lines + layers that stopped early).
+  const view = inspect !== null && run.inspected ? run.inspected : null;
+  const viewRasters = view ? view.rasters : run.rasterLayers;
+  const viewPlot = view ? view.plot : plot;
+  const viewLayers = [
+    ...(viewPlot?.layers.map((l) => ({ id: l.id, name: l.name, color: l.ink.color })) ?? []),
+    ...viewRasters.filter((r) => r.color !== null).map((r) => ({ id: r.id, name: r.name, color: r.color! })),
+  ];
+  const viewTitle =
+    inspect === "source" ? "the source, as placed on the paper" : typeof inspect === "number" ? `${registry.get(recipe.steps[inspect]?.step ?? "")?.title ?? "step"} output` : null;
   const finalLayers = run.steps.at(-1)?.layers ?? [];
   const strokes = plot?.layers.reduce((n, l) => n + l.paths.length, 0) ?? 0;
   const notLines = run.rasterLayers.map((r) => r.name);
@@ -211,7 +223,48 @@ export function App() {
               {notice}
             </div>
           )}
-          <StageView paper={recipe.paper} rasters={run.rasterLayers} plot={plot} showTravel={showTravel && recipe.target.kind === "plotter"} underlay={null} hidden={new Set()} empty="Working…" />
+          <div className="view-bar">
+            {viewTitle ? (
+              <>
+                <span>
+                  Viewing: <strong>{viewTitle}</strong>
+                </span>
+                <button onClick={() => inspectStage(null)}>Back to result</button>
+              </>
+            ) : (
+              <span>Result</span>
+            )}
+            {viewLayers.length > 1 &&
+              viewLayers.map((l) => (
+                <label key={l.id} className="chip" title="Show or hide this layer">
+                  <input
+                    type="checkbox"
+                    checked={!hidden.has(l.id)}
+                    onChange={() => {
+                      const h = new Set(hidden);
+                      if (h.has(l.id)) h.delete(l.id);
+                      else h.add(l.id);
+                      setHidden(h);
+                    }}
+                  />
+                  <span className="swatch" style={{ background: l.color }} /> {l.name}
+                </label>
+              ))}
+            {inspect !== "source" && (
+              <label className="toggle">
+                <input type="checkbox" checked={showSource} onChange={(e) => setShowSource(e.target.checked)} /> Show source underneath
+              </label>
+            )}
+          </div>
+          <StageView
+            paper={recipe.paper}
+            rasters={viewRasters}
+            plot={viewPlot}
+            showTravel={showTravel && recipe.target.kind === "plotter" && (!view || view.kind === "plot")}
+            underlay={showSource && inspect !== "source" ? run.underlay : null}
+            hidden={hidden}
+            empty={run.busy ? "Working…" : "Nothing to show at this stage"}
+          />
           <div className="actions">
             <button className="primary" disabled={!plot || run.refining} onClick={() => plot && download(`${stem}.svg`, plotToSvg(plot, { recipe }), "image/svg+xml")}>
               Download SVG
