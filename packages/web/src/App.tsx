@@ -121,7 +121,7 @@ export function App() {
     inspect === "source" ? "the source, as placed on the paper" : typeof inspect === "number" ? `${registry.get(recipe.steps[inspect]?.step ?? "")?.title ?? "step"} output` : null;
   const finalLayers = run.steps.at(-1)?.layers ?? [];
   const strokes = plot?.layers.reduce((n, l) => n + l.paths.length, 0) ?? 0;
-  const notLines = run.rasterLayers.map((r) => r.name);
+  const notLines = run.rasterLayers.filter((r) => r.color !== null).map((r) => r.name);
   const stem = sourceName.replace(/\.[^.]+$/, "");
   const cli = `plotlab run recipe.json -i ${sourceName === "sample" ? "photo.jpg" : JSON.stringify(sourceName)} -o out/`;
 

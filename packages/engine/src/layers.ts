@@ -1,6 +1,6 @@
 import type { RecipeStep } from "./recipe.ts";
 import type { AnyStep, StepContext } from "./step.ts";
-import type { GeometryLayer, Layer, Layers, LayerValueKind, StageData } from "./types.ts";
+import type { GeometryLayer, Image, Layer, Layers, LayerValueKind, StageData } from "./types.ts";
 
 /** A layer as the UI sees it in a step's output. */
 export interface LayerInfo {
@@ -85,5 +85,22 @@ export function describeLayers(data: StageData): LayerInfo[] {
     case "geometry":
     case "plot":
       return [...data.layers.map((l): LayerInfo => ({ id: l.id, name: l.name, kind: "lines" })), ...raster(data.rasterLayers)];
+  }
+}
+
+/**
+ * What the result view composites besides lines (ADR 0009: a layer's chain may stop at any
+ * stage): the image if the chain never left it, the layers if it ends at layers, or the
+ * layers that stopped before becoming lines.
+ */
+export function leftoverRasters(data: StageData): { image: Image | null; layers: Layers | null } {
+  switch (data.kind) {
+    case "image":
+      return { image: data, layers: null };
+    case "layers":
+      return { image: null, layers: data };
+    case "geometry":
+    case "plot":
+      return { image: null, layers: data.rasterLayers ?? null };
   }
 }

@@ -47,4 +47,11 @@ describe("orderPaths", () => {
     orderPaths(big, { allowReverse: true, improve: true });
     expect(performance.now() - t0).toBeLessThan(1500);
   });
+  it("stays fast when every stroke lies on almost the same line", () => {
+    const flat = Array.from({ length: 20000 }, (_, i) => [[i * 0.01, (i % 7) * 1e-10], [i * 0.01 + 0.005, (i % 5) * 1e-10]] as Position[]);
+    const t0 = performance.now();
+    expect(orderPaths(flat, { allowReverse: true, improve: true })).toHaveLength(20000);
+    expect(performance.now() - t0).toBeLessThan(1000);
+  });
 });
+

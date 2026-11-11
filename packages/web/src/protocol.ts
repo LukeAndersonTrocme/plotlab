@@ -48,7 +48,7 @@ export type FromWorker =
       steps: StepInfo[];
       /** On-demand steps that need a Run (their output would be stale). */
       stale: number[];
-      /** Layers that never became lines, ready to composite under the plot. */
+      /** The image or layers wherever the chain stopped short of lines, to composite under the plot. */
       rasterLayers: RasterView[];
       inspected: InspectView | null;
       underlay: RasterView | null;

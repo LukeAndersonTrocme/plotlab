@@ -35,7 +35,8 @@ export function orderPaths(paths: Position[][], opts: { allowReverse: boolean; i
 
   // Grid of endpoint entries: entry = stroke * 2 + (1 if it's the end point).
   const w = maxX - minX || 1, h = maxY - minY || 1;
-  const cell = Math.max(Math.sqrt((w * h) / n), 1e-6);
+  // ~1 stroke per cell, but never more than ~4√n cells per side (thin, flat drawings).
+  const cell = Math.max(Math.sqrt((w * h) / n), Math.max(w, h) / (4 * Math.ceil(Math.sqrt(n))), 1e-6);
   const gw = Math.max(1, Math.ceil(w / cell) + 1), gh = Math.max(1, Math.ceil(h / cell) + 1);
   const cells: number[][] = Array.from({ length: gw * gh }, () => []);
   const cx = (x: number) => Math.floor((x - minX) / cell), cy = (y: number) => Math.floor((y - minY) / cell);

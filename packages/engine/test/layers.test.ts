@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { defineStep, loadRecipe, Pipeline, StepError, StepRegistry, type Layer, type Layers, type RawImage } from "../src/index.ts";
+import { defineStep, leftoverRasters, loadRecipe, Pipeline, StepError, StepRegistry, type Layer, type Layers, type RawImage } from "../src/index.ts";
 import { centerline, threshold } from "../../steps/src/index.ts";
 
 /** Test-only: splits the image into two identical tone layers "a" and "b". */
@@ -103,3 +103,20 @@ describe("layers that stop early", () => {
     expect(plot?.rasterLayers?.layers).toHaveLength(2);
   });
 });
+
+describe("leftoverRasters (what the result view composites besides lines)", () => {
+  it("a chain ending at layers shows those layers", async () => {
+    const { output } = await run([{ step: "split" }]);
+    expect(leftoverRasters(output).layers?.layers.map((l) => l.id)).toEqual(["a", "b"]);
+    expect(leftoverRasters(output).image).toBeNull();
+  });
+  it("a chain with no steps shows the placed image", async () => {
+    const { output } = await run([]);
+    expect(leftoverRasters(output).image?.kind).toBe("image");
+  });
+  it("lines carry their stopped layers", async () => {
+    const { output } = await run([{ step: "split" }, { step: "centerline", layers: ["a"] }]);
+    expect(leftoverRasters(output).layers?.layers.map((l) => l.id)).toEqual(["b"]);
+  });
+});
+
