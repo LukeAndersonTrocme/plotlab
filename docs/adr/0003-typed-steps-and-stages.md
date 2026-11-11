@@ -16,3 +16,6 @@ validation and CLI docs. Help lives in `help.md` next to the step.
 ## Consequences
 - Internally it's a chain of typed nodes, so a node-graph view is possible later.
 - One layer = one physical pen pass, by definition.
+- Revised by ADR 0009 (tone/category layers, per-layer engines, reordering) and ADR 0010
+  (Flatten). UI stage names are provisional (Input → Image → Layers → Lines → Plot); the UI
+  will be rethought once the workflow is clearer.
