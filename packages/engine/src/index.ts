@@ -5,3 +5,4 @@ export * from "./recipe.ts";
 export * from "./pipeline.ts";
 export * from "./image.ts";
 export * from "./svg.ts";
+export * from "./rng.ts";

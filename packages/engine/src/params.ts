@@ -18,6 +18,8 @@ export interface NumberParam extends ParamBase {
   step?: number;
   default: number;
   unit?: "mm" | "px" | "%" | "deg" | "source-units" | "";
+  /** This number is a random seed (see `seedParam`); the UI adds a reroll button. */
+  seed?: true;
 }
 
 export interface BooleanParam extends ParamBase {
