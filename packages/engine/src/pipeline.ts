@@ -1,3 +1,4 @@
+import { applyStep, describeLayers, type LayerInfo } from "./layers.ts";
 import { MAX_WORKING_SIDE, placeOnPaper, resample, workingSize } from "./layout.ts";
 import { inkFor, toPlot, workingMmPerPx } from "./project.ts";
 import type { Recipe } from "./recipe.ts";
@@ -10,6 +11,8 @@ export interface StepResult {
   output: StageData;
   ms: number;
   cached: boolean;
+  /** The layers in this step's output (for selectors and ink assignment). */
+  layers: LayerInfo[];
 }
 
 export interface RunOptions {
@@ -104,14 +107,14 @@ export class Pipeline {
       } else {
         try {
           // Params were validated by loadRecipe; the registry erases their static type.
-          data = await def.run(data, rs.params as never, ctx);
+          data = await applyStep(def, data, rs, ctx);
         } catch (e) {
           if (e instanceof StepError) throw e;
           throw new StepError(index, e instanceof Error ? e.message : String(e));
         }
         this.cache.set(index, { key, output: data });
       }
-      const r: StepResult = { index, step: def.id, output: data, ms: performance.now() - t0, cached };
+      const r: StepResult = { index, step: def.id, output: data, ms: performance.now() - t0, cached, layers: describeLayers(data) };
       results.push(r);
       opts.onStep?.(r);
     }

@@ -1,4 +1,4 @@
-import { defineStep, pxToMm, type Frame, type Geometry, type LineFeature, type Position } from "@plotlab/engine";
+import { defineStep, pxToMm, type Frame, type GeometryLayer, type LineFeature, type Position } from "@plotlab/engine";
 import { help } from "../help.generated.ts";
 
 /** Zhang–Suen thinning. Returns a new mask, 1 = skeleton. */
@@ -153,23 +153,16 @@ export const centerline = defineStep({
     },
   },
   help: help.centerline ?? "",
-  run(input, p, ctx): Geometry {
-    const n = input.width * input.height;
+  accepts: ["tone"],
+  runLayer(layer, p, _ctx, grid): GeometryLayer {
+    const n = grid.width * grid.height;
+    const mask = new Uint8Array(n);
+    const tone = layer.values.data;
+    for (let i = 0; i < n; i++) mask[i] = tone[i]! >= 0.5 ? 1 : 0;
     return {
-      kind: "geometry",
-      paper: ctx.paper,
-      layers: input.layers.map((l) => {
-        if (l.values.kind !== "tone") {
-          throw new Error(`Centerline traces tone layers, but "${l.name}" holds categories. Add a step that turns categories into tone before it.`);
-        }
-        const mask = new Uint8Array(n);
-        for (let i = 0; i < n; i++) mask[i] = l.values.data[i]! >= 0.5 ? 1 : 0;
-        return {
-          id: l.id,
-          name: l.name,
-          features: { type: "FeatureCollection", features: centerlineMask(mask, input.width, input.height, input.frame, p.minLength, p.smoothing) },
-        };
-      }),
+      id: layer.id,
+      name: layer.name,
+      features: { type: "FeatureCollection", features: centerlineMask(mask, grid.width, grid.height, grid.frame, p.minLength, p.smoothing) },
     };
   },
   migrate: (params) => ({

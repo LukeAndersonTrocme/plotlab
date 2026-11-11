@@ -8,3 +8,4 @@ export * from "./svg.ts";
 export * from "./rng.ts";
 export * from "./layout.ts";
 export * from "./project.ts";
+export * from "./layers.ts";
