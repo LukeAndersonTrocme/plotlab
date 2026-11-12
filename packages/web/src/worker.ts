@@ -1,5 +1,5 @@
 /// <reference lib="webworker" />
-import { imageToRGBA, inkFor, layerToRGBA, leftoverRasters, Pipeline, StepError, toPlot, type Image, type Layers, type RawImage, type Recipe, type StageData } from "@plotlab/engine";
+import { exportOutput, exportProof, imageToRGBA, inkFor, layerToRGBA, leftoverRasters, Pipeline, StepError, toPlot, zipFiles, type Image, type Layers, type Plot, type RawImage, type Recipe, type StageData } from "@plotlab/engine";
 import { estimatePlot, getMachine } from "@plotlab/machines";
 import { createRegistry } from "@plotlab/steps";
 import type { FromWorker, InspectTarget, InspectView, RasterView, ToWorker } from "./protocol.ts";
@@ -64,8 +64,22 @@ async function resultRasters(output: StageData, recipe: Recipe): Promise<RasterV
   return [...(image ? [await imageView(image, "image", "Image")] : []), ...(await layerViews(layers ?? undefined, recipe))];
 }
 
-self.onmessage = async (e: MessageEvent<ToWorker>) => {
-  const msg = e.data;
+/** The page as it will export, as one raster over the whole paper. Smaller while dragging. */
+async function proofView(output: StageData, plot: Plot | null, recipe: Recipe, proxy: boolean): Promise<RasterView> {
+  const p = exportProof(output, plot, recipe, proxy ? 900 : 2400);
+  const c = new OffscreenCanvas(p.width, p.height);
+  c.getContext("2d")!.putImageData(new ImageData(p.rgba, p.width, p.height), 0, 0);
+  const frame = { xMm: 0, yMm: 0, widthMm: recipe.paper.widthMm, heightMm: recipe.paper.heightMm };
+  return { id: "proof", name: "As exported", color: null, mix: "normal", frame, png: await c.convertToBlob({ type: "image/png" }) };
+}
+
+// One message at a time: an export must not interleave with a run on the same pipeline cache.
+let queue: Promise<void> = Promise.resolve();
+self.onmessage = (e: MessageEvent<ToWorker>) => {
+  queue = queue.then(() => handle(e.data));
+};
+
+async function handle(msg: ToWorker): Promise<void> {
   if (msg.type === "source") {
     src = { image: msg.image, key: msg.key };
     full.reset();
@@ -74,6 +88,17 @@ self.onmessage = async (e: MessageEvent<ToWorker>) => {
     return;
   }
   if (!src) return;
+  if (msg.type === "export") {
+    try {
+      const { output, plot } = await full.run(src.image, msg.recipe, { sourceKey: src.key, runOnDemand: true });
+      const { files, notes } = exportOutput(output, plot, msg.recipe, msg.format, msg.stem);
+      const one = files.length === 1 ? files[0]! : { name: `${msg.stem}-plates.zip`, type: "application/zip", data: zipFiles(files) };
+      post({ type: "exported", id: msg.id, name: one.name, mime: one.type, data: one.data, notes });
+    } catch (err) {
+      post({ type: "export-error", id: msg.id, message: err instanceof Error ? err.message : String(err) });
+    }
+    return;
+  }
   try {
     const p = msg.proxy ? proxy : full;
     const { output, plot, results, warnings, placed, stale } = await p.run(src.image, msg.recipe, {
@@ -102,6 +127,7 @@ self.onmessage = async (e: MessageEvent<ToWorker>) => {
       rasterLayers: await resultRasters(output, msg.recipe),
       inspected,
       underlay: await imageView(placed, "source", "Source"),
+      proof: msg.proof ? await proofView(output, plot, msg.recipe, msg.proxy) : null,
     });
   } catch (err) {
     post({
@@ -111,4 +137,4 @@ self.onmessage = async (e: MessageEvent<ToWorker>) => {
       message: err instanceof Error ? err.message : String(err),
     });
   }
-};
+}

@@ -38,6 +38,11 @@ still to be argued over with Nick. Change a term here first, then rename it ever
 | **Variant** | A named snapshot of a recipe within a project | a version | branch / parameter set |
 | **Stage** | UI grouping of steps by data type (Input, Image, Layers, Lines, Plot; provisional) | step in the process | pipeline phase |
 | **Output target** | Where the work ends up: plotter, digital raster, digital vector, print prep | the output | sink |
+| **Plate** | One ink's file for print prep: where that ink goes, 1-bit or gray | plate, separation, film, screen | per-ink raster mask |
+| **Proof** | A picture of how the plates (or lines) will print together | proof | composite preview |
+| **Registration marks** | Circle-and-cross marks at each edge, on every plate/pass, for lining the inks up | reg marks | alignment fiducials |
+| **Mirror** | Flip left-right, for plates printed face down, screens, transfers | flop, wrong-reading | horizontal reflection |
+| **Film negative** | Plate with ink areas clear and the rest black | negative | inverted mask |
 | **Working resolution** | mm per pixel the pipeline works at, derived from the target | detail | grid resolution |
 | **Reference** | An extra image in a project, e.g. a paper texture for collage | a texture, a paper | auxiliary raster |
 | **Flatten** | Turn layers back into an image to keep processing | flatten | rasterize |

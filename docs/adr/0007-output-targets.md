@@ -20,3 +20,21 @@ The recipe does not depend on the target. The target sets units, working resolut
 ## Consequences
 - Each layer may end at a different stage (ADR 0009). Targets that need lines or 1-bit
   output say which layers aren't ready and suggest a step.
+
+## Implementation notes (M2, 2026-11-11)
+- One export module (`engine/src/exporter.ts`) serves the web worker and the CLI, so both
+  write the same bytes. The end of the chain is drawn onto the paper as one **plate** per
+  ink (layers sharing an ink share a plate), then written per target: plotter → SVG;
+  vector → SVG or PDF; raster → PNG or TIFF; print → one TIFF per ink plus a proof PNG.
+- Raster files composite plates in pass order with each ink's mix mode; a leftover image
+  is the paper underneath. Vector files put embedded rasters under the lines (multiply is
+  order-free; for "normal" inks the raster files are the reference).
+- Plotter SVG leaves out layers that aren't lines and says so. Registration marks are
+  added to every pass; mirror flips the page (a transform in SVG/PDF, pixels in rasters).
+- Halftone is a round-dot screen whose dot area equals the tone. Without a screen, 1-bit
+  plates cut at 50%. Categories print as label/count density, like the preview.
+- The print target's options live on the target (`mode`, `halftone`, `negative`, `mirror`,
+  `registration`); the plotter target takes `mirror` and `registration`. No schema bump:
+  missing fields read as defaults.
+- Not yet: multi-page TIFF as separations (enters at layers) and SVG input (enters at
+  lines) need the pipeline to accept those stages as input; CLI WebP needs a decoder.

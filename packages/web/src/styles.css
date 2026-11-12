@@ -70,7 +70,9 @@ h2.section { font-size: 12px; text-transform: uppercase; letter-spacing: 0.08em;
 .target-grid button.on, .anchor button.on { background: var(--accent); color: #fff; border-color: var(--accent); }
 .anchor { display: grid; grid-template-columns: repeat(3, 16px); gap: 2px; }
 .anchor button { width: 16px; height: 16px; padding: 0; border-radius: 3px; }
-.ink-row { display: flex; gap: 4px; align-items: center; margin: 6px 0; }
+.ink-row { display: flex; flex-wrap: wrap; gap: 4px; align-items: center; margin: 6px 0; }
+.ink-angle { flex-basis: 100%; display: flex; gap: 4px; align-items: center; padding-left: 36px; font-size: 12px; color: var(--muted); }
+.project .toggle { display: flex; margin: 4px 0; }
 .ink-row input[type="color"] { flex: none; width: 32px; height: 28px; padding: 0; border: 1px solid var(--line); border-radius: 4px; }
 .ink-name { flex: 1; min-width: 0; width: auto; }
 .ink-row .num { width: 56px; }

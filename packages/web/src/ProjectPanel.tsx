@@ -1,12 +1,14 @@
-import { type Ink, type LayerInfo, type Recipe, type Target, type TargetKind } from "@plotlab/engine";
+import { DEFAULT_PRINT, finishing, MARK_INSET_MM, screenAngle, type Ink, type LayerInfo, type Recipe, type Target, type TargetKind } from "@plotlab/engine";
 import { PAPERS } from "./defaults.ts";
 
 const TARGETS: Array<{ kind: TargetKind; label: string; hint: string }> = [
   { kind: "plotter", label: "Plotter", hint: "Pens on paper. Shows plot time and pen changes." },
-  { kind: "raster", label: "Digital image", hint: "A picture file (PNG export arrives in M2)." },
-  { kind: "vector", label: "Digital vector", hint: "An SVG with strokes at their ink width." },
-  { kind: "print", label: "Print prep", hint: "One file per ink for riso, screen print, relief (export arrives in M2)." },
+  { kind: "raster", label: "Digital image", hint: "A PNG or TIFF at the resolution below; inks mix like ink on paper." },
+  { kind: "vector", label: "Digital vector", hint: "An SVG or PDF with strokes at their ink width; layers that aren't lines are embedded as images." },
+  { kind: "print", label: "Print prep", hint: "One 1-bit or gray TIFF per ink (riso, screen print, relief, film), plus a proof." },
 ];
+
+type PrintTarget = Extract<Target, { kind: "print" }>;
 
 const ANCHORS: Array<[number, number]> = [0, 0.5, 1].flatMap((y) => [0, 0.5, 1].map((x): [number, number] => [x, y]));
 
@@ -37,7 +39,10 @@ export function ProjectPanel(props: {
     set({ inks: r.inks.map((ink, j) => (j === i ? { ...ink, ...patch } : ink)) }, proxy);
   const setTarget = (kind: TargetKind) => {
     const dpi = "dpi" in r.target ? r.target.dpi : 300;
-    const t: Target = kind === "raster" || kind === "print" ? { kind, dpi } : { kind };
+    const fin = finishing(r.target);
+    const keep = { ...(fin.mirror ? { mirror: true } : {}), ...(fin.registration ? { registration: true } : {}) };
+    const t: Target =
+      kind === "raster" ? { kind, dpi } : kind === "print" ? { kind, dpi: Math.max(dpi, 600), ...DEFAULT_PRINT, ...keep } : kind === "plotter" ? { kind, ...keep } : { kind };
     set({ target: t });
   };
   const paperName =
@@ -79,6 +84,61 @@ export function ProjectPanel(props: {
               <span className="unit">dpi</span>
             </div>
           </div>
+        )}
+        {r.target.kind === "print" && (
+          <>
+            <div className="param">
+              <label title="1-bit: each pixel is ink or no ink, which is what riso, screen and film need. Gray keeps density for processes that take it.">Plates</label>
+              <div className="param-row">
+                <select value={r.target.mode} onChange={(e) => set({ target: { ...r.target, mode: e.target.value as "bitmap" | "gray" } as Target })}>
+                  <option value="bitmap">1-bit (ink or no ink)</option>
+                  <option value="gray">Gray (density)</option>
+                </select>
+              </div>
+            </div>
+            {r.target.mode === "bitmap" && (
+              <div className="param">
+                <label title="A grid of dots whose size follows the tone. Without it, tone is cut at 50%. Coarser screens (fewer lines per inch) are easier to print.">
+                  <input
+                    type="checkbox"
+                    checked={r.target.halftone !== null}
+                    onChange={(e) => set({ target: { ...r.target, halftone: e.target.checked ? { lpi: 45, angles: {} } : null } as Target })}
+                  />{" "}
+                  Halftone screen
+                </label>
+                {r.target.halftone && (
+                  <div className="param-row">
+                    <input
+                      className="num"
+                      type="number"
+                      min={5}
+                      max={200}
+                      step={5}
+                      value={r.target.halftone.lpi}
+                      onChange={(e) => Number(e.target.value) > 0 && set({ target: { ...r.target, halftone: { ...(r.target as PrintTarget).halftone!, lpi: Number(e.target.value) } } as Target })}
+                    />
+                    <span className="unit">lines per inch; angle per ink below</span>
+                  </div>
+                )}
+              </div>
+            )}
+            <label className="toggle" title="Ink areas clear and the rest black, for processes that expose through a negative.">
+              <input type="checkbox" checked={r.target.negative} onChange={(e) => set({ target: { ...r.target, negative: e.target.checked } as Target })} /> Film negative
+            </label>
+          </>
+        )}
+        {(r.target.kind === "plotter" || r.target.kind === "print") && (
+          <>
+            <label className="toggle" title="Flip left-right: for screens and plates printed face down, or transfers.">
+              <input type="checkbox" checked={!!r.target.mirror} onChange={(e) => set({ target: { ...r.target, mirror: e.target.checked } as Target })} /> Mirror
+            </label>
+            <label className="toggle" title="Circle-and-cross marks at the middle of each edge, on every plate or pass, so the inks line up.">
+              <input type="checkbox" checked={!!r.target.registration} onChange={(e) => set({ target: { ...r.target, registration: e.target.checked } as Target })} /> Registration marks
+            </label>
+            {r.target.registration && r.layout.marginMm < MARK_INSET_MM * 2 && (
+              <p className="hint">The marks sit {MARK_INSET_MM} mm from the paper edge; with a margin under {MARK_INSET_MM * 2} mm they may touch the art.</p>
+            )}
+          </>
         )}
       </details>
 
@@ -196,6 +256,26 @@ export function ProjectPanel(props: {
             >
               ✕
             </button>
+            {r.target.kind === "print" && r.target.mode === "bitmap" && r.target.halftone && (
+              <span className="ink-angle">
+                Screen angle
+                <input
+                  className="num"
+                  type="number"
+                  min={0}
+                  max={180}
+                  step={7.5}
+                  title="Screen angle. Different angles per ink keep the dot grids from beating against each other (moiré)."
+                  aria-label={`${ink.name} screen angle`}
+                  value={screenAngle(r.target.halftone, ink.id, i)}
+                  onChange={(e) => {
+                    const h = (r.target as PrintTarget).halftone!;
+                    set({ target: { ...r.target, halftone: { ...h, angles: { ...h.angles, [ink.id]: Number(e.target.value) } } } as Target });
+                  }}
+                />
+                <span className="unit">°</span>
+              </span>
+            )}
           </div>
         ))}
         <button onClick={() => set({ inks: [...r.inks, { id: newInkId(r.inks), name: `Ink ${r.inks.length + 1}`, color: "#2f5d8a", mix: "multiply", widthMm: r.inks[0]?.widthMm ?? 0.5 }] })}>
