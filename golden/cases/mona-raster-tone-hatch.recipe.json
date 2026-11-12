@@ -1,0 +1,12 @@
+{
+  "schemaVersion": 2,
+  "input": "image",
+  "target": { "kind": "raster", "dpi": 50 },
+  "paper": { "widthMm": 148, "heightMm": 210 },
+  "layout": { "fit": "fit", "marginMm": 12, "position": [0.5, 0.5] },
+  "inks": [{ "id": "black", "name": "Black", "color": "#1d2a44", "mix": "multiply", "widthMm": 0.4 }],
+  "machine": "generic",
+  "preset": "topo-hatch",
+  "export": "png",
+  "fixture": "mona-lisa-600.jpg"
+}
