@@ -1,0 +1,11 @@
+{
+  "schemaVersion": 2,
+  "input": "image",
+  "target": { "kind": "plotter" },
+  "paper": { "widthMm": 210, "heightMm": 297 },
+  "layout": { "fit": "fit", "marginMm": 20, "position": [0.5, 0.5] },
+  "inks": [{ "id": "black", "name": "Black", "color": "#111111", "mix": "multiply", "widthMm": 0.3 }],
+  "machine": "generic",
+  "preset": "topo-hatch",
+  "fixture": "mona-lisa-600.jpg"
+}

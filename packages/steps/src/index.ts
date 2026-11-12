@@ -13,3 +13,4 @@ export const allSteps = [threshold, tone, levels, pixelate, centerline, bands, f
 export function createRegistry(): StepRegistry {
   return new StepRegistry(allSteps);
 }
+export { presets, presetSteps, type Preset } from "./presets.ts";
