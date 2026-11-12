@@ -105,7 +105,7 @@ export const fill = defineStep({
       ...geo,
       layers: geo.layers.map((l) => {
         const polys = l.features.features.filter((f) => f.geometry.type === "Polygon");
-        const count = Math.max(0, ...polys.map((f) => Number(f.properties.level) || 0));
+        const count = polys.reduce((m, f) => Math.max(m, Number(f.properties.level) || 0), 0);
         const toneOf = (f: GeoFeature) => {
           const lo = Number(f.properties.toneLo), hi = Number(f.properties.toneHi);
           return Number.isFinite(lo) && Number.isFinite(hi) ? (lo + hi) / 2 : (Number(f.properties.level) || 1) / Math.max(1, count);

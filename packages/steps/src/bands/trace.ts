@@ -102,8 +102,15 @@ export function maskPolygons(mask: Uint8Array, w: number, h: number): Position[]
   for (const r of rings) {
     const a = ringArea(r);
     if (a > 0) {
-      const xs = r.map((p) => p[0]), ys = r.map((p) => p[1]);
-      outers.push({ ring: r, area: a, box: [Math.min(...xs), Math.min(...ys), Math.max(...xs), Math.max(...ys)], holes: [] });
+      // Loops, not Math.min(...xs): a ragged ring can have more points than a call can take.
+      const box: [number, number, number, number] = [Infinity, Infinity, -Infinity, -Infinity];
+      for (const [x, y] of r) {
+        if (x < box[0]) box[0] = x;
+        if (y < box[1]) box[1] = y;
+        if (x > box[2]) box[2] = x;
+        if (y > box[3]) box[3] = y;
+      }
+      outers.push({ ring: r, area: a, box, holes: [] });
     } else holes.push(r);
   }
   for (const hole of holes) {

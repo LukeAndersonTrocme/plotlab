@@ -44,4 +44,11 @@ describe("maskContours", () => {
     expect(ls).toHaveLength(1);
     for (const [x] of ls[0]!) expect(x).toBe(3);
   });
+  it("handles very long rings (big, ragged shapes)", () => {
+    const w = 3000, h = 200;
+    // A comb: a long ragged edge gives one ring with > 150k points.
+    const m = mask(w, h, (x, y) => y < 100 || (x % 2 === 0 && y < 199));
+    expect(maskPolygons(m, w, h).length).toBeGreaterThan(0);
+  });
 });
+

@@ -52,4 +52,13 @@ describe("fill", () => {
     expect(out).toContainEqual(line);
     expect(out.some((f) => f.geometry.type === "Polygon")).toBe(true);
   });
+  it("copes with a huge number of tiny bands (speckled images)", async () => {
+    const many = Array.from({ length: 200000 }, (_, i): GeoFeature => ({
+      type: "Feature",
+      geometry: { type: "Polygon", coordinates: [rect(i % 400, Math.floor(i / 400) * 0.01, 0.05, 0.005)] },
+      properties: { level: (i % 3) + 1 },
+    }));
+    await expect(run(many)).resolves.toBeDefined();
+  });
 });
+

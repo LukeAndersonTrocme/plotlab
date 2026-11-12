@@ -15,7 +15,10 @@ screen print, relief, intaglio) are equally supported.
 **Status:** early. Works end to end: image → threshold → centerline → stroke order → SVG,
 with live sliders, a time estimate, and the source placed on paper in mm. Pick an output
 target (plotter, digital image, digital vector, print prep), give each layer an ink, reorder
-or add steps, and click any step to see its output.
+or add steps, and click any step to see its output. Topographic looks: Ink density → Levels
+→ Bands → Fill (hatching or dots, per-band patterns, cross-hatching), contour maps, and
+Pixelate. Start from a preset ("Topographic hatching", "Dotted bands", "Contour map", "Pixel
+hatching", "Single-line trace"); each one is a golden example in `golden/approved/`.
 
 ## Use it
 
