@@ -1,11 +1,11 @@
 import { readFileSync, readdirSync } from "node:fs";
 import { basename, dirname, extname, join } from "node:path";
-import { imageFromRGBA, type RawImage } from "@plotlab/engine";
+import { decodeTiff, imageFromRGBA, type RawImage } from "@plotlab/engine";
 import { PNG } from "pngjs";
 import jpeg from "jpeg-js";
 
-/** Decode a raster source file into an engine Image. PNG and JPEG for now. */
-export function readImage(path: string): RawImage {
+/** Decode a raster source file into an engine Image: PNG, JPEG, TIFF (8/16-bit; first page). */
+export function readImage(path: string, warn: (m: string) => void = () => {}): RawImage {
   const buf = readFileSync(path);
   const ext = extname(path).toLowerCase();
   if (ext === ".png") {
@@ -16,7 +16,12 @@ export function readImage(path: string): RawImage {
     const j = jpeg.decode(buf, { useTArray: true, formatAsRGBA: true });
     return imageFromRGBA(j.width, j.height, j.data);
   }
-  throw new Error(`unsupported input format "${ext}" (supported so far: .png, .jpg). TIFF/WebP/SVG are tracked as issues.`);
+  if (ext === ".tif" || ext === ".tiff") {
+    const pages = decodeTiff(new Uint8Array(buf.buffer, buf.byteOffset, buf.byteLength));
+    if (pages.length > 1) warn(`${basename(path)} has ${pages.length} pages; using the first (separations as layers are tracked in an issue)`);
+    return pages[0]!;
+  }
+  throw new Error(`unsupported input format "${ext}" (supported: .png, .jpg, .tif). WebP works in the web app; SVG input is tracked as an issue.`);
 }
 
 /** Expand a `*` wildcard in the file-name part only (e.g. 'frames/*.png'), sorted. */

@@ -1,15 +1,18 @@
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { basename, extname, join } from "node:path";
 import { parseArgs } from "node:util";
-import { loadRecipe, Pipeline, plotToSvg, RecipeError, showsTime, StepError, type StepDefinition } from "@plotlab/engine";
+import { exportFormats, exportOutput, loadRecipe, Pipeline, RecipeError, showsTime, StepError, type ExportFormat, type StepDefinition } from "@plotlab/engine";
 import { estimatePlot, getMachine } from "@plotlab/machines";
 import { createRegistry } from "@plotlab/steps";
 import { expandInput, readImage } from "./io.ts";
 
-const USAGE = `plotlab: image → plotter pipeline
+const USAGE = `plotlab: image → plotter / digital / print pipeline
 
 Usage:
-  plotlab run <recipe.json> -i <input|'frames/*.png'> -o <out-dir>
+  plotlab run <recipe.json> -i <input|'frames/*.png'> -o <out-dir> [-f svg|pdf|png|tiff|plates]
+
+  -f picks the file type; the default is the recipe target's main one
+  (plotter: svg, vector: svg, raster: png, print: plates = one TIFF per ink + proof).
   plotlab steps list
   plotlab steps describe <step>
 `;
@@ -40,7 +43,7 @@ async function run(args: string[]): Promise<number> {
   const { values, positionals } = parseArgs({
     args,
     allowPositionals: true,
-    options: { input: { type: "string", short: "i" }, out: { type: "string", short: "o" } },
+    options: { input: { type: "string", short: "i" }, out: { type: "string", short: "o" }, format: { type: "string", short: "f" } },
   });
   const recipePath = positionals[0];
   if (!recipePath || !values.input || !values.out) {
@@ -50,29 +53,36 @@ async function run(args: string[]): Promise<number> {
   const registry = createRegistry();
   const { recipe, warnings } = loadRecipe(JSON.parse(readFileSync(recipePath, "utf8")), registry);
   for (const w of warnings) process.stderr.write(`warning: ${w.index >= 0 ? `step ${w.index}: ` : ""}${w.message}\n`);
+  const formats: ExportFormat[] = ["svg", "pdf", "png", "tiff", "plates"];
+  const format = (values.format ?? exportFormats(recipe.target)[0]) as ExportFormat;
+  if (!formats.includes(format)) throw new Error(`unknown format "${values.format}"; use one of ${formats.join(", ")}`);
   const inputs = expandInput(values.input);
   if (inputs.length === 0) throw new Error(`no files match ${values.input}`);
-  mkdirSync(values.out, { recursive: true });
+  const outDir = values.out;
+  mkdirSync(outDir, { recursive: true });
   const pipeline = new Pipeline(registry);
   for (const file of inputs) {
     pipeline.reset();
-    const { output, plot, warnings: runWarnings } = await pipeline.run(readImage(file), recipe, { sourceKey: file });
+    const { output, plot, warnings: runWarnings } = await pipeline.run(readImage(file, (m) => process.stderr.write(`warning: ${m}\n`)), recipe, { sourceKey: file });
     for (const w of runWarnings) process.stderr.write(`warning: ${w}\n`);
-    if (!plot) throw new Error(`recipe ends at ${output.kind}; add a step that makes lines (e.g. centerline) to export SVG`);
+    const lineFormat = format === "svg" || format === "pdf";
+    if (!plot && lineFormat && recipe.target.kind === "plotter") throw new Error(`recipe ends at ${output.kind}; add a step that makes lines (e.g. centerline) to export for a plotter`);
     const stem = inputs.length > 1 ? basename(file, extname(file)) : "plot";
-    const svgPath = join(values.out, `${stem}.svg`);
-    writeFileSync(svgPath, plotToSvg(plot, { recipe }));
-    const strokes = plot.layers.reduce((n, l) => n + l.paths.length, 0);
-    let line = `${svgPath}  ${strokes} strokes`;
-    if (showsTime(recipe.target)) {
-      const e = estimatePlot(plot, getMachine(recipe.machine));
-      line += `  ~${fmtTime(e.totalS)}${plot.ordered ? "" : " (traced order)"}`;
+    const { files, notes } = exportOutput(output, plot, recipe, format, stem);
+    for (const f of files) writeFileSync(join(outDir, f.name), f.data);
+    let line = files.map((f) => join(outDir, f.name)).join(", ");
+    if (plot) {
+      const strokes = plot.layers.reduce((n, l) => n + l.paths.length, 0);
+      line += `  ${strokes} strokes`;
+      if (showsTime(recipe.target)) {
+        const e = estimatePlot(plot, getMachine(recipe.machine));
+        line += `  ~${fmtTime(e.totalS)}${plot.ordered ? "" : " (traced order)"}`;
+      }
     }
-    const skipped = plot.rasterLayers?.layers.map((l) => l.name) ?? [];
-    if (skipped.length) line += `  (not lines yet, skipped: ${skipped.join(", ")})`;
     process.stdout.write(line + "\n");
+    for (const n of notes) process.stderr.write(`note: ${n}\n`);
   }
-  writeFileSync(join(values.out, "recipe.json"), JSON.stringify(recipe, null, 2) + "\n");
+  writeFileSync(join(outDir, "recipe.json"), JSON.stringify(recipe, null, 2) + "\n");
   return 0;
 }
 
