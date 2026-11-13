@@ -13,7 +13,11 @@ still to be argued over with Nick. Change a term here first, then rename it ever
 | **Layer** | One ink pass/plate. Holds **tone** or **categories** | a color, a separation, a plate | a raster band |
 | **Tone** | A layer value from 0 to 1: how much ink goes here | shade, density | continuous Z |
 | **Categories** | A layer value that is a label 1..N (band 3, paper #7) | zones, areas | categorical raster / factor |
-| **Band** | The area of one level, as a polygon with holes (topo-style) | zone | iso-band |
+| **Band** | The area of one level, as a polygon with holes (topo-style). Band 1 is the lightest | zone | iso-band |
+| **Ink density** | A tone layer made from the image: 1 = full ink, 0 = bare paper | darkness | 1 − luminance |
+| **Lattice** | The grid of hatch lines or dots a Fill uses; one lattice per spacing/angle, anchored at the paper corner so bands line up | screen, ruling | regular grid |
+| **Cumulative** (cross-hatch) | Darker bands also get the lighter bands' lines | cross-hatching | nested fills |
+| **Contour line** | The border between two levels, drawn on its own | contour | isoline |
 | **Separation** | Splitting an image into layers (CMYK, palette, split darks) | separating colors | decomposition |
 | **Color mosaic** | Discrete opaque color areas, relying on optical mixing | mosaic, color bitmap | palette reduction, clustering |
 | **Screen angle** | Rotation of a layer's halftone/hatch grid; controls moiré | screen angle | grid rotation |
@@ -34,6 +38,11 @@ still to be argued over with Nick. Change a term here first, then rename it ever
 | **Variant** | A named snapshot of a recipe within a project | a version | branch / parameter set |
 | **Stage** | UI grouping of steps by data type (Input, Image, Layers, Lines, Plot; provisional) | step in the process | pipeline phase |
 | **Output target** | Where the work ends up: plotter, digital raster, digital vector, print prep | the output | sink |
+| **Plate** | One ink's file for print prep: where that ink goes, 1-bit or gray | plate, separation, film, screen | per-ink raster mask |
+| **Proof** | A picture of how the plates (or lines) will print together | proof | composite preview |
+| **Registration marks** | Circle-and-cross marks at each edge, on every plate/pass, for lining the inks up | reg marks | alignment fiducials |
+| **Mirror** | Flip left-right, for plates printed face down, screens, transfers | flop, wrong-reading | horizontal reflection |
+| **Film negative** | Plate with ink areas clear and the rest black | negative | inverted mask |
 | **Working resolution** | mm per pixel the pipeline works at, derived from the target | detail | grid resolution |
 | **Reference** | An extra image in a project, e.g. a paper texture for collage | a texture, a paper | auxiliary raster |
 | **Flatten** | Turn layers back into an image to keep processing | flatten | rasterize |
@@ -54,6 +63,8 @@ still to be argued over with Nick. Change a term here first, then rename it ever
 | **Frame** | Where a raster sits on the paper, in mm. Pixel → mm goes through it (`pxToMm`). |
 | **Placed source** | The source after layout and resampling to the working resolution: what step 1 receives. |
 | **1-bit tone** | A tone layer whose values are only 0 or 1 (what Threshold makes). |
+| **Band tone range** | The ink-density range a category label came from (`bands` on categories values) |
+| **Preset (code)** | `packages/steps/src/presets.ts`: a starting chain of steps, each proven by a golden case |
 | **Raster layers** (UI: "not lines yet") | Layers whose chain stopped before becoming lines; they ride along to the end (`rasterLayers`). |
 | **Pass** | One ink's strokes in a plot; passes are separated by pen changes. |
 | **On-demand step** | A slow step (e.g. Stroke order) that runs when you press Run, not on every change. |

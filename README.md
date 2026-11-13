@@ -5,7 +5,7 @@
 
 Turn images into pen-plotter drawings, in the browser or from the command line. Load an
 image, choose how it becomes lines, see the plot on paper with a time estimate, and export
-SVG. Built by Luke Anderson-Trocmé and Nicolas Oligny (bosny) for a CALQ-FRQ Arts-Sciences
+SVG/PDF, PNG/TIFF, or one print-ready plate per ink. Built by Luke Anderson-Trocmé and Nicolas Oligny (bosny) for a CALQ-FRQ Arts-Sciences
 project.
 
 Think of a modular synth: complex inside, but you can have fun turning the knobs without
@@ -15,7 +15,16 @@ screen print, relief, intaglio) are equally supported.
 **Status:** early. Works end to end: image → threshold → centerline → stroke order → SVG,
 with live sliders, a time estimate, and the source placed on paper in mm. Pick an output
 target (plotter, digital image, digital vector, print prep), give each layer an ink, reorder
-or add steps, and click any step to see its output.
+or add steps, and click any step to see its output. Topographic looks: Ink density → Levels
+→ Bands → Fill (hatching or dots, per-band patterns, cross-hatching), contour maps, and
+Pixelate. Start from a preset ("Topographic hatching", "Dotted bands", "Contour map", "Pixel
+hatching", "Single-line trace"); each one is a golden example in `golden/approved/`.
+Export follows the target: SVG for plotters; SVG or PDF for digital vector (layers that
+aren't lines are embedded as images); PNG or TIFF at a DPI for digital images, with inks
+mixed like ink on paper; for print prep, one 1-bit or gray TIFF per ink (optional halftone
+screen with an angle per ink, film negative, mirror, registration marks) plus a proof.
+"Preview as exported" shows the page as the file will look. Input: PNG, JPEG, WebP (web),
+TIFF including 16-bit.
 
 ## Use it
 
@@ -28,7 +37,8 @@ CLI:
 pnpm plotlab steps list
 pnpm plotlab steps describe threshold
 pnpm plotlab run golden/cases/shapes-centerline.recipe.json -i photo.jpg -o out/
-pnpm plotlab run recipe.json -i 'frames/*.png' -o out/    # one SVG per frame
+pnpm plotlab run recipe.json -i 'frames/*.png' -o out/    # one file per frame
+pnpm plotlab run recipe.json -i scan.tif -o out/ -f plates # print prep: a TIFF per ink + proof
 ```
 
 ## Develop
@@ -45,7 +55,7 @@ pnpm golden:approve # accept changed golden output, then review the diff in git
 
 | Package | What's in it |
 |---|---|
-| `packages/engine` | Stage data types, param declarations, step contract, recipe loading/versioning (schema v2: target, layout, inks), placing the source on paper, pipeline with caching, chain rules, SVG export. No UI, no Node-only code. |
+| `packages/engine` | Stage data types, param declarations, step contract, recipe loading/versioning (schema v2: target, layout, inks), placing the source on paper, pipeline with caching, chain rules, export (SVG, PDF, PNG, TIFF, print plates; TIFF input). No UI, no Node-only code. |
 | `packages/steps` | One folder per step: `index.ts` + `help.md`. Run `pnpm --filter @plotlab/steps gen:help` after editing help. |
 | `packages/machines` | Machine profiles (JSON) and time estimates. |
 | `packages/web` | React + Vite app. Pipeline runs in a Web Worker; low-res proxy while dragging. |

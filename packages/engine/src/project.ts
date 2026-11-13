@@ -1,4 +1,5 @@
 import type { Recipe } from "./recipe.ts";
+import { featurePaths } from "./features.ts";
 import type { Geometry, Ink, Paper, Plot, Position } from "./types.ts";
 
 /**
@@ -6,10 +7,49 @@ import type { Geometry, Ink, Paper, Plot, Position } from "./types.ts";
  * inks (ADR 0008) and passes (ADR 0011).
  */
 export type Target =
-  | { kind: "plotter" }
+  | ({ kind: "plotter" } & Partial<Finishing>)
   | { kind: "vector" }
   | { kind: "raster"; dpi: number }
-  | { kind: "print"; dpi: number };
+  | ({ kind: "print"; dpi: number } & PrintOptions & Partial<Finishing>);
+
+/** Plate finishing shared by print prep and plotter output (ADR 0007). */
+export interface Finishing {
+  /** Flip left-right (screen/relief plates, transfer, emulsion side down). */
+  mirror: boolean;
+  /** Draw registration marks in the margin on every plate/pass so they line up. */
+  registration: boolean;
+}
+
+/** Print prep: how each ink's plate is written. */
+export interface PrintOptions {
+  /** "bitmap" = 1-bit (solid ink or none); "gray" = 8-bit density. */
+  mode: "bitmap" | "gray";
+  /** Round-dot halftone screen for bitmap plates; null = plain threshold at 50%. */
+  halftone: Halftone | null;
+  /** Film negative: ink areas clear, paper black. Default is a film positive. */
+  negative: boolean;
+}
+
+export interface Halftone {
+  /** Screen ruling, lines per inch. */
+  lpi: number;
+  /** Screen angle per ink id, degrees. Inks not listed use the classic angle for their position. */
+  angles: Record<string, number>;
+}
+
+export const DEFAULT_PRINT: PrintOptions = { mode: "bitmap", halftone: null, negative: false };
+
+/** Classic CMYK-style screen angles by ink position (15, 75, 0, 45, then repeat shifted). */
+export function screenAngle(h: Halftone, inkId: string, inkIndex: number): number {
+  const a = h.angles[inkId];
+  if (typeof a === "number") return a;
+  return [15, 75, 0, 45][inkIndex % 4]! + 7.5 * Math.floor(inkIndex / 4);
+}
+
+export function finishing(target: Target): Finishing {
+  if (target.kind === "plotter" || target.kind === "print") return { mirror: !!target.mirror, registration: !!target.registration };
+  return { mirror: false, registration: false };
+}
 
 export type TargetKind = Target["kind"];
 export const TARGET_KINDS: TargetKind[] = ["plotter", "vector", "raster", "print"];
@@ -49,6 +89,18 @@ export function parseColor(color: string): [number, number, number] | null {
 
 export type PassOrder = "light-to-dark" | string[];
 
+/**
+ * Pass order: an explicit order first (by layer id), then light → dark by ink luminance,
+ * ties kept in their original order.
+ */
+export function sortPasses<T extends { id: string; ink: Ink }>(items: T[], passOrder: PassOrder): T[] {
+  const rank = (id: string) => (Array.isArray(passOrder) && passOrder.includes(id) ? passOrder.indexOf(id) : Infinity);
+  return items
+    .map((l, i) => ({ l, i, lum: colorLuminance(l.ink.color) }))
+    .sort((a, b) => rank(a.l.id) - rank(b.l.id) || b.lum - a.lum || a.i - b.i)
+    .map((x) => x.l);
+}
+
 export interface PlotSettings {
   paper: Paper;
   inkFor(layerId: string): Ink;
@@ -65,14 +117,9 @@ export function toPlot(geo: Geometry, s: PlotSettings, paths?: Position[][][]): 
     id: l.id,
     name: l.name,
     ink: s.inkFor(l.id),
-    paths: paths?.[i] ?? l.features.features.map((f) => f.geometry.coordinates),
+    paths: paths?.[i] ?? l.features.features.flatMap(featurePaths),
   }));
-  const lum = (id: string) => colorLuminance(layers.find((l) => l.id === id)!.ink.color);
-  const rank = (id: string) => (Array.isArray(s.passOrder) && s.passOrder.includes(id) ? s.passOrder.indexOf(id) : Infinity);
-  const ordered = layers
-    .map((l, i) => ({ l, i }))
-    .sort((a, b) => rank(a.l.id) - rank(b.l.id) || lum(b.l.id) - lum(a.l.id) || a.i - b.i)
-    .map((x) => x.l);
+  const ordered = sortPasses(layers, s.passOrder);
   const plot: Plot = { kind: "plot", paper: s.paper, layers: ordered, ordered: paths !== undefined };
   if (geo.rasterLayers) plot.rasterLayers = geo.rasterLayers;
   return plot;

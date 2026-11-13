@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { loadRecipe, plotToSvg, type AnyStep, type Recipe } from "@plotlab/engine";
+import { exportFormats, FORMAT_LABEL, loadRecipe, type AnyStep, type ExportFormat, type Recipe } from "@plotlab/engine";
 import { createRegistry } from "@plotlab/steps";
 import { defaultRecipe } from "./defaults.ts";
 import { HelpPanel } from "./Help.tsx";
@@ -23,9 +23,9 @@ function loadSaved(): Recipe {
   return defaultRecipe();
 }
 
-function download(name: string, text: string, type: string) {
+function download(name: string, data: string | Uint8Array, type: string) {
   const a = document.createElement("a");
-  a.href = URL.createObjectURL(new Blob([text], { type }));
+  a.href = URL.createObjectURL(new Blob([data], { type }));
   a.download = name;
   a.click();
   setTimeout(() => URL.revokeObjectURL(a.href), 1000);
@@ -48,6 +48,8 @@ export function App() {
   const [notice, setNotice] = useState<string | null>(null);
   const [showSource, setShowSource] = useState(false);
   const [hidden, setHidden] = useState<Set<string>>(new Set());
+  const [asExported, setAsExported] = useState(false);
+  const [exporting, setExporting] = useState<ExportFormat | null>(null);
   const runner = useMemo(() => new Runner(setRun), []);
   const recipeRef = useRef(recipe);
   recipeRef.current = recipe;
@@ -98,21 +100,43 @@ export function App() {
       return;
     }
     try {
-      const img = await decodeFile(file);
+      const warnings: string[] = [];
+      const img = await decodeFile(file, (m) => warnings.push(m));
       setSourceName(file.name);
       runner.setSource(img, `${file.name}:${file.size}:${file.lastModified}`);
       runner.request(recipe, false);
-      setNotice(null);
+      setNotice(warnings.length ? warnings.join("\n") : null);
     } catch {
-      setNotice(`Couldn't read ${file.name}. Try PNG, JPEG or WebP.`);
+      setNotice(`Couldn't read ${file.name}. Try PNG, JPEG, WebP or TIFF.`);
+    }
+  };
+
+  const showAsExported = (on: boolean) => {
+    setAsExported(on);
+    runner.proof = on;
+    runner.request(recipe, false);
+  };
+
+  const exportAs = async (format: ExportFormat) => {
+    setExporting(format);
+    try {
+      const f = await runner.export(recipe, format, stem);
+      download(f.name, f.data, f.mime);
+      setNotice(f.notes.length ? f.notes.join("\n") : null);
+    } catch (e) {
+      setNotice(`Export failed: ${e instanceof Error ? e.message : String(e)}`);
+    } finally {
+      setExporting(null);
     }
   };
 
   const plot = run.plot;
-  // What the view shows: an inspected stage, or the end result (lines + layers that stopped early).
+  // What the view shows: an inspected stage, the page as it will export, or the end result
+  // (lines + layers that stopped early).
   const view = inspect !== null && run.inspected ? run.inspected : null;
-  const viewRasters = view ? view.rasters : run.rasterLayers;
-  const viewPlot = view ? view.plot : plot;
+  const proof = !view && asExported ? run.proof : null;
+  const viewRasters = view ? view.rasters : proof ? [proof] : run.rasterLayers;
+  const viewPlot = view ? view.plot : proof ? null : plot;
   const viewLayers = [
     ...(viewPlot?.layers.map((l) => ({ id: l.id, name: l.name, color: l.ink.color })) ?? []),
     ...viewRasters.filter((r) => r.color !== null).map((r) => ({ id: r.id, name: r.name, color: r.color! })),
@@ -206,7 +230,10 @@ export function App() {
             )}
             {run.refining && <span className="refining">low-res preview…</span>}
             {run.busy && !run.refining && <span className="refining">working…</span>}
-            {recipe.target.kind === "plotter" && (
+            <label className="toggle" title="Draw the page the way the exported file will look: at the target's resolution, with halftones, mirror and registration marks.">
+              <input type="checkbox" checked={asExported} onChange={(e) => showAsExported(e.target.checked)} /> Preview as exported
+            </label>
+            {recipe.target.kind === "plotter" && !asExported && (
               <label className="toggle">
                 <input type="checkbox" checked={showTravel} onChange={(e) => setShowTravel(e.target.checked)} /> Show pen-up travel
               </label>
@@ -266,9 +293,16 @@ export function App() {
             empty={run.busy ? "Working…" : "Nothing to show at this stage"}
           />
           <div className="actions">
-            <button className="primary" disabled={!plot || run.refining} onClick={() => plot && download(`${stem}.svg`, plotToSvg(plot, { recipe }), "image/svg+xml")}>
-              Download SVG
-            </button>
+            {exportFormats(recipe.target).map((f, i) => (
+              <button
+                key={f}
+                className={i === 0 ? "primary" : ""}
+                disabled={exporting !== null || (recipe.target.kind === "plotter" && !plot)}
+                onClick={() => void exportAs(f)}
+              >
+                {exporting === f ? "Exporting…" : `Download ${FORMAT_LABEL[f]}`}
+              </button>
+            ))}
             <button onClick={() => download(`${stem}.recipe.json`, JSON.stringify(recipe, null, 2), "application/json")}>Download recipe</button>
             <button onClick={() => void navigator.clipboard?.writeText(cli).then(() => setNotice(`Copied: ${cli}`))}>Copy as CLI command</button>
             <button

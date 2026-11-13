@@ -28,3 +28,30 @@ describe("params", () => {
     expect(isVisible(decls, "flip", { mode: "b" })).toBe(true);
   });
 });
+
+describe("text and table params", () => {
+  const decls = {
+    cuts: { type: "text" as const, label: "Cuts", help: "", default: "" },
+    overrides: {
+      type: "table" as const,
+      label: "Overrides",
+      help: "",
+      rowLabel: "Band",
+      columns: { spacing: { label: "Spacing", min: 0.1, max: 10 }, angle: { label: "Angle", min: 0, max: 180 } },
+      default: {},
+    },
+  };
+  it("text takes strings only", () => {
+    expect(resolveParams(decls, { cuts: "20, 40" }).values.cuts).toBe("20, 40");
+    const r = resolveParams(decls, { cuts: 5 });
+    expect(r.values.cuts).toBe("");
+    expect(r.issues[0]?.param).toBe("cuts");
+  });
+  it("table keeps valid rows, clamps numbers and drops unknown columns", () => {
+    expect(resolveParams(decls, { overrides: { "3": { spacing: 1 } } }).values.overrides).toEqual({ "3": { spacing: 1 } });
+    const r = resolveParams(decls, { overrides: { "3": { spacing: 999, bogus: 1 } } });
+    expect(r.values.overrides).toEqual({ "3": { spacing: 10 } });
+    expect(r.issues.map((i) => i.message).join()).toMatch(/clamped/);
+    expect(r.issues.map((i) => i.message).join()).toMatch(/bogus/);
+  });
+});

@@ -1,0 +1,12 @@
+{
+  "schemaVersion": 2,
+  "input": "image",
+  "target": { "kind": "print", "dpi": 100, "mode": "bitmap", "halftone": { "lpi": 15, "angles": {} }, "negative": false, "mirror": true, "registration": true },
+  "paper": { "widthMm": 148, "heightMm": 210 },
+  "layout": { "fit": "fit", "marginMm": 16, "position": [0.5, 0.5] },
+  "inks": [{ "id": "red", "name": "Riso red", "color": "#e8413c", "mix": "multiply", "widthMm": 0.4 }],
+  "machine": "generic",
+  "steps": [{ "step": "tone", "version": 1, "params": {} }],
+  "export": "plates",
+  "fixture": "mona-lisa-600.jpg"
+}
