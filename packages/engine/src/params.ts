@@ -33,7 +33,32 @@ export interface EnumParam<V extends string = string> extends ParamBase {
   default: V;
 }
 
-export type ParamDecl = NumberParam | BooleanParam | EnumParam;
+export interface TextParam extends ParamBase {
+  type: "text";
+  default: string;
+  placeholder?: string;
+}
+
+export interface TableColumn {
+  label: string;
+  min: number;
+  max: number;
+  step?: number;
+  unit?: NumberParam["unit"];
+}
+
+/**
+ * Per-row overrides, e.g. settings for band 3. The value maps a row key ("3") to the
+ * columns it overrides; rows and columns left out use the step's other settings.
+ */
+export interface TableParam extends ParamBase {
+  type: "table";
+  rowLabel: string;
+  columns: Record<string, TableColumn>;
+  default: Record<string, Record<string, number>>;
+}
+
+export type ParamDecl = NumberParam | BooleanParam | EnumParam | TextParam | TableParam;
 export type ParamDecls = Record<string, ParamDecl>;
 
 /** Map a declaration record to the runtime values type. */
@@ -44,7 +69,11 @@ export type ParamValues<D extends ParamDecls> = {
       ? boolean
       : D[K] extends EnumParam<infer V>
         ? V
-        : never;
+        : D[K] extends TextParam
+          ? string
+          : D[K] extends TableParam
+            ? Record<string, Record<string, number>>
+            : never;
 };
 
 export function defaultParams<D extends ParamDecls>(decls: D): ParamValues<D> {
@@ -100,6 +129,40 @@ export function resolveParams<D extends ParamDecls>(
           values[k] = d.default;
         } else values[k] = v;
         break;
+      case "text":
+        if (typeof v !== "string") {
+          issues.push({ param: k, message: `expected text, got ${JSON.stringify(v)}` });
+          values[k] = d.default;
+        } else values[k] = v;
+        break;
+      case "table": {
+        if (typeof v !== "object" || v === null || Array.isArray(v)) {
+          issues.push({ param: k, message: `expected a table of rows, got ${JSON.stringify(v)}` });
+          values[k] = d.default;
+          break;
+        }
+        const table: Record<string, Record<string, number>> = {};
+        for (const [row, cols] of Object.entries(v as Record<string, unknown>)) {
+          if (typeof cols !== "object" || cols === null) continue;
+          const out: Record<string, number> = {};
+          for (const [col, x] of Object.entries(cols as Record<string, unknown>)) {
+            const c = d.columns[col];
+            if (!c) {
+              issues.push({ param: k, message: `row ${row}: unknown column "${col}"` });
+              continue;
+            }
+            if (typeof x !== "number" || Number.isNaN(x)) {
+              issues.push({ param: k, message: `row ${row}: ${col} must be a number` });
+              continue;
+            }
+            if (x < c.min || x > c.max) issues.push({ param: k, message: `row ${row}: ${col} ${x} is outside ${c.min}..${c.max}; clamped` });
+            out[col] = Math.min(c.max, Math.max(c.min, x));
+          }
+          if (Object.keys(out).length) table[row] = out;
+        }
+        values[k] = table;
+        break;
+      }
       case "enum":
         if (!d.options.some((o) => o.value === v)) {
           issues.push({

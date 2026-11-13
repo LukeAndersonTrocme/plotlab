@@ -1,0 +1,31 @@
+{
+  "schemaVersion": 2,
+  "input": "image",
+  "target": {
+    "kind": "plotter"
+  },
+  "paper": {
+    "widthMm": 210,
+    "heightMm": 148
+  },
+  "layout": {
+    "fit": "fit",
+    "marginMm": 15,
+    "position": [
+      0.5,
+      0.5
+    ]
+  },
+  "inks": [
+    {
+      "id": "black",
+      "name": "Black",
+      "color": "#111111",
+      "mix": "multiply",
+      "widthMm": 0.5
+    }
+  ],
+  "machine": "generic",
+  "fixture": "shapes.png",
+  "preset": "centerline"
+}

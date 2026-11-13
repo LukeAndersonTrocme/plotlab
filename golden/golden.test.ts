@@ -8,7 +8,7 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 import { loadRecipe, Pipeline, plotToSvg } from "@plotlab/engine";
-import { createRegistry } from "@plotlab/steps";
+import { createRegistry, presetSteps } from "@plotlab/steps";
 import { readImage } from "../packages/cli/src/io.ts";
 
 const root = dirname(fileURLToPath(import.meta.url));
@@ -21,7 +21,9 @@ describe("golden", () => {
     it(name, async () => {
       const raw = JSON.parse(readFileSync(join(root, "cases", file), "utf8"));
       const registry = createRegistry();
-      const { fixture, ...recipeJson } = raw;
+      // A case may name a preset instead of listing steps; the golden then proves the preset.
+      const { fixture, preset, ...recipeJson } = raw;
+      if (preset) recipeJson.steps = presetSteps(preset);
       const { recipe } = loadRecipe(recipeJson, registry);
       const { plot } = await new Pipeline(registry).run(readImage(join(root, "fixtures", fixture)), recipe);
       if (!plot) throw new Error(`${name} does not end in lines`);

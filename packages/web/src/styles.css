@@ -104,3 +104,8 @@ button.link { border: none; background: none; padding: 0; color: inherit; font-w
 .view-bar { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin-top: 8px; font-size: 13px; color: var(--muted); }
 .view-bar strong { color: var(--ink); }
 .view-bar .toggle { margin-left: auto; }
+.param input.text { width: 100%; }
+.ptable { border-collapse: collapse; font-size: 12px; margin: 4px 0; }
+.ptable th { text-align: left; font-weight: normal; color: var(--muted); padding: 0 4px 2px 0; }
+.ptable td { padding: 1px 4px 1px 0; }
+.num.tiny { width: 56px; }

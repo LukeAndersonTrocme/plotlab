@@ -1,4 +1,5 @@
 import type { Recipe } from "./recipe.ts";
+import { featurePaths } from "./features.ts";
 import type { Geometry, Ink, Paper, Plot, Position } from "./types.ts";
 
 /**
@@ -65,7 +66,7 @@ export function toPlot(geo: Geometry, s: PlotSettings, paths?: Position[][][]): 
     id: l.id,
     name: l.name,
     ink: s.inkFor(l.id),
-    paths: paths?.[i] ?? l.features.features.map((f) => f.geometry.coordinates),
+    paths: paths?.[i] ?? l.features.features.flatMap(featurePaths),
   }));
   const lum = (id: string) => colorLuminance(layers.find((l) => l.id === id)!.ink.color);
   const rank = (id: string) => (Array.isArray(s.passOrder) && s.passOrder.includes(id) ? s.passOrder.indexOf(id) : Infinity);

@@ -13,6 +13,7 @@ import {
   type StageKind,
   type StepRegistry,
 } from "@plotlab/engine";
+import { presets, presetSteps } from "@plotlab/steps";
 import { LayerScope } from "./LayerScope.tsx";
 import { ParamControl } from "./ParamControl.tsx";
 import type { InspectTarget, StepInfo } from "./protocol.ts";
@@ -182,6 +183,24 @@ export function StepList(props: {
 
   return (
     <div className="steps">
+      <select
+        className="add-step"
+        value=""
+        title="Replace the steps with a ready-made chain. You can change everything afterwards."
+        onChange={(e) => {
+          const p = presets.find((x) => x.id === e.target.value);
+          if (p && (recipe.steps.length === 0 || window.confirm(`Replace your steps with "${p.title}"?`))) {
+            props.onChange({ ...recipe, steps: presetSteps(p.id) }, false);
+          }
+        }}
+      >
+        <option value="">Start from a preset…</option>
+        {presets.map((p) => (
+          <option key={p.id} value={p.id} title={p.summary}>
+            {p.title}
+          </option>
+        ))}
+      </select>
       {items}
       <AddStep recipe={recipe} registry={registry} onAdd={(r) => props.onChange(r, false)} onNotice={props.onNotice} />
     </div>

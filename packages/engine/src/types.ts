@@ -40,7 +40,13 @@ export interface Image extends RawImage {
 export type LayerValueKind = "tone" | "categories";
 export type LayerValues =
   | { kind: "tone"; data: Float32Array }
-  | { kind: "categories"; data: Uint16Array; count: number };
+  | {
+      kind: "categories";
+      data: Uint16Array;
+      count: number;
+      /** Tone range of each label (index 0 = label 1), when the labels came from cutting tone. */
+      bands?: Array<{ lo: number; hi: number }>;
+    };
 
 /** One ink pass/plate (ADR 0009). The ink is assigned by the recipe's `layerInks`. */
 export interface Layer {
@@ -68,11 +74,20 @@ export interface LineFeature {
   properties: Record<string, unknown>;
 }
 
+/** GeoJSON polygon: first ring is the outline, the rest are holes. Rings need not repeat their first point. */
+export interface PolygonFeature {
+  type: "Feature";
+  geometry: { type: "Polygon"; coordinates: Position[][] };
+  properties: Record<string, unknown>;
+}
+
+export type GeoFeature = LineFeature | PolygonFeature;
+
 export interface GeometryLayer {
   id: string;
   name: string;
   /** GeoJSON FeatureCollection, so geometry can round-trip to R/QGIS. */
-  features: { type: "FeatureCollection"; features: LineFeature[] };
+  features: { type: "FeatureCollection"; features: GeoFeature[] };
 }
 
 export interface Geometry {

@@ -28,6 +28,8 @@ function describe(def: StepDefinition): string {
     if (d.type === "number") range = `${d.seed ? "seed " : ""}${d.min}..${d.max}${d.unit ? ` ${d.unit}` : ""}`;
     if (d.type === "enum") range = d.options.map((o) => o.value).join(" | ");
     if (d.type === "boolean") range = "true | false";
+    if (d.type === "text") range = "text";
+    if (d.type === "table") range = `{ "<${d.rowLabel.toLowerCase()}>": { ${Object.keys(d.columns).join(", ")} } }`;
     const cond = d.visibleWhen ? `  (only when ${d.visibleWhen.param} = ${d.visibleWhen.equals.join("/")})` : "";
     lines.push(`  ${k}  [${range}]  default ${JSON.stringify(d.default)}${cond}`, `      ${d.help}`);
   }
