@@ -12,8 +12,10 @@ Think of a modular synth: complex inside, but you can have fun turning the knobs
 knowing the theory. Plotters are one output; pure digital work and print prep (riso,
 screen print, relief, intaglio) are equally supported.
 
-**Status:** early scaffold. First slice works end to end:
-image → threshold → centerline → place on paper (+ time estimate) → SVG, with live sliders.
+**Status:** early. Works end to end: image → threshold → centerline → stroke order → SVG,
+with live sliders, a time estimate, and the source placed on paper in mm. Pick an output
+target (plotter, digital image, digital vector, print prep), give each layer an ink, reorder
+or add steps, and click any step to see its output.
 
 ## Use it
 
@@ -43,7 +45,7 @@ pnpm golden:approve # accept changed golden output, then review the diff in git
 
 | Package | What's in it |
 |---|---|
-| `packages/engine` | Stage data types, param declarations, step contract, recipe loading/versioning, pipeline with caching, SVG export. No UI, no Node-only code. |
+| `packages/engine` | Stage data types, param declarations, step contract, recipe loading/versioning (schema v2: target, layout, inks), placing the source on paper, pipeline with caching, chain rules, SVG export. No UI, no Node-only code. |
 | `packages/steps` | One folder per step: `index.ts` + `help.md`. Run `pnpm --filter @plotlab/steps gen:help` after editing help. |
 | `packages/machines` | Machine profiles (JSON) and time estimates. |
 | `packages/web` | React + Vite app. Pipeline runs in a Web Worker; low-res proxy while dragging. |
@@ -52,7 +54,10 @@ pnpm golden:approve # accept changed golden output, then review the diff in git
 
 ### Adding a step
 
-1. `packages/steps/src/<id>/index.ts` with `defineStep({...})`, plus `help.md`.
+1. `packages/steps/src/<id>/index.ts` with `defineStep({...})`, plus `help.md`. Steps work in
+   mm on the paper. A step that transforms layers one at a time implements `runLayer` (and
+   `accepts: ["tone"]` etc.); the engine handles layer selection, per-layer settings and
+   pass-through. Random steps take `seed: seedParam()` and draw from `createRng(seed)`.
 2. Register it in `packages/steps/src/index.ts`.
 3. Unit tests in `packages/steps/test/`, and a golden case in `golden/cases/`.
 

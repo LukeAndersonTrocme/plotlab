@@ -24,7 +24,7 @@ export function otsuLevel(lum: Float32Array, bins = 256): number {
 
 export const threshold = defineStep({
   id: "threshold",
-  version: 1,
+  version: 2,
   title: "Threshold",
   summary: "Turn the image into one black-and-white layer: everything darker than a level gets ink.",
   input: "image",
@@ -60,19 +60,19 @@ export const threshold = defineStep({
     },
   },
   help: help.threshold ?? "",
-  run(img, p, ctx): Layers {
+  run(img, p): Layers {
     const lum = luminance(img);
     const level = p.mode === "auto" ? otsuLevel(lum) : p.level / 100;
-    const mask = new Uint8Array(img.width * img.height);
-    for (let i = 0; i < mask.length; i++) {
-      const dark = lum[i]! < level;
-      mask[i] = dark !== p.invert ? 1 : 0;
-    }
-    const pen = ctx.pens[0]?.id ?? "pen-1";
+    // A 1-bit tone layer: 1 = ink, 0 = paper (ADR 0009).
+    const data = new Float32Array(img.width * img.height);
+    for (let i = 0; i < data.length; i++) data[i] = lum[i]! < level !== p.invert ? 1 : 0;
     return {
       kind: "layers",
-      extent: img.extent,
-      layers: [{ id: "threshold", name: "Threshold", pen, width: img.width, height: img.height, mask, levels: 2 }],
+      width: img.width,
+      height: img.height,
+      frame: img.frame,
+      layers: [{ id: "threshold", name: "Threshold", values: { kind: "tone", data } }],
     };
   },
+  migrate: (params) => ({ params, note: "The layer is now a 1-bit tone layer; output is unchanged." }),
 });

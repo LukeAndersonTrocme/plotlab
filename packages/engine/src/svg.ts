@@ -5,7 +5,8 @@ const esc = (s: string) =>
   s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
 
 /**
- * Plot → one SVG with Inkscape-compatible layers (one per pen pass). Units are mm.
+ * Plot → one SVG with Inkscape-compatible layers (one per pass, in pass order). Units are mm.
+ * Layers that are not lines yet (`plot.rasterLayers`) are not included.
  * The recipe is embedded in <metadata> so every export carries its recipe.
  */
 export function plotToSvg(plot: Plot, opts: { recipe?: unknown } = {}): string {
@@ -22,7 +23,9 @@ export function plotToSvg(plot: Plot, opts: { recipe?: unknown } = {}): string {
   plot.layers.forEach((layer, i) => {
     out.push(
       `<g inkscape:groupmode="layer" inkscape:label="${i + 1}-${esc(layer.name)}" id="layer-${esc(layer.id)}"` +
-        ` fill="none" stroke="${esc(layer.pen.color)}" stroke-width="${r(layer.pen.widthMm)}" stroke-linecap="round" stroke-linejoin="round">`,
+        ` fill="none" stroke="${esc(layer.ink.color)}" stroke-width="${r(layer.ink.widthMm)}" stroke-linecap="round" stroke-linejoin="round"` +
+        (layer.ink.mix === "multiply" ? ` style="mix-blend-mode:multiply"` : "") +
+        `>`,
     );
     for (const p of layer.paths) {
       if (p.length === 0) continue;

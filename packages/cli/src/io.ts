@@ -1,11 +1,11 @@
 import { readFileSync, readdirSync } from "node:fs";
 import { basename, dirname, extname, join } from "node:path";
-import { imageFromRGBA, type Image } from "@plotlab/engine";
+import { imageFromRGBA, type RawImage } from "@plotlab/engine";
 import { PNG } from "pngjs";
 import jpeg from "jpeg-js";
 
 /** Decode a raster source file into an engine Image. PNG and JPEG for now. */
-export function readImage(path: string): Image {
+export function readImage(path: string): RawImage {
   const buf = readFileSync(path);
   const ext = extname(path).toLowerCase();
   if (ext === ".png") {

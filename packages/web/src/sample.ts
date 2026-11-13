@@ -1,7 +1,7 @@
-import { imageFromRGBA, type Image } from "@plotlab/engine";
+import { imageFromRGBA, type RawImage } from "@plotlab/engine";
 
 /** The Mona Lisa face crop (public domain), falling back to drawn text if it can't load. */
-export async function loadSample(): Promise<Image> {
+export async function loadSample(): Promise<RawImage> {
   try {
     const res = await fetch(`${import.meta.env.BASE_URL}sample-mona-lisa.jpg`);
     if (res.ok) return await decodeFile(new File([await res.blob()], "sample-mona-lisa.jpg"));
@@ -11,7 +11,7 @@ export async function loadSample(): Promise<Image> {
   return textSample();
 }
 
-function textSample(): Image {
+function textSample(): RawImage {
   const w = 900, h = 450;
   const c = new OffscreenCanvas(w, h);
   const g = c.getContext("2d")!;
@@ -28,7 +28,7 @@ function textSample(): Image {
   return imageFromRGBA(w, h, d.data);
 }
 
-export async function decodeFile(file: File): Promise<Image> {
+export async function decodeFile(file: File): Promise<RawImage> {
   const bmp = await createImageBitmap(file);
   const c = new OffscreenCanvas(bmp.width, bmp.height);
   const g = c.getContext("2d")!;

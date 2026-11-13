@@ -1,23 +1,35 @@
 import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
-import { defaultParams, type Image, type Layers } from "@plotlab/engine";
-import { allSteps, centerline, plot, threshold } from "../src/index.ts";
+import { applyStep, defaultParams, type Frame, type StageDataOf, type StageKind, type StepDefinition, type Image, type Ink, type Layers, type StepContext } from "@plotlab/engine";
+import { allSteps, centerline, order, threshold } from "../src/index.ts";
 import { otsuLevel } from "../src/threshold/index.ts";
-import { orderPaths } from "../src/plot/index.ts";
 import { generate } from "../scripts/gen-help.ts";
 
-const ctx = { paper: { widthMm: 100, heightMm: 100 }, pens: [{ id: "k", widthMm: 0.5, color: "#000" }], machine: "generic" };
+const ink: Ink = { id: "k", name: "k", color: "#000", mix: "multiply", widthMm: 0.5 };
+const ctx: StepContext = {
+  paper: { widthMm: 100, heightMm: 100 },
+  target: { kind: "plotter" },
+  inks: [ink],
+  inkFor: () => ink,
+  passOrder: "light-to-dark",
+};
+/** Run a step through the engine (whole-stage or per layer). */
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+const apply = async <O extends StageKind>(def: StepDefinition<any, O, any>, input: unknown, params: unknown, c: StepContext) =>
+  (await applyStep(def, input as never, { params: params as Record<string, unknown> }, c)) as StageDataOf<O>;
+/** 1 mm per pixel, starting at the paper origin, so pixel and mm coordinates match. */
+const frameFor = (w: number, h: number): Frame => ({ xMm: 0, yMm: 0, widthMm: w, heightMm: h });
 
 function gray(w: number, h: number, f: (x: number, y: number) => number): Image {
   const data = new Float32Array(w * h);
   for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) data[y * w + x] = f(x, y);
-  return { kind: "image", width: w, height: h, channels: 1, data, extent: { width: w, height: h } };
+  return { kind: "image", width: w, height: h, channels: 1, data, frame: frameFor(w, h) };
 }
 
 function maskLayers(w: number, h: number, f: (x: number, y: number) => boolean): Layers {
-  const mask = new Uint8Array(w * h);
-  for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) mask[y * w + x] = f(x, y) ? 1 : 0;
-  return { kind: "layers", extent: { width: w, height: h }, layers: [{ id: "l", name: "l", pen: "k", width: w, height: h, mask, levels: 2 }] };
+  const data = new Float32Array(w * h);
+  for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) data[y * w + x] = f(x, y) ? 1 : 0;
+  return { kind: "layers", width: w, height: h, frame: frameFor(w, h), layers: [{ id: "l", name: "l", values: { kind: "tone", data } }] };
 }
 
 describe("step contract", () => {
@@ -39,10 +51,12 @@ describe("step contract", () => {
 describe("threshold", () => {
   it("dark pixels become ink; invert flips", async () => {
     const img = gray(4, 1, (x) => x / 3);
-    const out = (await threshold.run(img, { mode: "fixed", level: 50, invert: false }, ctx)) as Layers;
-    expect([...out.layers[0]!.mask]).toEqual([1, 1, 0, 0]);
-    const inv = (await threshold.run(img, { mode: "fixed", level: 50, invert: true }, ctx)) as Layers;
-    expect([...inv.layers[0]!.mask]).toEqual([0, 0, 1, 1]);
+    const out = (await apply(threshold, img, { mode: "fixed", level: 50, invert: false }, ctx)) as Layers;
+    expect(out.layers[0]!.values.kind).toBe("tone");
+    expect([...out.layers[0]!.values.data]).toEqual([1, 1, 0, 0]);
+    expect(out.frame).toEqual(img.frame);
+    const inv = (await apply(threshold, img, { mode: "fixed", level: 50, invert: true }, ctx)) as Layers;
+    expect([...inv.layers[0]!.values.data]).toEqual([0, 0, 1, 1]);
   });
   it("otsu splits a bimodal image between the modes", () => {
     const lum = new Float32Array([...Array(50).fill(0.2), ...Array(50).fill(0.8)]);
@@ -54,14 +68,14 @@ describe("threshold", () => {
 
 describe("centerline", () => {
   it("a thick horizontal bar becomes one roughly straight stroke", async () => {
-    const geo = await centerline.run(maskLayers(40, 11, (x, y) => x >= 2 && x < 38 && y >= 3 && y < 8), defaultParams(centerline.params), ctx);
+    const geo = await apply(centerline, maskLayers(40, 11, (x, y) => x >= 2 && x < 38 && y >= 3 && y < 8), defaultParams(centerline.params), ctx);
     const feats = geo.layers[0]!.features.features;
     expect(feats).toHaveLength(1);
     const ys = feats[0]!.geometry.coordinates.map((c) => c[1]);
     for (const y of ys) expect(Math.abs(y - 5.5)).toBeLessThanOrEqual(1.5);
   });
   it("a ring becomes a closed loop", async () => {
-    const geo = await centerline.run(
+    const geo = await apply(centerline, 
       maskLayers(40, 40, (x, y) => { const r = Math.hypot(x - 20, y - 20); return r > 10 && r < 15; }),
       { minLength: 4, smoothing: 0 },
       ctx,
@@ -73,20 +87,31 @@ describe("centerline", () => {
   });
 });
 
-describe("plot", () => {
-  it("fits geometry inside the margin and estimates time", async () => {
-    const geo = await centerline.run(maskLayers(40, 11, (x, y) => x >= 2 && x < 38 && y >= 3 && y < 8), defaultParams(centerline.params), ctx);
-    const out = await plot.run(geo, { margin: 10, order: "nearest", allowReverse: true }, ctx);
-    for (const p of out.layers[0]!.paths) for (const [x, y] of p) {
-      expect(x).toBeGreaterThanOrEqual(10);
-      expect(x).toBeLessThanOrEqual(90);
-      expect(y).toBeGreaterThanOrEqual(10);
-      expect(y).toBeLessThanOrEqual(90);
+describe("centerline on paper", () => {
+  it("places strokes in paper mm through the frame", async () => {
+    const layers = maskLayers(40, 11, (x, y) => x >= 2 && x < 38 && y >= 3 && y < 8);
+    layers.frame = { xMm: 100, yMm: 50, widthMm: 20, heightMm: 5.5 }; // 0.5 mm per pixel
+    const geo = await apply(centerline, layers, { minLength: 2, smoothing: 0.2 }, ctx);
+    for (const [x, y] of geo.layers[0]!.features.features[0]!.geometry.coordinates) {
+      expect(x).toBeGreaterThanOrEqual(100);
+      expect(x).toBeLessThanOrEqual(120);
+      expect(Math.abs(y - 52.75)).toBeLessThanOrEqual(0.75);
     }
-    expect(out.timeEstimateS).toBeGreaterThan(0);
   });
-  it("nearest-first ordering reverses strokes when closer", () => {
-    const out = orderPaths([[[50, 0], [100, 0]], [[10, 0], [1, 0]]], true);
-    expect(out[0]).toEqual([[1, 0], [10, 0]]);
+  it("refuses category layers with a plain reason", async () => {
+    const layers: Layers = { ...maskLayers(4, 4, () => true) };
+    layers.layers = [{ id: "b", name: "Bands", values: { kind: "categories", data: new Uint16Array(16), count: 3 } }];
+    await expect(async () => apply(centerline, layers, defaultParams(centerline.params), ctx)).rejects.toThrow(/holds categories/);
   });
+});
+
+describe("order", () => {
+  it("returns an ordered plot with the layer's ink", async () => {
+    const geo = await apply(centerline, maskLayers(40, 11, (x, y) => x >= 2 && x < 38 && y >= 3 && y < 8), defaultParams(centerline.params), ctx);
+    const out = await apply(order, geo, { method: "nearest", allowReverse: true }, ctx);
+    expect(out.ordered).toBe(true);
+    expect(out.layers[0]!.ink).toEqual(ink);
+    expect(out.layers[0]!.paths.length).toBe(geo.layers[0]!.features.features.length);
+  });
+
 });

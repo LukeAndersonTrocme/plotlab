@@ -25,7 +25,7 @@ still to be argued over with Nick. Change a term here first, then rename it ever
 | **Fill** | Strokes that cover a shape's area (hatch, halftone, pattern) | fill | area coverage |
 | **Ink** | A layer's colour, mix mode (multiply/normal) and width | ink, colour | render style |
 | **Pen** | Plotter wording for an ink with a physical width | marker, pen | stroke width parameter |
-| **Plot** | Geometry on paper in mm, ordered, with pen-up travel | the print, the file for the machine | path / job |
+| **Plot** | Lines on paper in mm, one pass per ink, in pass order | the print, the file for the machine | path / job |
 | **Travel** | Pen-up moves between strokes | | TSP edges |
 | **Time estimate** | Predicted plot duration from the machine profile | how long it'll take (and cost) | runtime estimate |
 | **Machine profile** | Description of a plotter: bed, speeds, protocol | the machine settings | device config |
@@ -51,7 +51,12 @@ still to be argued over with Nick. Change a term here first, then rename it ever
 | Term | Means |
 |---|---|
 | **Stage data** | The typed value passed between steps: `Image`, `Layers`, `Geometry` or `Plot` (`packages/engine/src/types.ts`). |
-| **Source units** | *(Being removed in M0, ADR 0005.)* Coordinates in the original Source's pixels. |
+| **Frame** | Where a raster sits on the paper, in mm. Pixel → mm goes through it (`pxToMm`). |
+| **Placed source** | The source after layout and resampling to the working resolution: what step 1 receives. |
+| **1-bit tone** | A tone layer whose values are only 0 or 1 (what Threshold makes). |
+| **Raster layers** (UI: "not lines yet") | Layers whose chain stopped before becoming lines; they ride along to the end (`rasterLayers`). |
+| **Pass** | One ink's strokes in a plot; passes are separated by pen changes. |
+| **On-demand step** | A slow step (e.g. Stroke order) that runs when you press Run, not on every change. |
 | **Proxy** | A downscaled copy of the Source used while a slider is being dragged. |
 | **Step contract** | A step = `run` function + param declarations + `help.md` + tests (`defineStep`). |
 | **Cost** | A step's `live` / `on-demand` hint for the UI. |

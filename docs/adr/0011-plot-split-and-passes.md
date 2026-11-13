@@ -14,3 +14,10 @@ and estimating.
   optional time budget comes later.
 - A multi-ink plot is a sequence of **passes** with pen-change pauses; layer order is
   adjustable (light → dark by default) and pen changes count toward the time.
+
+## Implementation notes (M0, 2026-11-11)
+- The step is `order` ("Stroke order", geometry → plot, on-demand): grid nearest-neighbour
+  plus windowed 2-opt. A recipe that ends at lines still yields a Plot in traced order
+  (`ordered: false`), so preview and estimate work before ordering runs.
+- Plot data has no times; `estimatePlot(plot, machine)` gives per-pass time plus pen changes.
+- Passes default to light → dark by ink luminance; `passOrder` in the recipe overrides.

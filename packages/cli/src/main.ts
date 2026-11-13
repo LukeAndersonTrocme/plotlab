@@ -1,7 +1,8 @@
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { basename, extname, join } from "node:path";
 import { parseArgs } from "node:util";
-import { loadRecipe, Pipeline, plotToSvg, RecipeError, type Plot, type StepDefinition } from "@plotlab/engine";
+import { loadRecipe, Pipeline, plotToSvg, RecipeError, showsTime, StepError, type StepDefinition } from "@plotlab/engine";
+import { estimatePlot, getMachine } from "@plotlab/machines";
 import { createRegistry } from "@plotlab/steps";
 import { expandInput, readImage } from "./io.ts";
 
@@ -19,10 +20,12 @@ const fmtTime = (s: number) => {
 };
 
 function describe(def: StepDefinition): string {
-  const lines = [`${def.id} (v${def.version}): ${def.title}`, `  ${def.summary}`, `  ${def.input} → ${def.output}, ${def.cost}`, "", "Parameters:"];
+  const perLayer = def.runLayer ? `, per layer (${(def.accepts ?? ["tone", "categories"]).join(" or ")})` : "";
+  const lines = [`${def.id} (v${def.version}): ${def.title}`, `  ${def.summary}`, `  ${def.input} → ${def.output}, ${def.cost}${perLayer}`, "", "Parameters:"];
+  if (def.runLayer) lines.splice(3, 0, `  In a recipe: "layers": ["id", …] picks layers; "layerParams": { "id": { … } } overrides settings per layer.`);
   for (const [k, d] of Object.entries(def.params)) {
     let range = "";
-    if (d.type === "number") range = `${d.min}..${d.max}${d.unit ? ` ${d.unit}` : ""}`;
+    if (d.type === "number") range = `${d.seed ? "seed " : ""}${d.min}..${d.max}${d.unit ? ` ${d.unit}` : ""}`;
     if (d.type === "enum") range = d.options.map((o) => o.value).join(" | ");
     if (d.type === "boolean") range = "true | false";
     const cond = d.visibleWhen ? `  (only when ${d.visibleWhen.param} = ${d.visibleWhen.equals.join("/")})` : "";
@@ -51,12 +54,21 @@ async function run(args: string[]): Promise<number> {
   const pipeline = new Pipeline(registry);
   for (const file of inputs) {
     pipeline.reset();
-    const { output } = await pipeline.run(readImage(file), recipe, { sourceKey: file });
-    if (output.kind !== "plot") throw new Error(`recipe ends at ${output.kind}; only plot output is exported so far`);
+    const { output, plot, warnings: runWarnings } = await pipeline.run(readImage(file), recipe, { sourceKey: file });
+    for (const w of runWarnings) process.stderr.write(`warning: ${w}\n`);
+    if (!plot) throw new Error(`recipe ends at ${output.kind}; add a step that makes lines (e.g. centerline) to export SVG`);
     const stem = inputs.length > 1 ? basename(file, extname(file)) : "plot";
     const svgPath = join(values.out, `${stem}.svg`);
-    writeFileSync(svgPath, plotToSvg(output as Plot, { recipe }));
-    process.stdout.write(`${svgPath}  ~${fmtTime((output as Plot).timeEstimateS)}\n`);
+    writeFileSync(svgPath, plotToSvg(plot, { recipe }));
+    const strokes = plot.layers.reduce((n, l) => n + l.paths.length, 0);
+    let line = `${svgPath}  ${strokes} strokes`;
+    if (showsTime(recipe.target)) {
+      const e = estimatePlot(plot, getMachine(recipe.machine));
+      line += `  ~${fmtTime(e.totalS)}${plot.ordered ? "" : " (traced order)"}`;
+    }
+    const skipped = plot.rasterLayers?.layers.map((l) => l.name) ?? [];
+    if (skipped.length) line += `  (not lines yet, skipped: ${skipped.join(", ")})`;
+    process.stdout.write(line + "\n");
   }
   writeFileSync(join(values.out, "recipe.json"), JSON.stringify(recipe, null, 2) + "\n");
   return 0;
@@ -85,7 +97,7 @@ async function main(argv: string[]): Promise<number> {
 main(process.argv.slice(2)).then(
   (code) => process.exit(code),
   (e) => {
-    process.stderr.write(`error: ${e instanceof RecipeError ? e.message : e instanceof Error ? e.message : String(e)}\n`);
+    process.stderr.write(`error: ${e instanceof StepError ? `step ${e.index}: ${e.message}` : e instanceof RecipeError ? e.message : e instanceof Error ? e.message : String(e)}\n`);
     process.exit(1);
   },
 );

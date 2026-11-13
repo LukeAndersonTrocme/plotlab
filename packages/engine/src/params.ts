@@ -17,7 +17,9 @@ export interface NumberParam extends ParamBase {
   max: number;
   step?: number;
   default: number;
-  unit?: "mm" | "px" | "%" | "deg" | "source-units" | "";
+  unit?: "mm" | "px" | "%" | "deg" | "";
+  /** This number is a random seed (see `seedParam`); the UI adds a reroll button. */
+  seed?: true;
 }
 
 export interface BooleanParam extends ParamBase {

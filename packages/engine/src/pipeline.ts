@@ -1,6 +1,9 @@
+import { applyStep, describeLayers, type LayerInfo } from "./layers.ts";
+import { MAX_WORKING_SIDE, placeOnPaper, resample, workingSize } from "./layout.ts";
+import { inkFor, toPlot, workingMmPerPx } from "./project.ts";
 import type { Recipe } from "./recipe.ts";
 import type { StepContext, StepRegistry } from "./step.ts";
-import type { StageData } from "./types.ts";
+import type { Image, Plot, RawImage, StageData } from "./types.ts";
 
 export interface StepResult {
   index: number;
@@ -8,60 +11,128 @@ export interface StepResult {
   output: StageData;
   ms: number;
   cached: boolean;
+  /** The layers in this step's output (for selectors and ink assignment). */
+  layers: LayerInfo[];
+}
+
+export interface RunOptions {
+  sourceKey?: string;
+  /** Proxy runs: cap the working raster's long side (e.g. 400 while dragging). */
+  maxSidePx?: number;
+  onStep?: (r: StepResult) => void;
+  /**
+   * false = stop before an on-demand step whose cached output is stale (the app shows a
+   * Run button instead). Default true: the CLI and tests run everything.
+   */
+  runOnDemand?: boolean;
+}
+
+export interface RunOutput {
+  output: StageData;
+  results: StepResult[];
+  /** The source as placed on paper at working resolution: what step 1 receives. */
+  placed: Image;
+  /** The plot to preview/export: the output if it is a plot, traced-order lines if it ends at lines, else null. */
+  plot: Plot | null;
+  /** Project-level warnings (e.g. working resolution capped). */
+  warnings: string[];
+  /** Indices of on-demand steps held back because they need re-running (empty or one entry). */
+  stale: number[];
+}
+
+export class StepError extends Error {
+  constructor(
+    public readonly index: number,
+    message: string,
+  ) {
+    super(message);
+  }
 }
 
 /**
- * Runs recipes and caches each step's output keyed on (upstream key, step, version, params),
- * so changing step N only recomputes steps N..end.
+ * Runs recipes. The source is first placed on paper at the working resolution, then each
+ * step's output is cached keyed on (upstream key, step, version, params), so changing
+ * step N only recomputes steps N..end.
  *
  * A Pipeline is tied to one source; make a new one (or call `reset`) for a new source.
  */
 export class Pipeline {
   private cache = new Map<number, { key: string; output: StageData }>();
+  private placed: { key: string; image: Image } | null = null;
 
   constructor(private registry: StepRegistry) {}
 
   reset(): void {
     this.cache.clear();
+    this.placed = null;
   }
 
-  async run(
-    source: StageData,
-    recipe: Recipe,
-    opts: { sourceKey?: string; onStep?: (r: StepResult) => void } = {},
-  ): Promise<{ output: StageData; results: StepResult[] }> {
+  private place(source: RawImage, recipe: Recipe, opts: RunOptions): { image: Image; key: string; warnings: string[] } {
+    const { frame, crop } = placeOnPaper(source, recipe.paper, recipe.layout);
+    const mmpp = workingMmPerPx(recipe);
+    const full = workingSize(frame, crop, mmpp);
+    let size = full;
+    if (opts.maxSidePx) {
+      const proxy = workingSize(frame, crop, mmpp, Math.min(opts.maxSidePx, MAX_WORKING_SIDE));
+      if (proxy.width < size.width) size = proxy;
+    }
+    const key = JSON.stringify([opts.sourceKey ?? "source", frame, crop, size.width, size.height]);
+    if (this.placed?.key !== key) {
+      const data = resample(source, crop, size.width, size.height);
+      this.placed = { key, image: { kind: "image", width: size.width, height: size.height, channels: source.channels, data, frame } };
+    }
+    return { image: this.placed.image, key, warnings: full.warnings };
+  }
+
+  async run(source: RawImage, recipe: Recipe, opts: RunOptions = {}): Promise<RunOutput> {
+    if (recipe.input !== "image") throw new Error(`sources entering at "${recipe.input}" aren't supported yet`);
     const ctx: StepContext = {
       paper: recipe.paper,
-      pens: recipe.pens,
-      machine: recipe.machine,
+      target: recipe.target,
+      inks: recipe.inks,
+      inkFor: (id) => inkFor(recipe, id),
+      passOrder: recipe.passOrder,
     };
-    const project = JSON.stringify([recipe.paper, recipe.pens, recipe.machine]);
-    let key = `${opts.sourceKey ?? "source"}|${project}`;
-    let data = source;
+    const placed = this.place(source, recipe, opts);
+    const inkKey = JSON.stringify([recipe.inks, recipe.layerInks, recipe.passOrder]);
+    let key = `${placed.key}|${JSON.stringify(recipe.target)}`;
+    let data: StageData = placed.image;
     const results: StepResult[] = [];
+    const stale: number[] = [];
     for (const [index, rs] of recipe.steps.entries()) {
       if (rs.enabled === false) continue;
       const def = this.registry.get(rs.step);
-      if (!def) throw new Error(`unknown step "${rs.step}"`);
-      if (def.input !== data.kind) throw new Error(`${def.id} expects ${def.input} but receives ${data.kind}`);
-      key = `${key}>${def.id}@${def.version}${JSON.stringify(rs.params)}`;
+      if (!def) throw new StepError(index, `unknown step "${rs.step}"`);
+      if (def.input !== data.kind) throw new StepError(index, `${def.title} needs ${def.input} but receives ${data.kind}`);
+      key = `${key}>${def.id}@${def.version}${JSON.stringify([rs.params, rs.layers, rs.layerParams])}`;
+      if (def.output === "plot") key += inkKey;
       const hit = this.cache.get(index);
+      if (opts.runOnDemand === false && def.cost === "on-demand" && hit?.key !== key) {
+        stale.push(index);
+        break;
+      }
       const t0 = performance.now();
       let cached = false;
       if (hit && hit.key === key) {
         data = hit.output;
         cached = true;
       } else {
-        // Params were validated by loadRecipe; the registry erases their static type.
-        data = await def.run(data, rs.params as never, ctx);
+        try {
+          // Params were validated by loadRecipe; the registry erases their static type.
+          data = await applyStep(def, data, rs, ctx);
+        } catch (e) {
+          if (e instanceof StepError) throw e;
+          throw new StepError(index, e instanceof Error ? e.message : String(e));
+        }
         this.cache.set(index, { key, output: data });
       }
-      const r: StepResult = { index, step: def.id, output: data, ms: performance.now() - t0, cached };
+      const r: StepResult = { index, step: def.id, output: data, ms: performance.now() - t0, cached, layers: describeLayers(data) };
       results.push(r);
       opts.onStep?.(r);
     }
     // Drop cache entries past the end of a shortened recipe.
     for (const k of this.cache.keys()) if (k >= recipe.steps.length) this.cache.delete(k);
-    return { output: data, results };
+    const plot = data.kind === "plot" ? data : data.kind === "geometry" ? toPlot(data, ctx) : null;
+    return { output: data, results, placed: placed.image, plot, warnings: placed.warnings, stale };
   }
 }

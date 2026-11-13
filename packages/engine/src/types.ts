@@ -2,59 +2,66 @@
  * Typed stage data. Every step declares which of these it consumes and produces.
  * See GLOSSARY.md for the canonical terms.
  *
- * Coordinates: rasters carry an `extent` in *source units* (the pixel size of the
- * original Source). A low-res proxy has fewer pixels but the same extent, so geometry
- * traced from a proxy lands in the same place as geometry traced at full resolution.
- * The Plot step maps source units onto paper in mm.
+ * Coordinates (ADR 0005): the source is placed on the paper before any step runs.
+ * Rasters carry a `Frame` (their rectangle on the paper, in mm); geometry and plots
+ * are in paper mm, top-left origin, y down. A low-res proxy has fewer pixels but the
+ * same frame, so it lands in the same place.
  */
 
-/** Width/height in source units (original Source pixels). */
-export interface Extent {
-  width: number;
-  height: number;
+export interface Paper {
+  widthMm: number;
+  heightMm: number;
 }
 
-/** A raster: a grid of pixels with one or more channels (the Z-axis). Values are 0..1. */
-export interface Image {
-  kind: "image";
+/** Where a raster sits on the paper, in mm. Pixel (0,0)'s top-left corner is at (xMm, yMm). */
+export interface Frame {
+  xMm: number;
+  yMm: number;
+  widthMm: number;
+  heightMm: number;
+}
+
+/** Decoded pixels before they are placed on paper (what file readers return). */
+export interface RawImage {
   width: number;
   height: number;
   channels: 1 | 3 | 4;
-  /** Row-major, interleaved channels, 0..1 (0 = black / no ink density). */
+  /** Row-major, interleaved channels, 0..1 (0 = black). */
   data: Float32Array;
-  extent: Extent;
 }
 
-/** A pen: a tool with a width (mm) and a color, assigned to a layer. */
-export interface Pen {
-  id: string;
-  widthMm: number;
-  color: string;
+/** A raster on the paper: a grid of pixels with one or more channels (the Z-axis). */
+export interface Image extends RawImage {
+  kind: "image";
+  frame: Frame;
 }
 
-/** One physical pen pass: a mask of where one pen goes. */
+/** A layer value is ink density (tone, 0..1) or a label (categories, 1..count; 0 = no ink). */
+export type LayerValueKind = "tone" | "categories";
+export type LayerValues =
+  | { kind: "tone"; data: Float32Array }
+  | { kind: "categories"; data: Uint16Array; count: number };
+
+/** One ink pass/plate (ADR 0009). The ink is assigned by the recipe's `layerInks`. */
 export interface Layer {
   id: string;
   name: string;
-  /** Pen id from the recipe's pens. */
-  pen: string;
-  width: number;
-  height: number;
-  /** Row-major, 1 value per pixel. 0 = no ink; >0 = ink (1-bit uses 0/1; few-level masks use 1..levels-1). */
-  mask: Uint8Array;
-  levels: number;
+  values: LayerValues;
 }
 
+/** Layers share one pixel grid laid over `frame`. */
 export interface Layers {
   kind: "layers";
+  width: number;
+  height: number;
+  frame: Frame;
   layers: Layer[];
-  extent: Extent;
 }
 
-/** A position, GeoJSON order: [x, y]. */
+/** A position, GeoJSON order: [x, y], in paper mm. */
 export type Position = [number, number];
 
-/** GeoJSON-compatible line feature. Coordinates in source units (Geometry) or mm (Plot). */
+/** GeoJSON-compatible line feature. */
 export interface LineFeature {
   type: "Feature";
   geometry: { type: "LineString"; coordinates: Position[] };
@@ -64,41 +71,46 @@ export interface LineFeature {
 export interface GeometryLayer {
   id: string;
   name: string;
-  pen: string;
   /** GeoJSON FeatureCollection, so geometry can round-trip to R/QGIS. */
   features: { type: "FeatureCollection"; features: LineFeature[] };
 }
 
 export interface Geometry {
   kind: "geometry";
+  paper: Paper;
   layers: GeometryLayer[];
-  extent: Extent;
+  /** Layers whose chain stopped before becoming lines (ADR 0009). Digital targets still show them. */
+  rasterLayers?: Layers;
 }
 
-export interface Paper {
+/** A layer's colour, how it mixes with the layers under it, and its stroke width (ADR 0008). */
+export interface Ink {
+  id: string;
+  name: string;
+  color: string;
+  mix: "multiply" | "normal";
   widthMm: number;
-  heightMm: number;
 }
 
+/** One pass of the plot: one ink's ordered strokes. */
 export interface PlotLayer {
   id: string;
   name: string;
-  pen: Pen;
-  /** Ordered strokes in mm on the paper, top-left origin, y down. */
+  ink: Ink;
   paths: Position[][];
-  drawLengthMm: number;
-  travelLengthMm: number;
-  timeEstimateS: number;
 }
 
-/** Geometry placed on paper in mm, ordered, with pen-up travel and a time estimate. */
+/**
+ * Lines on paper, one layer per pass, in pass order. Machine-agnostic: time comes
+ * from `estimatePlot(plot, machine)` in @plotlab/machines.
+ */
 export interface Plot {
   kind: "plot";
   paper: Paper;
   layers: PlotLayer[];
-  /** Plot-wide totals, including pen changes between layers. */
-  timeEstimateS: number;
-  machine: string;
+  /** False while strokes are still in traced order (no Stroke order step yet). */
+  ordered: boolean;
+  rasterLayers?: Layers;
 }
 
 export type StageData = Image | Layers | Geometry | Plot;
