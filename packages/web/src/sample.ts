@@ -1,4 +1,4 @@
-import { imageFromRGBA, type RawImage } from "@plotlab/engine";
+import { decodeTiff, imageFromRGBA, isTiff, type RawImage } from "@plotlab/engine";
 
 /** The Mona Lisa face crop (public domain), falling back to drawn text if it can't load. */
 export async function loadSample(): Promise<RawImage> {
@@ -28,7 +28,14 @@ function textSample(): RawImage {
   return imageFromRGBA(w, h, d.data);
 }
 
-export async function decodeFile(file: File): Promise<RawImage> {
+/** PNG, JPEG, WebP… via the browser; TIFF (8/16-bit) via the engine, first page. */
+export async function decodeFile(file: File, warn: (m: string) => void = () => {}): Promise<RawImage> {
+  const head = new Uint8Array(await file.slice(0, 4).arrayBuffer());
+  if (isTiff(head)) {
+    const pages = decodeTiff(new Uint8Array(await file.arrayBuffer()));
+    if (pages.length > 1) warn(`${file.name} has ${pages.length} pages; using the first. Separations as layers come later.`);
+    return pages[0]!;
+  }
   const bmp = await createImageBitmap(file);
   const c = new OffscreenCanvas(bmp.width, bmp.height);
   const g = c.getContext("2d")!;

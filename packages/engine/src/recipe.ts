@@ -92,11 +92,18 @@ function readTarget(v: unknown, errors: RecipeWarning[]): Target {
     errors.push({ index: -1, message: `target.kind must be one of ${TARGET_KINDS.join(", ")}` });
     return { kind: "plotter" };
   }
-  if (t.kind === "raster" || t.kind === "print") {
-    const dpi = typeof t.dpi === "number" && t.dpi > 0 ? t.dpi : 300;
-    return { kind: t.kind, dpi };
+  const dpi = typeof t.dpi === "number" && t.dpi > 0 ? t.dpi : 300;
+  const fin = { ...(t.mirror === true ? { mirror: true } : {}), ...(t.registration === true ? { registration: true } : {}) };
+  if (t.kind === "raster") return { kind: "raster", dpi };
+  if (t.kind === "print") {
+    const h = obj(t.halftone);
+    const angles: Record<string, number> = {};
+    for (const [k, a] of Object.entries(obj(h.angles))) if (typeof a === "number") angles[k] = a;
+    const halftone = t.halftone ? { lpi: typeof h.lpi === "number" && h.lpi > 0 ? h.lpi : 45, angles } : null;
+    return { kind: "print", dpi, mode: t.mode === "gray" ? "gray" : "bitmap", halftone, negative: t.negative === true, ...fin };
   }
-  return { kind: t.kind as "plotter" | "vector" };
+  if (t.kind === "plotter") return { kind: "plotter", ...fin };
+  return { kind: "vector" };
 }
 
 function readLayout(v: unknown, warnings: RecipeWarning[]): Layout {

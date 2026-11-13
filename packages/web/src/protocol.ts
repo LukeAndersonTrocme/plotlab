@@ -1,4 +1,4 @@
-import type { Frame, LayerInfo, Plot, RawImage, Recipe, StageKind } from "@plotlab/engine";
+import type { ExportFormat, Frame, LayerInfo, Plot, RawImage, Recipe, StageKind } from "@plotlab/engine";
 import type { PlotEstimate } from "@plotlab/machines";
 
 /** What to show in the view: a step's output (by index), the placed source, or the end result. */
@@ -33,7 +33,9 @@ export interface StepInfo {
 
 export type ToWorker =
   | { type: "source"; image: RawImage; key: string }
-  | { type: "run"; id: number; recipe: Recipe; proxy: boolean; inspect: InspectTarget; runOnDemand: boolean };
+  | { type: "run"; id: number; recipe: Recipe; proxy: boolean; inspect: InspectTarget; runOnDemand: boolean; proof: boolean }
+  /** Full-resolution run (on-demand steps included) → files for the target. */
+  | { type: "export"; id: number; recipe: Recipe; format: ExportFormat; stem: string };
 
 export type FromWorker =
   | {
@@ -52,5 +54,9 @@ export type FromWorker =
       rasterLayers: RasterView[];
       inspected: InspectView | null;
       underlay: RasterView | null;
+      /** The page as it will export (when asked for). */
+      proof: RasterView | null;
     }
+  | { type: "exported"; id: number; name: string; mime: string; data: Uint8Array | string; notes: string[] }
+  | { type: "export-error"; id: number; message: string }
   | { type: "error"; id: number; index?: number; message: string };

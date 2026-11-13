@@ -1,4 +1,4 @@
-import type { Plot, RawImage, Recipe } from "@plotlab/engine";
+import type { ExportFormat, Plot, RawImage, Recipe } from "@plotlab/engine";
 import type { PlotEstimate } from "@plotlab/machines";
 import type { FromWorker, InspectTarget, InspectView, RasterView, StepInfo, ToWorker } from "./protocol.ts";
 
@@ -12,6 +12,7 @@ export interface RunState {
   rasterLayers: RasterView[];
   inspected: InspectView | null;
   underlay: RasterView | null;
+  proof: RasterView | null;
   /** True while the preview shows a low-res proxy result (full resolution comes on release). */
   refining: boolean;
   busy: boolean;
@@ -28,6 +29,7 @@ export const EMPTY_RUN: RunState = {
   rasterLayers: [],
   inspected: null,
   underlay: null,
+  proof: null,
   refining: false,
   busy: false,
   error: null,
@@ -44,6 +46,9 @@ export class Runner {
   private pending: { recipe: Recipe; proxy: boolean; runOnDemand: boolean } | null = null;
   /** Which stage the view shows; sent with every run. */
   inspect: InspectTarget = null;
+  /** Also render the page as it will export. */
+  proof = false;
+  private exports = new Map<number, { resolve: (f: { name: string; mime: string; data: Uint8Array | string; notes: string[] }) => void; reject: (e: Error) => void }>();
   state: RunState = EMPTY_RUN;
 
   constructor(private onChange: (s: RunState) => void) {
@@ -72,12 +77,29 @@ export class Runner {
     this.pending = null;
     const id = this.nextId++;
     this.inFlight = id;
-    const msg: ToWorker = { type: "run", id, recipe, proxy, inspect: this.inspect, runOnDemand };
+    const msg: ToWorker = { type: "run", id, recipe, proxy, inspect: this.inspect, runOnDemand, proof: this.proof };
     this.worker.postMessage(msg);
     this.set({ busy: true });
   }
 
+  /** Export files for the target. Runs after any run in flight (the worker handles messages in order). */
+  export(recipe: Recipe, format: ExportFormat, stem: string): Promise<{ name: string; mime: string; data: Uint8Array | string; notes: string[] }> {
+    const id = this.nextId++;
+    const msg: ToWorker = { type: "export", id, recipe, format, stem };
+    return new Promise((resolve, reject) => {
+      this.exports.set(id, { resolve, reject });
+      this.worker.postMessage(msg);
+    });
+  }
+
   private receive(m: FromWorker): void {
+    if (m.type === "exported" || m.type === "export-error") {
+      const p = this.exports.get(m.id);
+      this.exports.delete(m.id);
+      if (m.type === "exported") p?.resolve(m);
+      else p?.reject(new Error(m.message));
+      return;
+    }
     this.inFlight = null;
     if (m.type === "error") this.set({ error: { message: m.message, index: m.index }, busy: false });
     else {

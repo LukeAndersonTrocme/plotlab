@@ -27,7 +27,8 @@ function Raster(props: { view: RasterView; opacity?: number }) {
       height={v.frame.heightMm}
       preserveAspectRatio="none"
       opacity={props.opacity ?? 1}
-      style={{ mixBlendMode: v.mix === "multiply" ? "multiply" : "normal", imageRendering: "pixelated" }}
+      // Working pixels stay crisp; the export proof is finer than the screen, so it is smoothed.
+      style={{ mixBlendMode: v.mix === "multiply" ? "multiply" : "normal", imageRendering: v.id === "proof" ? "auto" : "pixelated" }}
     />
   );
 }
