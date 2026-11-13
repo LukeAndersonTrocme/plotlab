@@ -41,17 +41,19 @@ describe("orderPaths", () => {
     expect(orderPaths([], { allowReverse: true, improve: true })).toEqual([]);
     expect(orderPaths([[]], { allowReverse: true, improve: true })).toEqual([]);
   });
+  // Budgets are loose: shared CI runners are 2-3x slower than a laptop. They only need to
+  // catch the old quadratic behaviour (26 s), not small slowdowns.
   it("orders 50 000 strokes in well under the old 26 s", () => {
     const big = randomStrokes(50000, 300, 7);
     const t0 = performance.now();
     orderPaths(big, { allowReverse: true, improve: true });
-    expect(performance.now() - t0).toBeLessThan(1500);
+    expect(performance.now() - t0).toBeLessThan(5000);
   });
   it("stays fast when every stroke lies on almost the same line", () => {
     const flat = Array.from({ length: 20000 }, (_, i) => [[i * 0.01, (i % 7) * 1e-10], [i * 0.01 + 0.005, (i % 5) * 1e-10]] as Position[]);
     const t0 = performance.now();
     expect(orderPaths(flat, { allowReverse: true, improve: true })).toHaveLength(20000);
-    expect(performance.now() - t0).toBeLessThan(1000);
+    expect(performance.now() - t0).toBeLessThan(4000);
   });
 });
 
