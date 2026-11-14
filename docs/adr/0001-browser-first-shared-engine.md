@@ -14,3 +14,4 @@ Web Worker in the browser. File decoding stays at the edges (canvas in web, pngj
 ## Consequences
 - Same recipe → same output in both places; golden tests run the engine in Node.
 - Anything too slow for JS later goes to WASM or an optional Python helper, not a fork.
+- Extended by ADR 0013 (desktop shell later) and ADR 0014 (storage interface, progressive enhancement).

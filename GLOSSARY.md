@@ -35,7 +35,13 @@ still to be argued over with Nick. Change a term here first, then rename it ever
 | **Machine profile** | Description of a plotter: bed, speeds, protocol | the machine settings | device config |
 | **Step** | One operation in the pipeline, with its own parameters | a trick, a move | function |
 | **Recipe** | The ordered steps + all parameter values, as JSON | the settings, the process | pipeline config |
-| **Variant** | A named snapshot of a recipe within a project | a version | branch / parameter set |
+| **Checkpoint** | A saved moment while exploring: recipe + thumbnail + optional name/note, tied to its source. Saved by hand; clicking one restores it (undoable). Working name, open to Nick | a version, a save | snapshot / parameter set |
+| **Variant** | A randomized suggestion from Explore. Temporary; starring one keeps it as a checkpoint | a try, an option | random sample |
+| **Project** | One source with its recipe and checkpoints, stored as a project folder | a piece, a project | workspace |
+| **Bundle** | A project folder zipped into one file, for sharing or moving between devices | the file | archive |
+| **Library** | Full-screen view of all sources and their checkpoints, for browsing | the archive, my work | index |
+| **Reset** | Back to defaults, at three levels: one slider, one step, or the whole recipe (keeps the source) | start over | restore defaults |
+| **Experimental step** | A step still being worked out; badged in the UI, its params may change (old recipes warn, not break) | work in progress | unstable API |
 | **Stage** | UI grouping of steps by data type (Input, Image, Layers, Lines, Plot; provisional) | step in the process | pipeline phase |
 | **Output target** | Where the work ends up: plotter, digital raster, digital vector, print prep | the output | sink |
 | **Plate** | One ink's file for print prep: where that ink goes, 1-bit or gray | plate, separation, film, screen | per-ink raster mask |
@@ -54,6 +60,7 @@ still to be argued over with Nick. Change a term here first, then rename it ever
 - "Layer" vs "separation" vs "plate": Nick's preference?
 - Is "bitmap" 1-bit only, or any raster? (It varies in common usage. Pick one meaning.)
 - Mosaic vs color bitmap: confirm the term Nick uses.
+- "Checkpoint": working name (2026-11-13). Does Nick have a better word?
 
 ## Code-level terms
 
@@ -71,4 +78,6 @@ still to be argued over with Nick. Change a term here first, then rename it ever
 | **Proxy** | A downscaled copy of the Source used while a slider is being dragged. |
 | **Step contract** | A step = `run` function + param declarations + `help.md` + tests (`defineStep`). |
 | **Cost** | A step's `live` / `on-demand` hint for the UI. |
+| **Storage adapter** | One implementation of the storage interface (IndexedDB, connected folder, later desktop) (ADR 0014). |
+| **Project folder** | The on-disk layout of a project: `source`, `recipe.json`, `checkpoints/`, `README.md` (ADR 0014). |
 | **Golden test** | A recipe + fixture whose output is compared to a human-approved file in `golden/approved/`. |
