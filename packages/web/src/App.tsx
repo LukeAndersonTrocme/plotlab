@@ -6,6 +6,7 @@ import { HelpPanel } from "./Help.tsx";
 import { ProjectPanel } from "./ProjectPanel.tsx";
 import { EMPTY_RUN, Runner, type RunState } from "./runner.ts";
 import { decodeFile, loadSample } from "./sample.ts";
+import { canRedo, canUndo, commit, createHistory, preview, redo, undo, type History } from "./history.ts";
 import type { InspectTarget } from "./protocol.ts";
 import { StageView } from "./StageView.tsx";
 import { StepList } from "./StepList.tsx";
@@ -38,7 +39,8 @@ const fmtTime = (s: number) => {
 };
 
 export function App() {
-  const [recipe, setRecipe] = useState<Recipe>(loadSaved);
+  const [history, setHistory] = useState<History<Recipe>>(() => createHistory(loadSaved()));
+  const recipe = history.present;
   const [run, setRun] = useState<RunState>(EMPTY_RUN);
   const [live, setLive] = useState(true);
   const [dirty, setDirty] = useState(false);
@@ -70,8 +72,9 @@ export function App() {
     }
   }, [recipe]);
 
-  const apply = (next: Recipe, proxy: boolean, step?: AnyStep) => {
-    setRecipe(next);
+  const apply = (next: Recipe, proxy: boolean, _step?: AnyStep) => {
+    // A drag previews; releasing commits, so one drag is one Back step.
+    setHistory((h) => (proxy ? preview(h, next) : commit(h, next)));
     // On-demand steps' own settings wait for their Run button; the worker holds them back.
     if (!live) {
       setDirty(true);
@@ -79,6 +82,40 @@ export function App() {
     }
     runner.request(next, proxy);
   };
+
+  const travel = (move: typeof undo) => {
+    const h = move(history);
+    if (h === history) return;
+    setHistory(h);
+    setNotice(null);
+    if (live) runner.request(h.present, false);
+    else setDirty(true);
+  };
+  const back = () => travel(undo);
+  const forward = () => travel(redo);
+  const startOver = () => {
+    setDirty(false);
+    apply(defaultRecipe(), false);
+    setNotice("Reset to the default recipe (your image stays). Back undoes this.");
+  };
+
+  // ⌘Z / ⇧⌘Z (Ctrl on other systems). Text and number boxes keep their own undo.
+  const keys = useRef({ back, forward });
+  keys.current = { back, forward };
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (!(e.metaKey || e.ctrlKey) || e.altKey) return;
+      const t = e.target as HTMLElement | null;
+      if (t instanceof HTMLTextAreaElement || (t instanceof HTMLInputElement && (t.type === "text" || t.type === "number"))) return;
+      const k = e.key.toLowerCase();
+      if (k === "z" && !e.shiftKey) keys.current.back();
+      else if ((k === "z" && e.shiftKey) || k === "y") keys.current.forward();
+      else return;
+      e.preventDefault();
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, []);
 
   const [inspect, setInspect] = useState<InspectTarget>(null);
   const inspectStage = (t: InspectTarget) => {
@@ -161,6 +198,14 @@ export function App() {
     >
       <header>
         <strong className="brand">plotlab</strong>
+        <span className="history-btns">
+          <button onClick={back} disabled={!canUndo(history)} title="Back: undo the last change (⌘Z)" aria-label="Back">
+            ← Back
+          </button>
+          <button onClick={forward} disabled={!canRedo(history)} title="Forward: redo (⇧⌘Z)" aria-label="Forward">
+            Forward →
+          </button>
+        </span>
         <span className="spacer" />
         <label className="toggle" title="Live: recompute while you drag. Manual: press Update.">
           <input type="checkbox" checked={live} onChange={(e) => setLive(e.target.checked)} /> Live
@@ -176,6 +221,9 @@ export function App() {
             Update
           </button>
         )}
+        <button className="reset" onClick={startOver} title="Start over from the default recipe. Keeps your image. Back undoes it.">
+          ↺ Reset
+        </button>
       </header>
 
       <main>
@@ -305,14 +353,6 @@ export function App() {
             ))}
             <button onClick={() => download(`${stem}.recipe.json`, JSON.stringify(recipe, null, 2), "application/json")}>Download recipe</button>
             <button onClick={() => void navigator.clipboard?.writeText(cli).then(() => setNotice(`Copied: ${cli}`))}>Copy as CLI command</button>
-            <button
-              onClick={() => {
-                setDirty(false);
-                apply(defaultRecipe(), false);
-              }}
-            >
-              Reset
-            </button>
           </div>
           <details className="timings">
             <summary>Step timings</summary>

@@ -16,3 +16,4 @@ export * from "./layers.ts";
 export * from "./chain.ts";
 export * from "./render.ts";
 export * from "./features.ts";
+export * from "./defaults.ts";
