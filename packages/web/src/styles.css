@@ -28,6 +28,8 @@ main { display: flex; flex: 1; min-height: 0; }
 .card { background: var(--panel); border: 1px solid var(--line); border-radius: 8px; padding: 10px 12px; margin-bottom: 8px; }
 .card-head { display: flex; justify-content: space-between; align-items: center; }
 .card .title { font-weight: 600; }
+.badge { font-size: 11px; padding: 1px 6px; border-radius: 8px; border: 1px solid currentColor; white-space: nowrap; }
+.badge.experimental { color: #a06a00; }
 .summary { color: var(--muted); font-size: 13px; margin: 4px 0 8px; }
 .help-btn { width: 26px; height: 26px; padding: 0; border-radius: 50%; }
 .param { margin: 8px 0; }

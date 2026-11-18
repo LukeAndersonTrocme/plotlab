@@ -209,7 +209,9 @@ export function loadRecipe(raw: unknown, registry: StepRegistry): { recipe: Reci
       } else {
         warnings.push({
           index,
-          message: `${def.id}: recipe was written for v${version}, running v${def.version}; output may differ`,
+          message: def.experimental
+            ? `${def.id} is experimental: recipe was written for v${version}, running v${def.version}; settings and output may differ`
+            : `${def.id}: recipe was written for v${version}, running v${def.version}; output may differ`,
         });
       }
       version = def.version;

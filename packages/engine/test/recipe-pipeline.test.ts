@@ -38,6 +38,18 @@ describe("loadRecipe", () => {
       expect(msgs).toMatch(/b expects image but receives layers/);
     }
   });
+  it("loads old recipes for an experimental step with a warning that names it experimental", () => {
+    const x = defineStep({
+      id: "x", version: 3, experimental: true, title: "X", summary: "", input: "image", output: "image", cost: "live", help: "",
+      params: { k: { type: "number", label: "k", help: "", min: 0, max: 10, default: 1 } },
+      run: (i) => i,
+    });
+    const { recipe, warnings } = loadRecipe({ ...base, steps: [{ step: "x", version: 1, params: { k: 2, gone: 1 } }] }, new StepRegistry([x]));
+    expect(recipe.steps[0]).toMatchObject({ step: "x", version: 3, params: { k: 2 } });
+    const msgs = warnings.map((w) => w.message).join("\n");
+    expect(msgs).toMatch(/x is experimental/);
+    expect(msgs).toMatch(/unknown parameter "gone"/);
+  });
   it("rejects recipes from a newer schema", () => {
     expect(() => loadRecipe({ ...base, schemaVersion: 99, steps: [] }, makeRegistry())).toThrow(/newer/);
   });
