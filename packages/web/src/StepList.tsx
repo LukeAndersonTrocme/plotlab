@@ -190,7 +190,7 @@ export function StepList(props: {
         onChange={(e) => {
           const p = presets.find((x) => x.id === e.target.value);
           if (p && (recipe.steps.length === 0 || window.confirm(`Replace your steps with "${p.title}"?`))) {
-            props.onChange({ ...recipe, steps: presetSteps(p.id) }, false);
+            props.onChange({ ...recipe, steps: presetSteps(p.id), ...(p.target ? { target: structuredClone(p.target) } : {}) }, false);
           }
         }}
       >

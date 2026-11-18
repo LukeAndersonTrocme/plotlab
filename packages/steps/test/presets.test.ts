@@ -4,9 +4,10 @@ import { loadRecipe } from "@plotlab/engine";
 import { createRegistry, presets, presetSteps } from "../src/index.ts";
 
 const casesDir = new URL("../../../golden/cases/", import.meta.url);
-const goldenPresets = readdirSync(casesDir)
+const goldenCases = readdirSync(casesDir)
   .filter((f) => f.endsWith(".recipe.json"))
-  .map((f) => JSON.parse(readFileSync(new URL(f, casesDir), "utf8")).preset as string | undefined);
+  .map((f) => JSON.parse(readFileSync(new URL(f, casesDir), "utf8")) as { preset?: string; target?: { kind: string } });
+const goldenPresets = goldenCases.map((c) => c.preset);
 
 describe("presets", () => {
   for (const p of presets) {
@@ -18,6 +19,12 @@ describe("presets", () => {
       expect(warnings).toEqual([]);
     });
     it(`${p.id} is proven by a golden case`, () => expect(goldenPresets).toContain(p.id));
+    if (p.target) {
+      it(`${p.id}'s golden case uses its ${p.target.kind} target`, () => {
+        const kinds = goldenCases.filter((c) => c.preset === p.id).map((c) => c.target?.kind ?? "plotter");
+        expect(kinds).toContain(p.target!.kind);
+      });
+    }
   }
   it("presetSteps returns a fresh copy", () => {
     const a = presetSteps("topo-hatch");

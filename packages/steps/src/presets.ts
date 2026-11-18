@@ -1,6 +1,7 @@
-import { defaultParams, type AnyStep, type RecipeStep } from "@plotlab/engine";
+import { defaultParams, type AnyStep, type RecipeStep, type Target } from "@plotlab/engine";
 import { bands } from "./bands/index.ts";
 import { centerline } from "./centerline/index.ts";
+import { dither } from "./dither/index.ts";
 import { fill } from "./fill/index.ts";
 import { levels } from "./levels/index.ts";
 import { order } from "./order/index.ts";
@@ -17,6 +18,8 @@ export interface Preset {
   title: string;
   summary: string;
   steps: RecipeStep[];
+  /** The output this preset is made for, when it isn't the plotter (e.g. a print-only look). */
+  target?: Target;
 }
 
 const s = (def: AnyStep, params: Record<string, unknown> = {}): RecipeStep => ({
@@ -69,6 +72,13 @@ export const presets: Preset[] = [
       s(fill, { mapping: "cycle", minSpacing: 0.7, maxSpacing: 2.2 }),
       s(order),
     ],
+  },
+  {
+    id: "atkinson-print",
+    title: "Atkinson print",
+    summary: "One ink of crisp 1-bit dots in the early-Macintosh style, for print or screen. Not plottable yet.",
+    steps: [s(dither, { method: "atkinson", dotMm: 0.4 })],
+    target: { kind: "print", dpi: 300, mode: "bitmap", halftone: null, negative: false },
   },
 ];
 
