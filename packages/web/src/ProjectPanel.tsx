@@ -42,7 +42,7 @@ export function ProjectPanel(props: {
     const fin = finishing(r.target);
     const keep = { ...(fin.mirror ? { mirror: true } : {}), ...(fin.registration ? { registration: true } : {}) };
     const t: Target =
-      kind === "raster" ? { kind, dpi } : kind === "print" ? { kind, dpi: Math.max(dpi, 600), ...DEFAULT_PRINT, ...keep } : kind === "plotter" ? { kind, ...keep } : { kind };
+      kind === "raster" ? { kind, dpi } : kind === "print" ? { kind, dpi: Math.max(dpi, 600), ...DEFAULT_PRINT, ...keep } : kind === "plotter" ? { kind, ...keep, ...(r.target.kind === "plotter" && r.target.budgetMin ? { budgetMin: r.target.budgetMin } : {}) } : { kind };
     set({ target: t });
   };
   const paperName =
@@ -126,6 +126,30 @@ export function ProjectPanel(props: {
               <input type="checkbox" checked={r.target.negative} onChange={(e) => set({ target: { ...r.target, negative: e.target.checked } as Target })} /> Film negative
             </label>
           </>
+        )}
+        {r.target.kind === "plotter" && (
+          <div className="param">
+            <label htmlFor="time-budget" title="Optional. The time readout warns when the estimate goes over, and says what to change. Nothing is changed for you.">
+              Time budget
+            </label>
+            <div className="param-row">
+              <input
+                id="time-budget"
+                className="num"
+                type="number"
+                min={0.5}
+                step={0.5}
+                placeholder="none"
+                value={r.target.budgetMin ?? ""}
+                onChange={(e) => {
+                  const { budgetMin: _old, ...rest } = r.target as Extract<Target, { kind: "plotter" }>;
+                  const n = Number(e.target.value);
+                  set({ target: e.target.value !== "" && n > 0 ? { ...rest, budgetMin: n } : rest });
+                }}
+              />
+              <span className="unit">min</span>
+            </div>
+          </div>
         )}
         {(r.target.kind === "plotter" || r.target.kind === "print") && (
           <>

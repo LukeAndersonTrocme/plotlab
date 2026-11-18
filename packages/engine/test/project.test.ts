@@ -58,3 +58,27 @@ describe("recipe v2 validation", () => {
     expect(warnings[0]?.message).toMatch(/nope/);
   });
 });
+
+describe("time budget (plotter targets)", () => {
+  const load = (target: unknown) =>
+    loadRecipe({ schemaVersion: 2, paper: { widthMm: 100, heightMm: 100 }, inks: [ink("k", "#000000", 0.3)], steps: [], target }, new StepRegistry());
+
+  it("round-trips a budget in minutes", () => {
+    const { recipe, warnings } = load({ kind: "plotter", budgetMin: 5 });
+    expect(recipe.target).toEqual({ kind: "plotter", budgetMin: 5 });
+    expect(warnings).toEqual([]);
+    expect(load(JSON.parse(JSON.stringify(recipe.target))).recipe.target).toEqual(recipe.target);
+  });
+  it("absent means no budget", () => {
+    expect("budgetMin" in load({ kind: "plotter" }).recipe.target).toBe(false);
+  });
+  it.each([0, -3, "5", Number.NaN, null])("drops an invalid budget (%s) with a warning", (budgetMin) => {
+    const { recipe, warnings } = load({ kind: "plotter", budgetMin });
+    expect("budgetMin" in recipe.target).toBe(false);
+    expect(warnings.map((w) => w.message).join("\n")).toMatch(/budgetMin/);
+  });
+  it("ignores a budget on non-plotter targets", () => {
+    expect("budgetMin" in load({ kind: "vector", budgetMin: 5 }).recipe.target).toBe(false);
+    expect("budgetMin" in load({ kind: "raster", dpi: 300, budgetMin: 5 }).recipe.target).toBe(false);
+  });
+});

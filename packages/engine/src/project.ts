@@ -7,10 +7,15 @@ import type { Geometry, Ink, Paper, Plot, Position } from "./types.ts";
  * inks (ADR 0008) and passes (ADR 0011).
  */
 export type Target =
-  | ({ kind: "plotter" } & Partial<Finishing>)
+  | ({ kind: "plotter" } & Partial<Finishing> & PlotterOptions)
   | { kind: "vector" }
   | { kind: "raster"; dpi: number }
   | ({ kind: "print"; dpi: number } & PrintOptions & Partial<Finishing>);
+
+export interface PlotterOptions {
+  /** Time budget in minutes ("under 5 min"); absent = none. Advisory: the time readout warns when over. */
+  budgetMin?: number;
+}
 
 /** Plate finishing shared by print prep and plotter output (ADR 0007). */
 export interface Finishing {
