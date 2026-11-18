@@ -31,7 +31,17 @@ TIFF including 16-bit.
 Web app: `pnpm dev` and open the printed URL (deployed to GitHub Pages from `main`).
 Drop an image (or a `recipe.json`) on the window.
 
-CLI:
+CLI: in this repo, `pnpm plotlab …` runs the TypeScript source directly (through tsx). To
+get a standalone command, build and pack it; the tarball is a single bundled file with no
+dependencies, and needs Node 20+:
+
+```sh
+pnpm --filter @plotlab/cli build   # writes packages/cli/dist/ (also runs on pack)
+cd packages/cli && npm pack        # makes a .tgz you can install anywhere:
+npm install -g ./*.tgz             # or `npm i ./*.tgz` in a project, then `npx <command>`
+```
+
+The command name is the `bin` entry in `packages/cli/package.json`. Examples:
 
 ```sh
 pnpm plotlab steps list

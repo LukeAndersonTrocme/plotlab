@@ -15,6 +15,10 @@ jobs:
       - run: pnpm install --frozen-lockfile
       - run: pnpm typecheck
       - run: pnpm test
+      - name: Build the CLI bundle and run it
+        run: |
+          pnpm --filter @plotlab/cli build
+          node "packages/cli/$(node -p "Object.values(require('./packages/cli/package.json').bin)[0]")" steps list
       - name: Upload received golden output on failure
         if: failure()
         uses: actions/upload-artifact@v4
