@@ -1,10 +1,10 @@
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { basename, extname, join } from "node:path";
 import { parseArgs } from "node:util";
-import { exportFormats, exportOutput, loadRecipe, Pipeline, RecipeError, showsTime, StepError, type ExportFormat, type StepDefinition } from "@plotlab/engine";
+import { describeEntry, enterAt, exportFormats, exportOutput, loadRecipe, Pipeline, RecipeError, showsTime, sourceLabel, sourceStage, StepError, type ExportFormat, type StepDefinition } from "@plotlab/engine";
 import { estimatePlot, getMachine } from "@plotlab/machines";
 import { createRegistry } from "@plotlab/steps";
-import { expandInput, readImage } from "./io.ts";
+import { expandInput, INPUT_FORMATS, readSource } from "./io.ts";
 
 const USAGE = `plotlab: image → plotter / digital / print pipeline
 
@@ -13,6 +13,11 @@ Usage:
 
   -f picks the file type; the default is the recipe target's main one
   (plotter: svg, vector: svg, raster: png, print: plates = one TIFF per ink + proof).
+
+  Inputs: ${INPUT_FORMATS}. PNG, JPEG, WebP and single-page TIFF (8/16-bit) enter as an
+  image; a multi-page TIFF enters as layers (one per page, separations); SVG enters as
+  lines. Steps that belong before the entry stage are switched off, with a warning.
+
   plotlab steps list
   plotlab steps describe <step>
 `;
@@ -61,28 +66,37 @@ async function run(args: string[]): Promise<number> {
   const outDir = values.out;
   mkdirSync(outDir, { recursive: true });
   const pipeline = new Pipeline(registry);
+  let ran = recipe;
   for (const file of inputs) {
     pipeline.reset();
-    const { output, plot, warnings: runWarnings } = await pipeline.run(readImage(file, (m) => process.stderr.write(`warning: ${m}\n`)), recipe, { sourceKey: file });
+    const source = readSource(file, (m) => process.stderr.write(`warning: ${m}\n`));
+    const stage = sourceStage(source);
+    const entry = enterAt(recipe, stage, registry);
+    const note = describeEntry(sourceLabel(basename(file), source), stage, entry);
+    if (entry.issues.length) throw new Error(note!);
+    if (note) process.stderr.write(`warning: ${note}\n`);
+    ran = entry.recipe;
+    const { output, plot, warnings: runWarnings } = await pipeline.run(source, ran, { sourceKey: file });
     for (const w of runWarnings) process.stderr.write(`warning: ${w}\n`);
     const lineFormat = format === "svg" || format === "pdf";
-    if (!plot && lineFormat && recipe.target.kind === "plotter") throw new Error(`recipe ends at ${output.kind}; add a step that makes lines (e.g. centerline) to export for a plotter`);
+    if (!plot && lineFormat && ran.target.kind === "plotter") throw new Error(`recipe ends at ${output.kind}; add a step that makes lines (e.g. centerline) to export for a plotter`);
     const stem = inputs.length > 1 ? basename(file, extname(file)) : "plot";
-    const { files, notes } = exportOutput(output, plot, recipe, format, stem);
+    const { files, notes } = exportOutput(output, plot, ran, format, stem);
     for (const f of files) writeFileSync(join(outDir, f.name), f.data);
     let line = files.map((f) => join(outDir, f.name)).join(", ");
     if (plot) {
       const strokes = plot.layers.reduce((n, l) => n + l.paths.length, 0);
       line += `  ${strokes} strokes`;
-      if (showsTime(recipe.target)) {
-        const e = estimatePlot(plot, getMachine(recipe.machine));
+      if (showsTime(ran.target)) {
+        const e = estimatePlot(plot, getMachine(ran.machine));
         line += `  ~${fmtTime(e.totalS)}${plot.ordered ? "" : " (traced order)"}`;
       }
     }
     process.stdout.write(line + "\n");
     for (const n of notes) process.stderr.write(`note: ${n}\n`);
   }
-  writeFileSync(join(outDir, "recipe.json"), JSON.stringify(recipe, null, 2) + "\n");
+  // The recipe that ran (for mixed inputs, the last file's entry stage).
+  writeFileSync(join(outDir, "recipe.json"), JSON.stringify(ran, null, 2) + "\n");
   return 0;
 }
 

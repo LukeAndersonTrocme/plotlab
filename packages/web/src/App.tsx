@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { exportFormats, FORMAT_LABEL, loadRecipe, type AnyStep, type ExportFormat, type Recipe } from "@plotlab/engine";
+import { describeEntry, enterAt, exportFormats, FORMAT_LABEL, loadRecipe, sourceLabel, sourceStage, type AnyStep, type ExportFormat, type Recipe, type Source, type StageKind } from "@plotlab/engine";
 import { createRegistry } from "@plotlab/steps";
 import { defaultRecipe } from "./defaults.ts";
 import { HelpPanel } from "./Help.tsx";
@@ -53,12 +53,25 @@ export function App() {
   const runner = useMemo(() => new Runner(setRun), []);
   const recipeRef = useRef(recipe);
   recipeRef.current = recipe;
+  // Where the current source enters the chain (an SVG enters as lines, separations as layers).
+  const entry = useRef<{ stage: StageKind; label: string }>({ stage: "image", label: "the sample" });
+  /** Fit a recipe to the current source's entry stage; returns it and what to tell the person. */
+  const enter = (r: Recipe): { recipe: Recipe; note: string | null } => {
+    const e = enterAt(r, entry.current.stage, registry);
+    return { recipe: e.recipe, note: describeEntry(entry.current.label, entry.current.stage, e) };
+  };
+  const openSource = (src: Source, name: string, key: string, warnings: string[]) => {
+    entry.current = { stage: sourceStage(src), label: sourceLabel(name, src) };
+    runner.setSource(src, key);
+    const { recipe: r, note } = enter(recipeRef.current);
+    setRecipe(r);
+    runner.request(r, false);
+    const lines = [...warnings, ...(note ? [note] : [])];
+    setNotice(lines.length ? lines.join("\n") : null);
+  };
 
   useEffect(() => {
-    void loadSample().then((img) => {
-      runner.setSource(img, "sample");
-      runner.request(recipeRef.current, false);
-    });
+    void loadSample().then((src) => openSource(src, "the sample", "sample", []));
     return () => runner.dispose();
   }, [runner]);
 
@@ -91,8 +104,10 @@ export function App() {
   const loadFile = async (file: File) => {
     if (file.name.endsWith(".json")) {
       try {
-        const { recipe: r, warnings } = loadRecipe(JSON.parse(await file.text()), registry);
-        setNotice(warnings.length ? warnings.map((w) => w.message).join("\n") : `Loaded recipe ${file.name}`);
+        const { recipe: loaded, warnings } = loadRecipe(JSON.parse(await file.text()), registry);
+        const { recipe: r, note } = enter(loaded);
+        const lines = [...warnings.map((w) => w.message), ...(note ? [note] : [])];
+        setNotice(lines.length ? lines.join("\n") : `Loaded recipe ${file.name}`);
         apply(r, false);
       } catch (e) {
         setNotice(e instanceof Error ? e.message : String(e));
@@ -101,13 +116,11 @@ export function App() {
     }
     try {
       const warnings: string[] = [];
-      const img = await decodeFile(file, (m) => warnings.push(m));
+      const src = await decodeFile(file, (m) => warnings.push(m));
       setSourceName(file.name);
-      runner.setSource(img, `${file.name}:${file.size}:${file.lastModified}`);
-      runner.request(recipe, false);
-      setNotice(warnings.length ? warnings.join("\n") : null);
-    } catch {
-      setNotice(`Couldn't read ${file.name}. Try PNG, JPEG, WebP or TIFF.`);
+      openSource(src, file.name, `${file.name}:${file.size}:${file.lastModified}`, warnings);
+    } catch (e) {
+      setNotice(`Couldn't read ${file.name}${e instanceof Error && e.message ? `: ${e.message}` : ""}. Try PNG, JPEG, WebP, TIFF or SVG.`);
     }
   };
 
@@ -182,8 +195,8 @@ export function App() {
         <section className="panel">
           <div className="card">
             <label className="file">
-              <input type="file" accept="image/*,.json" onChange={(e) => e.target.files?.[0] && loadFile(e.target.files[0])} />
-              <span>{sourceName === "sample" ? "Open image or recipe…" : sourceName}</span>
+              <input type="file" accept="image/*,.png,.jpg,.jpeg,.webp,.tif,.tiff,.svg,.json" onChange={(e) => e.target.files?.[0] && loadFile(e.target.files[0])} />
+              <span>{sourceName === "sample" ? "Open image, SVG or recipe…" : sourceName}</span>
             </label>
           </div>
           <ProjectPanel
@@ -308,7 +321,7 @@ export function App() {
             <button
               onClick={() => {
                 setDirty(false);
-                apply(defaultRecipe(), false);
+                apply(enter(defaultRecipe()).recipe, false);
               }}
             >
               Reset

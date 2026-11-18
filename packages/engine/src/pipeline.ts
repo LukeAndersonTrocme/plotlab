@@ -1,9 +1,15 @@
+import { STAGE_WORDS } from "./chain.ts";
 import { applyStep, describeLayers, type LayerInfo } from "./layers.ts";
 import { MAX_WORKING_SIDE, placeOnPaper, resample, workingSize } from "./layout.ts";
 import { inkFor, toPlot, workingMmPerPx } from "./project.ts";
 import type { Recipe } from "./recipe.ts";
 import type { StepContext, StepRegistry } from "./step.ts";
-import type { Image, Plot, RawImage, StageData } from "./types.ts";
+import { sourceStage, type Geometry, type GeoFeature, type Image, type Layer, type Layers, type Plot, type Position, type RawGeometry, type RawImage, type Source, type StageData } from "./types.ts";
+
+/** A source as placed on the paper: what step 1 receives. */
+export type Placed = Image | Layers | Geometry;
+/** The placed form of a source type (a RawImage places as an Image, and so on). */
+export type PlacedOf<S extends Source> = S extends { kind: "layers" } ? Layers : S extends { kind: "geometry" } ? Geometry : Image;
 
 export interface StepResult {
   index: number;
@@ -27,11 +33,11 @@ export interface RunOptions {
   runOnDemand?: boolean;
 }
 
-export interface RunOutput {
+export interface RunOutput<P extends Placed = Placed> {
   output: StageData;
   results: StepResult[];
-  /** The source as placed on paper at working resolution: what step 1 receives. */
-  placed: Image;
+  /** The source as placed on paper (rasters at working resolution): what step 1 receives. */
+  placed: P;
   /** The plot to preview/export: the output if it is a plot, traced-order lines if it ends at lines, else null. */
   plot: Plot | null;
   /** Project-level warnings (e.g. working resolution capped). */
@@ -58,7 +64,7 @@ export class StepError extends Error {
  */
 export class Pipeline {
   private cache = new Map<number, { key: string; output: StageData }>();
-  private placed: { key: string; image: Image } | null = null;
+  private placed: { key: string; data: Placed } | null = null;
 
   constructor(private registry: StepRegistry) {}
 
@@ -67,8 +73,10 @@ export class Pipeline {
     this.placed = null;
   }
 
-  private place(source: RawImage, recipe: Recipe, opts: RunOptions): { image: Image; key: string; warnings: string[] } {
-    const { frame, crop } = placeOnPaper(source, recipe.paper, recipe.layout);
+  private place(source: Source, recipe: Recipe, opts: RunOptions): { data: Placed; key: string; warnings: string[] } {
+    if (sourceStage(source) === "geometry") return this.placeGeometry(source as RawGeometry, recipe, opts);
+    const src = source as Exclude<Source, RawGeometry>;
+    const { frame, crop } = placeOnPaper(src, recipe.paper, recipe.layout);
     const mmpp = workingMmPerPx(recipe);
     const full = workingSize(frame, crop, mmpp);
     let size = full;
@@ -78,14 +86,54 @@ export class Pipeline {
     }
     const key = JSON.stringify([opts.sourceKey ?? "source", frame, crop, size.width, size.height]);
     if (this.placed?.key !== key) {
-      const data = resample(source, crop, size.width, size.height);
-      this.placed = { key, image: { kind: "image", width: size.width, height: size.height, channels: source.channels, data, frame } };
+      const { width, height } = size;
+      let data: Placed;
+      if ("kind" in src && src.kind === "layers") {
+        const layers = src.layers.map((l): Layer => {
+          if (l.values.kind === "tone") return { ...l, values: { kind: "tone", data: resample({ width: src.width, height: src.height, channels: 1, data: l.values.data }, crop, width, height) } };
+          // Labels can't be averaged: take the nearest source pixel.
+          const out = new Uint16Array(width * height);
+          for (let y = 0; y < height; y++)
+            for (let x = 0; x < width; x++) {
+              const sx = Math.min(src.width - 1, Math.floor(crop.x + ((x + 0.5) * crop.w) / width));
+              const sy = Math.min(src.height - 1, Math.floor(crop.y + ((y + 0.5) * crop.h) / height));
+              out[y * width + x] = l.values.data[sy * src.width + sx]!;
+            }
+          return { ...l, values: { ...l.values, data: out } };
+        });
+        data = { kind: "layers", width, height, frame, layers };
+      } else {
+        const img = src as RawImage;
+        data = { kind: "image", width, height, channels: img.channels, data: resample(img, crop, width, height), frame };
+      }
+      this.placed = { key, data };
     }
-    return { image: this.placed.image, key, warnings: full.warnings };
+    return { data: this.placed.data, key, warnings: full.warnings };
   }
 
-  async run(source: RawImage, recipe: Recipe, opts: RunOptions = {}): Promise<RunOutput> {
-    if (recipe.input !== "image") throw new Error(`sources entering at "${recipe.input}" aren't supported yet`);
+  /** Lines are scaled into the frame like an image would be (ADR 0005); there is no working resolution. */
+  private placeGeometry(src: RawGeometry, recipe: Recipe, opts: RunOptions): { data: Placed; key: string; warnings: string[] } {
+    const { frame, crop } = placeOnPaper({ width: src.widthMm, height: src.heightMm }, recipe.paper, recipe.layout);
+    const key = JSON.stringify([opts.sourceKey ?? "source", "geometry", frame, crop]);
+    const warnings = crop.w < src.widthMm - 1e-9 || crop.h < src.heightMm - 1e-9 ? ["Fill crops images, but lines outside the frame aren't cut off yet: use Fit for SVG sources."] : [];
+    if (this.placed?.key !== key) {
+      const s = frame.widthMm / crop.w;
+      const at = (p: Position): Position => [frame.xMm + (p[0] - crop.x) * s, frame.yMm + (p[1] - crop.y) * s];
+      const move = (f: GeoFeature): GeoFeature =>
+        f.geometry.type === "LineString"
+          ? { ...f, geometry: { type: "LineString", coordinates: f.geometry.coordinates.map(at) } }
+          : { ...f, geometry: { type: "Polygon", coordinates: f.geometry.coordinates.map((r) => r.map(at)) } };
+      const layers = src.layers.map((l) => ({ ...l, features: { type: "FeatureCollection" as const, features: l.features.features.map(move) } }));
+      this.placed = { key, data: { kind: "geometry", paper: recipe.paper, layers } };
+    }
+    return { data: this.placed.data, key, warnings };
+  }
+
+  async run<S extends Source>(source: S, recipe: Recipe, opts: RunOptions = {}): Promise<RunOutput<PlacedOf<S>>> {
+    const stage = sourceStage(source);
+    if (recipe.input !== stage) {
+      throw new Error(`This source enters as ${STAGE_WORDS[stage]}, but the recipe starts at ${STAGE_WORDS[recipe.input]}. Set the recipe's "input" to "${stage}".`);
+    }
     const ctx: StepContext = {
       paper: recipe.paper,
       target: recipe.target,
@@ -96,7 +144,7 @@ export class Pipeline {
     const placed = this.place(source, recipe, opts);
     const inkKey = JSON.stringify([recipe.inks, recipe.layerInks, recipe.passOrder]);
     let key = `${placed.key}|${JSON.stringify(recipe.target)}`;
-    let data: StageData = placed.image;
+    let data: StageData = placed.data;
     const results: StepResult[] = [];
     const stale: number[] = [];
     for (const [index, rs] of recipe.steps.entries()) {
@@ -133,6 +181,6 @@ export class Pipeline {
     // Drop cache entries past the end of a shortened recipe.
     for (const k of this.cache.keys()) if (k >= recipe.steps.length) this.cache.delete(k);
     const plot = data.kind === "plot" ? data : data.kind === "geometry" ? toPlot(data, ctx) : null;
-    return { output: data, results, placed: placed.image, plot, warnings: placed.warnings, stale };
+    return { output: data, results, placed: placed.data as PlacedOf<S>, plot, warnings: placed.warnings, stale };
   }
 }

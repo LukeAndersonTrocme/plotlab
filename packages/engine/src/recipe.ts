@@ -25,7 +25,10 @@ export interface RecipeStep {
  */
 export interface Recipe {
   schemaVersion: number;
-  /** Which stage the source enters at. Only "image" is supported so far. */
+  /**
+   * Which stage the source enters at: "image" (photos, scans), "layers" (multi-page TIFF
+   * separations) or "geometry" (SVG). Set from the source when it is opened.
+   */
   input: StageKind;
   target: Target;
   paper: Paper;
@@ -40,6 +43,9 @@ export interface Recipe {
   machine: string;
   steps: RecipeStep[];
 }
+
+/** Stages a source can enter the chain at. */
+export const ENTRY_STAGES: StageKind[] = ["image", "layers", "geometry"];
 
 export interface RecipeWarning {
   /** Step index, or -1 for the recipe envelope. */
@@ -180,6 +186,7 @@ export function loadRecipe(raw: unknown, registry: StepRegistry): { recipe: Reci
     Array.isArray(r.passOrder) && r.passOrder.every((x) => typeof x === "string") ? (r.passOrder as string[]) : "light-to-dark";
   const workingMmPerPx = typeof r.workingMmPerPx === "number" && r.workingMmPerPx > 0 ? r.workingMmPerPx : null;
   const input = (r.input ?? "image") as StageKind;
+  if (!ENTRY_STAGES.includes(input)) errors.push({ index: -1, message: `input must be one of ${ENTRY_STAGES.join(", ")}` });
   const rawSteps = Array.isArray(r.steps) ? (r.steps as unknown[]) : [];
 
   const steps: RecipeStep[] = [];

@@ -61,7 +61,7 @@ export function StepList(props: {
   let kind: StageKind = recipe.input;
   const items: JSX.Element[] = [
     <div key="src" className={`divider${props.inspect === "source" ? " on" : ""}`} onClick={() => props.onInspect("source")}>
-      Source
+      Source{recipe.input !== "image" ? ` · enters as ${STAGE_NAMES[recipe.input].toLowerCase()}` : ""}
     </div>,
   ];
   recipe.steps.forEach((rs, index) => {
