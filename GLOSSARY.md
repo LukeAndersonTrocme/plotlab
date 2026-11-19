@@ -52,7 +52,7 @@ still to be argued over with Nick. Change a term here first, then rename it ever
 | **Working resolution** | mm per pixel the pipeline works at, derived from the target | detail | grid resolution |
 | **Reference** | An extra image in a project, e.g. a paper texture for collage | a texture, a paper | auxiliary raster |
 | **Flatten** | Turn layers back into an image to keep processing | flatten | rasterize |
-| **Preset** | A saved piece of recipe (one step or a short chain) | a recipe, a look | template |
+| **Preset** | A saved piece of recipe (one step or a short chain). Picking one replaces the steps; it may also switch the output target (e.g. a print-only look). A preset without a target keeps the current one | a recipe, a look | template |
 | **Seed** | Number that fixes a step's randomness so it can be reproduced | | RNG seed |
 
 ## Open terminology questions
@@ -71,7 +71,7 @@ still to be argued over with Nick. Change a term here first, then rename it ever
 | **Placed source** | The source after layout and resampling to the working resolution: what step 1 receives. |
 | **1-bit tone** | A tone layer whose values are only 0 or 1 (what Threshold makes). |
 | **Band tone range** | The ink-density range a category label came from (`bands` on categories values) |
-| **Preset (code)** | `packages/steps/src/presets.ts`: a starting chain of steps, each proven by a golden case |
+| **Preset (code)** | `packages/steps/src/presets.ts`: a starting chain of steps, plus an optional target request, each proven by a golden case. `applyPreset` applies it; the target goes through `retarget` (as the Output panel does), so mirror, registration and dpi carry over and print prep stays at 600 dpi or more |
 | **Raster layers** (UI: "not lines yet") | Layers whose chain stopped before becoming lines; they ride along to the end (`rasterLayers`). |
 | **Pass** | One ink's strokes in a plot; passes are separated by pen changes. |
 | **On-demand step** | A slow step (e.g. Stroke order) that runs when you press Run, not on every change. |

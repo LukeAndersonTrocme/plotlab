@@ -46,7 +46,10 @@ importers:
         version: 2.1.9(@types/node@20.19.43)
 
   packages/cli:
-    dependencies:
+    devDependencies:
+      '@cwasm/webp':
+        specifier: 0.1.5
+        version: 0.1.5
       '@plotlab/engine':
         specifier: workspace:*
         version: link:../engine
@@ -56,16 +59,18 @@ importers:
       '@plotlab/steps':
         specifier: workspace:*
         version: link:../steps
+      '@types/pngjs':
+        specifier: ^6.0.5
+        version: 6.0.5
+      esbuild:
+        specifier: 0.28.2
+        version: 0.28.2
       jpeg-js:
         specifier: ^0.4.4
         version: 0.4.4
       pngjs:
         specifier: ^7.0.0
         version: 7.0.0
-    devDependencies:
-      '@types/pngjs':
-        specifier: ^6.0.5
-        version: 6.0.5
 
   packages/engine:
     dependencies:
@@ -209,6 +214,12 @@ packages:
   '@babel/types@7.29.11':
     resolution: {integrity: sha512-WCsemW40Cpc6gouC1SrY6PBaZ+oLRlEVY9XBvZBI7il/HyUrb2nJ505wE1MHEFyDZNnrWDEuy4jL50WVHfTTSQ==}
     engines: {node: '>=6.9.0'}
+
+  '@canvas/image-data@1.1.0':
+    resolution: {integrity: sha512-QdObRRjRbcXGmM1tmJ+MrHcaz1MftF2+W7YI+MsphnsCrmtyfS0d5qJbk0MeSbUeyM/jCb0hmnkXPsy026L7dA==}
+
+  '@cwasm/webp@0.1.5':
+    resolution: {integrity: sha512-ceIZQkyxK+s7mmItNcWqqHdOBiJAxYxTnrnPNgUNjldB1M9j+Bp/3eVIVwC8rUFyN/zoFwuT0331pyY3ackaNA==}
 
   '@esbuild/aix-ppc64@0.21.5':
     resolution: {integrity: sha512-1SDgH6ZSPTlggy1yI6+Dbkiz8xzpHJEVAlF/AM1tHPLsf5STom9rwtjE4hKAF20FfXXNTFqEYXyJNWh1GiZedQ==}
@@ -1133,6 +1144,12 @@ snapshots:
     dependencies:
       '@babel/helper-string-parser': 7.29.13
       '@babel/helper-validator-identifier': 7.29.7
+
+  '@canvas/image-data@1.1.0': {}
+
+  '@cwasm/webp@0.1.5':
+    dependencies:
+      '@canvas/image-data': 1.1.0
 
   '@esbuild/aix-ppc64@0.21.5':
     optional: true

@@ -13,8 +13,8 @@ import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 import { exportOutput, loadRecipe, Pipeline, plotToSvg, type ExportFormat } from "@plotlab/engine";
 import { PNG } from "pngjs";
-import { createRegistry, presetSteps } from "@plotlab/steps";
-import { readImage } from "../packages/cli/src/io.ts";
+import { applyPreset, createRegistry } from "@plotlab/steps";
+import { readSource } from "../packages/cli/src/io.ts";
 
 const root = dirname(fileURLToPath(import.meta.url));
 const update = process.env.UPDATE_GOLDEN === "1";
@@ -27,10 +27,12 @@ describe("golden", () => {
       const raw = JSON.parse(readFileSync(join(root, "cases", file), "utf8"));
       const registry = createRegistry();
       // A case may name a preset instead of listing steps; the golden then proves the preset.
+      // The preset is picked as in the app: its steps replace the chain and its target (if
+      // any) is switched to from the case's target, so the case's target is the "before".
       const { fixture, preset, export: format, ...recipeJson } = raw;
-      if (preset) recipeJson.steps = presetSteps(preset);
-      const { recipe } = loadRecipe(recipeJson, registry);
-      const { plot, output } = await new Pipeline(registry).run(readImage(join(root, "fixtures", fixture)), recipe);
+      const loaded = loadRecipe(recipeJson, registry).recipe;
+      const recipe = preset ? applyPreset(loaded, preset) : loaded;
+      const { plot, output } = await new Pipeline(registry).run(readSource(join(root, "fixtures", fixture)), recipe);
       if (format) return rasterGolden(name, exportOutput(output, plot, recipe, format as ExportFormat, name).files.find((f) => f.name.endsWith(".png"))!.data as Uint8Array);
       if (!plot) throw new Error(`${name} does not end in lines`);
       const svg = plotToSvg(plot, { recipe });

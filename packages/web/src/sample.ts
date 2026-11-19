@@ -1,7 +1,7 @@
-import { decodeTiff, imageFromRGBA, isTiff, type RawImage } from "@plotlab/engine";
+import { decodeTiffSource, imageFromRGBA, isTiff, parseSvg, type RawImage, type Source } from "@plotlab/engine";
 
 /** The Mona Lisa face crop (public domain), falling back to drawn text if it can't load. */
-export async function loadSample(): Promise<RawImage> {
+export async function loadSample(): Promise<Source> {
   try {
     const res = await fetch(`${import.meta.env.BASE_URL}sample-mona-lisa.jpg`);
     if (res.ok) return await decodeFile(new File([await res.blob()], "sample-mona-lisa.jpg"));
@@ -48,13 +48,17 @@ function drawTextSample(): OffscreenCanvas {
   return c;
 }
 
-/** PNG, JPEG, WebP… via the browser; TIFF (8/16-bit) via the engine, first page. */
-export async function decodeFile(file: File, warn: (m: string) => void = () => {}): Promise<RawImage> {
-  const head = new Uint8Array(await file.slice(0, 4).arrayBuffer());
-  if (isTiff(head)) {
-    const pages = decodeTiff(new Uint8Array(await file.arrayBuffer()));
-    if (pages.length > 1) warn(`${file.name} has ${pages.length} pages; using the first. Separations as layers come later.`);
-    return pages[0]!;
+/**
+ * PNG, JPEG, WebP… via the browser. TIFF (8/16-bit) and SVG via the engine, the same code
+ * the CLI runs: a multi-page TIFF enters as layers, an SVG as lines.
+ */
+export async function decodeFile(file: File, warn: (m: string) => void = () => {}): Promise<Source> {
+  const head = new Uint8Array(await file.slice(0, 512).arrayBuffer());
+  if (isTiff(head)) return decodeTiffSource(new Uint8Array(await file.arrayBuffer()));
+  if (file.type === "image/svg+xml" || /\.svg$/i.test(file.name) || /<svg[\s>]/.test(new TextDecoder().decode(head))) {
+    const { geometry, warnings } = parseSvg(await file.text());
+    warnings.forEach(warn);
+    return geometry;
   }
   const bmp = await createImageBitmap(file);
   const c = new OffscreenCanvas(bmp.width, bmp.height);

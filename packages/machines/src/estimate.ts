@@ -28,6 +28,10 @@ export function pathLength(path: Position[]): number {
 export interface LayerEstimate {
   drawLengthMm: number;
   travelLengthMm: number;
+  /** Time split: pen-down drawing, pen-up travel, and lifting/lowering the pen. They add up to `timeS`. */
+  drawS: number;
+  travelS: number;
+  penS: number;
   timeS: number;
 }
 
@@ -37,25 +41,27 @@ export function estimateLayer(paths: Position[][], m: MachineProfile): LayerEsti
   const vCorner = drawMmS * cornerSpeedFactor;
   let draw = 0;
   let travel = 0;
-  let t = 0;
+  let drawS = 0;
+  let travelS = 0;
+  let penS = 0;
   let at: Position = [0, 0];
   for (const p of paths) {
     if (p.length === 0) continue;
     const dt = dist(at, p[0]!);
     travel += dt;
-    t += moveTime(dt, travelMmS, accelMmS2) + m.pen.downS;
+    travelS += moveTime(dt, travelMmS, accelMmS2);
+    penS += m.pen.downS + m.pen.upS;
     for (let i = 1; i < p.length; i++) {
       const d = dist(p[i - 1]!, p[i]!);
       draw += d;
-      t += moveTime(d, drawMmS, accelMmS2, vCorner);
+      drawS += moveTime(d, drawMmS, accelMmS2, vCorner);
     }
-    t += m.pen.upS;
     at = p[p.length - 1]!;
   }
   const home = dist(at, [0, 0]);
   travel += home;
-  t += moveTime(home, travelMmS, accelMmS2);
-  return { drawLengthMm: draw, travelLengthMm: travel, timeS: t };
+  travelS += moveTime(home, travelMmS, accelMmS2);
+  return { drawLengthMm: draw, travelLengthMm: travel, drawS, travelS, penS, timeS: drawS + travelS + penS };
 }
 
 export interface PassEstimate extends LayerEstimate {
@@ -66,6 +72,8 @@ export interface PlotEstimate {
   passes: PassEstimate[];
   /** Pen changes between passes that draw something. */
   penChanges: number;
+  /** Time spent on those pen changes. */
+  penChangeS: number;
   totalS: number;
 }
 
@@ -74,6 +82,7 @@ export function estimatePlot(plot: Plot, m: MachineProfile): PlotEstimate {
   const passes = plot.layers.map((l) => ({ layerId: l.id, ...estimateLayer(l.paths, m) }));
   const drawing = plot.layers.filter((l) => l.paths.some((p) => p.length > 0)).length;
   const penChanges = Math.max(0, drawing - 1);
-  const totalS = passes.reduce((t, p) => t + p.timeS, 0) + penChanges * m.pen.changeS;
-  return { passes, penChanges, totalS };
+  const penChangeS = penChanges * m.pen.changeS;
+  const totalS = passes.reduce((t, p) => t + p.timeS, 0) + penChangeS;
+  return { passes, penChanges, penChangeS, totalS };
 }

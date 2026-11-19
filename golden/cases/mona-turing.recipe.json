@@ -1,0 +1,11 @@
+{
+  "schemaVersion": 2,
+  "input": "image",
+  "target": { "kind": "plotter" },
+  "paper": { "widthMm": 70, "heightMm": 70 },
+  "layout": { "fit": "fit", "marginMm": 5, "position": [0.5, 0.5] },
+  "inks": [{ "id": "black", "name": "Black", "color": "#111111", "mix": "multiply", "widthMm": 0.3 }],
+  "machine": "generic",
+  "preset": "turing",
+  "fixture": "mona-lisa-600.jpg"
+}

@@ -7,6 +7,7 @@
   --accent: #2f5d8a;
   --changed: #c8741e;
   --paper: #fffdf8;
+  --warn: #a8361a;
   font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
   color: var(--ink);
   background: var(--bg);
@@ -29,6 +30,8 @@ main { display: flex; flex: 1; min-height: 0; }
 .card { background: var(--panel); border: 1px solid var(--line); border-radius: 8px; padding: 10px 12px; margin-bottom: 8px; }
 .card-head { display: flex; justify-content: space-between; align-items: center; }
 .card .title { font-weight: 600; }
+.badge { font-size: 11px; padding: 1px 6px; border-radius: 8px; border: 1px solid currentColor; white-space: nowrap; }
+.badge.experimental { color: #a06a00; }
 .summary { color: var(--muted); font-size: 13px; margin: 4px 0 8px; }
 .help-btn { width: 26px; height: 26px; padding: 0; border-radius: 50%; }
 .param { margin: 8px 0; }
@@ -44,6 +47,8 @@ main { display: flex; flex: 1; min-height: 0; }
 .stats { display: flex; gap: 16px; align-items: baseline; color: var(--muted); flex-wrap: wrap; }
 .stats .big { font-size: 22px; color: var(--ink); }
 .stats .toggle { margin-left: auto; }
+.stats .over-budget { color: var(--warn); }
+.stats .budget.over-budget { font-weight: 600; max-width: 46ch; }
 .refining { color: var(--accent); }
 .preview { flex: 1; min-height: 0; width: 100%; margin: 10px 0; }
 .preview.empty { display: grid; place-items: center; color: var(--muted); }
@@ -91,7 +96,8 @@ button.icon { padding: 2px 8px; }
 .card.dragging { opacity: 0.4; }
 .card-head { gap: 6px; }
 .card-head .title { flex: 1; text-align: left; }
-.card-tools { display: inline-flex; gap: 2px; align-items: center; }
+.card-head { flex-wrap: wrap; }
+.card-tools { display: inline-flex; gap: 2px; align-items: center; margin-left: auto; }
 .handle { cursor: grab; color: var(--muted); user-select: none; }
 button.link { border: none; background: none; padding: 0; color: inherit; font-weight: 600; cursor: pointer; }
 .hint button.link { color: var(--accent); font-weight: normal; text-decoration: underline; }

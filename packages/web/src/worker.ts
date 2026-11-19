@@ -1,5 +1,5 @@
 /// <reference lib="webworker" />
-import { exportOutput, exportProof, imageToRGBA, inkFor, layerToRGBA, leftoverRasters, Pipeline, StepError, toPlot, zipFiles, type Image, type Layers, type Plot, type RawImage, type Recipe, type StageData } from "@plotlab/engine";
+import { exportOutput, exportProof, imageToRGBA, inkFor, layerToRGBA, leftoverRasters, Pipeline, StepError, toPlot, zipFiles, type Image, type Layers, type Plot, type Recipe, type Source, type StageData } from "@plotlab/engine";
 import { estimatePlot, getMachine } from "@plotlab/machines";
 import { createRegistry } from "@plotlab/steps";
 import type { FromWorker, InspectTarget, InspectView, RasterView, ToWorker } from "./protocol.ts";
@@ -10,7 +10,7 @@ const PROXY_SIDE = 400;
 const registry = createRegistry();
 const full = new Pipeline(registry);
 const proxy = new Pipeline(registry);
-let src: { image: RawImage; key: string } | null = null;
+let src: { source: Source; key: string } | null = null;
 /** Encoded PNGs keyed by the pixel buffer they came from (outputs are cached by the pipeline, so identity is stable). */
 let pngCache = new WeakMap<object, Map<string, Promise<Blob>>>();
 
@@ -81,7 +81,7 @@ self.onmessage = (e: MessageEvent<ToWorker>) => {
 
 async function handle(msg: ToWorker): Promise<void> {
   if (msg.type === "source") {
-    src = { image: msg.image, key: msg.key };
+    src = { source: msg.source, key: msg.key };
     full.reset();
     proxy.reset();
     pngCache = new WeakMap();
@@ -90,7 +90,7 @@ async function handle(msg: ToWorker): Promise<void> {
   if (!src) return;
   if (msg.type === "export") {
     try {
-      const { output, plot } = await full.run(src.image, msg.recipe, { sourceKey: src.key, runOnDemand: true });
+      const { output, plot } = await full.run(src.source, msg.recipe, { sourceKey: src.key, runOnDemand: true });
       const { files, notes } = exportOutput(output, plot, msg.recipe, msg.format, msg.stem);
       const one = files.length === 1 ? files[0]! : { name: `${msg.stem}-plates.zip`, type: "application/zip", data: zipFiles(files) };
       post({ type: "exported", id: msg.id, name: one.name, mime: one.type, data: one.data, notes });
@@ -101,7 +101,7 @@ async function handle(msg: ToWorker): Promise<void> {
   }
   try {
     const p = msg.proxy ? proxy : full;
-    const { output, plot, results, warnings, placed, stale } = await p.run(src.image, msg.recipe, {
+    const { output, plot, results, warnings, placed, stale } = await p.run(src.source, msg.recipe, {
       sourceKey: src.key,
       maxSidePx: msg.proxy ? PROXY_SIDE : undefined,
       runOnDemand: msg.runOnDemand && !msg.proxy,
@@ -121,12 +121,12 @@ async function handle(msg: ToWorker): Promise<void> {
       plot,
       estimate,
       warnings,
-      working: { width: placed.width, height: placed.height, mmPerPx: placed.frame.widthMm / placed.width },
+      working: placed.kind === "geometry" ? null : { width: placed.width, height: placed.height, mmPerPx: placed.frame.widthMm / placed.width },
       stale,
       steps: results.map((r) => ({ index: r.index, step: r.step, ms: r.ms, cached: r.cached, layers: r.layers })),
       rasterLayers: await resultRasters(output, msg.recipe),
       inspected,
-      underlay: await imageView(placed, "source", "Source"),
+      underlay: placed.kind === "image" ? await imageView(placed, "source", "Source") : null,
       proof: msg.proof ? await proofView(output, plot, msg.recipe, msg.proxy) : null,
     });
   } catch (err) {

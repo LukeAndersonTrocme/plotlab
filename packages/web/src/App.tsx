@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { exportFormats, FORMAT_LABEL, loadRecipe, type AnyStep, type ExportFormat, type Recipe } from "@plotlab/engine";
+import { budgetOnlyChange, describeEntry, enterAt, exportFormats, FORMAT_LABEL, loadRecipe, sourceLabel, sourceStage, type AnyStep, type ExportFormat, type Recipe, type Source, type StageKind } from "@plotlab/engine";
+import { budgetCheck } from "@plotlab/machines";
 import { createRegistry } from "@plotlab/steps";
 import { defaultRecipe } from "./defaults.ts";
 import { HelpPanel } from "./Help.tsx";
@@ -13,7 +14,7 @@ import { StepList } from "./StepList.tsx";
 import { CheckpointSidebar } from "./CheckpointSidebar.tsx";
 import { createCheckpoint, restoreFrom } from "./checkpoints.ts";
 import { openImage, SAMPLE_NAME, startSession } from "./session.ts";
-import { defaultLocalStorage, openLibrary, type Checkpoint, type Library, type ProjectStore, type Source } from "./storage/index.ts";
+import { defaultLocalStorage, openLibrary, type Checkpoint, type Library, type ProjectStore, type Source as StoredSource } from "./storage/index.ts";
 import { captureThumbnail } from "./thumbnail.ts";
 
 const registry = createRegistry();
@@ -23,7 +24,7 @@ const parseRecipe = (json: unknown) => {
   const { recipe, warnings } = loadRecipe(json, registry);
   return { recipe, warnings: warnings.map((w) => w.message) };
 };
-const decodeStored = (p: ProjectStore, s: Source) => decodeFile(new File([s.bytes], p.name, { type: s.type }));
+const decodeStored = (p: ProjectStore, s: StoredSource, warn?: (m: string) => void) => decodeFile(new File([s.bytes], p.name, { type: s.type }), warn);
 /** The label and file stem for a project's image ("sample" keeps its special wording). */
 const nameOf = (p: ProjectStore) => (p.name === SAMPLE_NAME ? "sample" : p.name);
 const errText = (e: unknown) => (e instanceof Error ? e.message : String(e));
@@ -67,6 +68,19 @@ export function App() {
   const [ready, setReady] = useState(false);
   const [sidebar, setSidebar] = useState(false);
   const [saved, setSaved] = useState(0);
+  // Where the current source enters the chain (an SVG enters as lines, separations as layers).
+  const entry = useRef<{ stage: StageKind; label: string }>({ stage: "image", label: "the sample" });
+  /** Fit a recipe to the current source's entry stage; returns it and what to tell the person. */
+  const enter = (r: Recipe): { recipe: Recipe; note: string | null } => {
+    const e = enterAt(r, entry.current.stage, registry);
+    return { recipe: e.recipe, note: describeEntry(entry.current.label, entry.current.stage, e) };
+  };
+  /** Show a decoded source. Every way in (startup, open, restore) goes through here, then `enter`. */
+  const takeSource = (src: Source, name: string, key: string) => {
+    entry.current = { stage: sourceStage(src), label: name === "sample" ? "the sample" : sourceLabel(name, src) };
+    runner.setSource(src, key);
+    setSourceName(name);
+  };
 
   // Start: reopen the last project with its recipe (image and settings survive a reload).
   useEffect(() => {
@@ -85,18 +99,18 @@ export function App() {
         session = await startSession({ ...opened, localStorage: ls, sample, parse: parseRecipe });
       }
       const s = session;
-      const img = await decodeStored(s.project, s.source).catch(() => {
+      const img = await decodeStored(s.project, s.source, (m) => s.warnings.push(m)).catch(() => {
         s.warnings.push("Couldn't read the saved image; showing the sample.");
         return loadSample();
       });
       if (!alive) return;
-      if (s.recipe) {
-        setHistory(createHistory(s.recipe));
-        recipeRef.current = s.recipe;
-      }
+      takeSource(img, nameOf(s.project), s.project.id);
+      // Fitting the restored session to its image isn't a Back step: it's where the work starts.
+      const { recipe: start, note } = enter(s.recipe ?? recipeRef.current);
+      setHistory(createHistory(start));
+      recipeRef.current = start;
+      if (note) s.warnings.push(note);
       if (s.warnings.length) setNotice(s.warnings.join("\n"));
-      runner.setSource(img, s.project.id);
-      setSourceName(nameOf(s.project));
       setLibrary(opened.library);
       setProject(s.project);
       setPersistent(opened.persistent);
@@ -133,14 +147,13 @@ export function App() {
     if (!library || !project) return;
     try {
       const r = await restoreFrom(library, project, cp, history, parseRecipe);
-      if (r.source) {
-        runner.setSource(await decodeStored(r.project, r.source), r.project.id);
-        setSourceName(nameOf(r.project));
-      }
+      if (r.source) takeSource(await decodeStored(r.project, r.source, (m) => r.warnings.push(m)), nameOf(r.project), r.project.id);
+      const { recipe: fitted, note } = enter(r.recipe);
+      if (note) r.warnings.push(note);
       setProject(r.project);
-      setHistory((h) => commit(h, r.recipe));
+      setHistory((h) => commit(h, fitted));
       setNotice(r.warnings.length ? r.warnings.join("\n") : null);
-      if (live) runner.request(r.recipe, false);
+      if (live) runner.request(fitted, false);
       else setDirty(true);
     } catch (e) {
       setNotice(`Couldn't restore that checkpoint: ${errText(e)}`);
@@ -151,6 +164,8 @@ export function App() {
     if (!ready) return;
     // A drag previews; releasing commits, so one drag is one Back step.
     setHistory((h) => (proxy ? preview(h, next) : commit(h, next)));
+    // The time budget only changes the readout, which is computed from the last estimate.
+    if (budgetOnlyChange(recipe, next)) return;
     // On-demand steps' own settings wait for their Run button; the worker holds them back.
     if (!live) {
       setDirty(true);
@@ -171,7 +186,7 @@ export function App() {
   const forward = () => travel(redo);
   const startOver = () => {
     setDirty(false);
-    apply(defaultRecipe(), false);
+    apply(enter(defaultRecipe()).recipe, false);
     setNotice("Reset to the default recipe (your image stays). Back undoes this.");
   };
 
@@ -205,8 +220,10 @@ export function App() {
     if (!ready) return;
     if (file.name.endsWith(".json")) {
       try {
-        const { recipe: r, warnings } = loadRecipe(JSON.parse(await file.text()), registry);
-        setNotice(warnings.length ? warnings.map((w) => w.message).join("\n") : `Loaded recipe ${file.name}`);
+        const { recipe: loaded, warnings } = loadRecipe(JSON.parse(await file.text()), registry);
+        const { recipe: r, note } = enter(loaded);
+        const lines = [...warnings.map((w) => w.message), ...(note ? [note] : [])];
+        setNotice(lines.length ? lines.join("\n") : `Loaded recipe ${file.name}`);
         apply(r, false);
       } catch (e) {
         setNotice(e instanceof Error ? e.message : String(e));
@@ -226,7 +243,6 @@ export function App() {
         if (opened.saved) {
           try {
             next = parseRecipe(opened.saved.recipe).recipe;
-            setHistory((h) => commit(h, next));
             warnings.push(`Reopened ${file.name} with its last settings. Back returns to the settings you had.`);
           } catch {
             warnings.push(`${file.name}'s last settings couldn't be read; keeping the current ones.`);
@@ -234,12 +250,15 @@ export function App() {
         }
         setProject(opened.project);
       }
-      setSourceName(file.name);
-      runner.setSource(img, opened && !(opened instanceof Error) ? opened.project.id : `${file.name}:${file.size}`);
-      runner.request(next, false);
+      takeSource(img, file.name, opened && !(opened instanceof Error) ? opened.project.id : `${file.name}:${file.size}:${file.lastModified}`);
+      // Reopened settings, and steps this source can't use switched off, are one Back step.
+      const { recipe: fitted, note } = enter(next);
+      setHistory((h) => commit(h, fitted));
+      if (note) warnings.push(note);
+      runner.request(fitted, false);
       setNotice(warnings.length ? warnings.join("\n") : null);
-    } catch {
-      setNotice(`Couldn't read ${file.name}. Try PNG, JPEG, WebP or TIFF.`);
+    } catch (e) {
+      setNotice(`Couldn't read ${file.name}${e instanceof Error && e.message ? `: ${e.message}` : ""}. Try PNG, JPEG, WebP, TIFF or SVG.`);
     }
   };
 
@@ -331,8 +350,8 @@ export function App() {
         <section className="panel">
           <div className="card">
             <label className="file">
-              <input type="file" accept="image/*,.json" onChange={(e) => e.target.files?.[0] && loadFile(e.target.files[0])} />
-              <span>{sourceName === "sample" ? "Open image or recipe…" : sourceName}</span>
+              <input type="file" accept="image/*,.png,.jpg,.jpeg,.webp,.tif,.tiff,.svg,.json" onChange={(e) => e.target.files?.[0] && loadFile(e.target.files[0])} />
+              <span>{sourceName === "sample" ? "Open image, SVG or recipe…" : sourceName}</span>
             </label>
           </div>
           <ProjectPanel
@@ -363,11 +382,17 @@ export function App() {
 
         <section className="view">
           <div className="stats">
-            {run.estimate && (
-              <span className="big" title="Estimated from the machine profile; includes pen changes.">
-                ~{fmtTime(run.estimate.totalS)}
-              </span>
-            )}
+            {run.estimate && (() => {
+              const b = recipe.target.kind === "plotter" && recipe.target.budgetMin ? budgetCheck(run.estimate, recipe.target.budgetMin) : null;
+              return (
+                <>
+                  <span className={`big${b?.over ? " over-budget" : ""}`} title="Estimated from the machine profile; includes pen changes.">
+                    ~{fmtTime(run.estimate.totalS)}
+                  </span>
+                  {b && <span className={b.over ? "budget over-budget" : "budget"} role={b.over ? "alert" : undefined}>{b.over ? `⚠ Over budget: ${b.message}` : b.message}</span>}
+                </>
+              );
+            })()}
             {run.estimate && plot && !plot.ordered && <span className="caveat">traced order: add Stroke order for a better estimate</span>}
             {plot && <span>{strokes} strokes</span>}
             {run.estimate && run.estimate.penChanges > 0 && <span>{run.estimate.penChanges} pen changes</span>}
