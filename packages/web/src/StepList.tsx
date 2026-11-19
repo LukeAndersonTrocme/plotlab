@@ -62,7 +62,7 @@ export function StepList(props: {
   let kind: StageKind = recipe.input;
   const items: JSX.Element[] = [
     <div key="src" className={`divider${props.inspect === "source" ? " on" : ""}`} onClick={() => props.onInspect("source")}>
-      Source
+      Source{recipe.input !== "image" ? ` · enters as ${STAGE_NAMES[recipe.input].toLowerCase()}` : ""}
     </div>,
   ];
   recipe.steps.forEach((rs, index) => {
@@ -137,7 +137,7 @@ export function StepList(props: {
               title={enabled ? "On (untick to skip this step)" : "Skipped"}
               checked={enabled}
               onChange={(e) => {
-                const steps = recipe.steps.map((s, i) => (i === index ? { ...s, enabled: e.target.checked } : s));
+                const steps = recipe.steps.map((s, i) => (i === index ? { ...s, enabled: e.target.checked, offForEntry: undefined } : s));
                 const issue = checkChain(recipe.input, steps, registry)[0];
                 if (issue) props.onNotice(`${e.target.checked ? "Turning on" : "Skipping"} ${def.title} would break the chain: ${issue.reason}`);
                 else props.onChange({ ...recipe, steps }, false);

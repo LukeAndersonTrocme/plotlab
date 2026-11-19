@@ -129,6 +129,35 @@ export interface Plot {
 }
 
 export type StageData = Image | Layers | Geometry | Plot;
+
+/** Decoded separations before they are placed on paper (a multi-page TIFF: one layer per page). */
+export interface RawLayers {
+  kind: "layers";
+  width: number;
+  height: number;
+  layers: Layer[];
+}
+
+/** Decoded vector source before it is placed on paper (SVG), in the document's own mm, top-left origin. */
+export interface RawGeometry {
+  kind: "geometry";
+  widthMm: number;
+  heightMm: number;
+  layers: GeometryLayer[];
+}
+
+/** What a file reader returns. The source's kind is the recipe's entry stage (`Recipe.input`). */
+export type Source = RawImage | RawLayers | RawGeometry;
+
+/** How to name a source in messages: "scan.tif (3 pages, one layer each)". */
+export function sourceLabel(name: string, s: Source): string {
+  return "kind" in s && s.kind === "layers" ? `${name} (${s.layers.length} pages, one layer each)` : name;
+}
+
+/** The stage a source enters the chain at. */
+export function sourceStage(s: Source): "image" | "layers" | "geometry" {
+  return "kind" in s && (s.kind === "layers" || s.kind === "geometry") ? s.kind : "image";
+}
 export type StageKind = StageData["kind"];
 
 export type StageDataOf<K extends StageKind> = Extract<StageData, { kind: K }>;

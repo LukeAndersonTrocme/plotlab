@@ -14,6 +14,7 @@
     "@plotlab/engine": "workspace:*",
     "@plotlab/machines": "workspace:*",
     "@plotlab/steps": "workspace:*",
+    "@cwasm/webp": "0.1.5",
     "@types/pngjs": "^6.0.5",
     "esbuild": "0.28.2",
     "jpeg-js": "^0.4.4",

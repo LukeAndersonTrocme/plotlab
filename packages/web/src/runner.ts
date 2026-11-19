@@ -1,4 +1,4 @@
-import type { ExportFormat, Plot, RawImage, Recipe } from "@plotlab/engine";
+import type { ExportFormat, Plot, Recipe, Source } from "@plotlab/engine";
 import type { PlotEstimate } from "@plotlab/machines";
 import type { FromWorker, InspectTarget, InspectView, RasterView, StepInfo, ToWorker } from "./protocol.ts";
 
@@ -55,8 +55,8 @@ export class Runner {
     this.worker.onmessage = (e: MessageEvent<FromWorker>) => this.receive(e.data);
   }
 
-  setSource(image: RawImage, key: string): void {
-    const msg: ToWorker = { type: "source", image, key };
+  setSource(source: Source, key: string): void {
+    const msg: ToWorker = { type: "source", source, key };
     this.worker.postMessage(msg);
   }
 

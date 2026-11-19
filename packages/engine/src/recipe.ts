@@ -13,6 +13,13 @@ export interface RecipeStep {
   params: Record<string, unknown>;
   /** Disabled steps are skipped but kept in the recipe. */
   enabled?: boolean;
+  /**
+   * Set (with enabled: false) when the step was switched off automatically because the
+   * source enters after it (an SVG skips the image steps). Only such steps are switched
+   * back on when a source enters earlier again; steps switched off by hand stay off.
+   * Optional and ignored by older builds, so no schema bump (ADR 0002).
+   */
+  offForEntry?: boolean;
   /** Layer-acting steps: which layers to transform ("all" when absent). */
   layers?: "all" | string[];
   /** Layer-acting steps: per-layer overrides of `params`, by layer id. */
@@ -25,7 +32,10 @@ export interface RecipeStep {
  */
 export interface Recipe {
   schemaVersion: number;
-  /** Which stage the source enters at. Only "image" is supported so far. */
+  /**
+   * Which stage the source enters at: "image" (photos, scans), "layers" (multi-page TIFF
+   * separations) or "geometry" (SVG). Set from the source when it is opened.
+   */
   input: StageKind;
   target: Target;
   paper: Paper;
@@ -40,6 +50,9 @@ export interface Recipe {
   machine: string;
   steps: RecipeStep[];
 }
+
+/** Stages a source can enter the chain at. */
+export const ENTRY_STAGES: StageKind[] = ["image", "layers", "geometry"];
 
 export interface RecipeWarning {
   /** Step index, or -1 for the recipe envelope. */
@@ -186,6 +199,7 @@ export function loadRecipe(raw: unknown, registry: StepRegistry): { recipe: Reci
     Array.isArray(r.passOrder) && r.passOrder.every((x) => typeof x === "string") ? (r.passOrder as string[]) : "light-to-dark";
   const workingMmPerPx = typeof r.workingMmPerPx === "number" && r.workingMmPerPx > 0 ? r.workingMmPerPx : null;
   const input = (r.input ?? "image") as StageKind;
+  if (!ENTRY_STAGES.includes(input)) errors.push({ index: -1, message: `input must be one of ${ENTRY_STAGES.join(", ")}` });
   const rawSteps = Array.isArray(r.steps) ? (r.steps as unknown[]) : [];
 
   const steps: RecipeStep[] = [];
@@ -232,6 +246,7 @@ export function loadRecipe(raw: unknown, registry: StepRegistry): { recipe: Reci
       current = def.output;
     }
     const out: RecipeStep = { step: def.id, version, params: values, enabled };
+    if (!enabled && s.offForEntry === true) out.offForEntry = true;
     if (Array.isArray(s.layers) && s.layers.every((x) => typeof x === "string")) out.layers = s.layers;
     if (layerParams && typeof layerParams === "object") {
       out.layerParams = {};

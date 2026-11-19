@@ -90,3 +90,65 @@ export function removeStep(recipe: Recipe, index: number, registry: StepRegistry
   const steps = recipe.steps.filter((_, i) => i !== index);
   return validated(recipe, steps, registry, `Removing ${def?.title ?? "this step"} would break the chain: `);
 }
+
+const RANK: Record<StageKind, number> = { image: 0, layers: 1, geometry: 2, plot: 3 };
+
+export interface EntryResult {
+  recipe: Recipe;
+  /** True when the entry stage changed. */
+  changed: boolean;
+  /** Titles of steps switched off because they come before the new entry stage. */
+  switchedOff: string[];
+  /** Titles of leading steps switched back on because the source now enters earlier. */
+  switchedOn: string[];
+  /** What still doesn't fit (plain language), if anything. */
+  issues: ChainIssue[];
+}
+
+/**
+ * Set the chain's entry stage to where a new source enters (an SVG enters as lines,
+ * multi-page TIFF separations as layers). Leading steps that belong before that stage are
+ * switched off, not removed, and marked `offForEntry`; marked steps are switched back on when a
+ * source enters earlier again. Steps switched off by hand are never touched.
+ */
+export function enterAt(recipe: Recipe, stage: StageKind, registry: StepRegistry): EntryResult {
+  if (recipe.input === stage) return { recipe, changed: false, switchedOff: [], switchedOn: [], issues: checkChain(stage, recipe.steps, registry) };
+  const steps = recipe.steps.map((s) => ({ ...s }));
+  const title = (s: RecipeStep) => registry.get(s.step)?.title ?? s.step;
+  const rankOf = (s: RecipeStep) => RANK[(registry.get(s.step)?.input ?? "plot") as StageKind];
+  const switchedOff: string[] = [];
+  const switchedOn: string[] = [];
+  if (RANK[stage] > RANK[recipe.input]) {
+    for (const s of steps) {
+      if (s.enabled === false) continue;
+      if (!registry.get(s.step) || rankOf(s) >= RANK[stage]) break;
+      s.enabled = false;
+      s.offForEntry = true;
+      switchedOff.push(title(s));
+    }
+  } else {
+    // Only steps this function switched off, and only those that belong at or after the new
+    // entry: this undoes the earlier switch. If the chain still doesn't fit (a step before
+    // them was switched off by hand), `issues` says so.
+    for (const s of steps) {
+      if (s.enabled !== false || !s.offForEntry || !registry.get(s.step) || rankOf(s) < RANK[stage]) continue;
+      s.enabled = true;
+      delete s.offForEntry;
+      switchedOn.push(title(s));
+    }
+  }
+  return { recipe: { ...recipe, input: stage, steps }, changed: true, switchedOff, switchedOn, issues: checkChain(stage, steps, registry) };
+}
+
+const list = (xs: string[]) => (xs.length < 2 ? xs.join("") : `${xs.slice(0, -1).join(", ")} and ${xs.at(-1)}`);
+
+/** What to tell the person after `enterAt`, or null when nothing changed and everything fits. */
+export function describeEntry(source: string, stage: StageKind, res: EntryResult): string | null {
+  if (!res.changed && !res.issues.length) return null;
+  const parts = [`${source} enters as ${STAGE_WORDS[stage]}, so the chain now starts there.`];
+  const n = res.switchedOff.length;
+  if (n) parts.push(`Switched off ${list(res.switchedOff)}: ${n === 1 ? "it works" : "they work"} before that stage, and ${n === 1 ? "stays" : "stay"} in the recipe for when you open an image again.`);
+  if (res.switchedOn.length) parts.push(`Switched ${list(res.switchedOn)} back on.`);
+  if (res.issues.length) parts.push(`The recipe doesn't fit yet: ${res.issues[0]!.reason}`);
+  return parts.join(" ");
+}
