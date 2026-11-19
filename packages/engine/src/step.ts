@@ -63,9 +63,10 @@ export interface StepDefinition<
   accepts?: LayerValueKind[];
   /**
    * Upgrade params written for an older version. Return the new params plus a
-   * human-readable note shown as a warning.
+   * human-readable note shown as a warning. `scope` is "layer" when upgrading a per-layer
+   * override (which holds only the keys the user set), so new keys belong at "step" only.
    */
-  migrate?(params: Record<string, unknown>, fromVersion: number): { params: Record<string, unknown>; note: string };
+  migrate?(params: Record<string, unknown>, fromVersion: number, scope?: "step" | "layer"): { params: Record<string, unknown>; note: string };
 }
 
 /** Identity helper that keeps the generic types inferred. */

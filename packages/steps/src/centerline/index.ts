@@ -50,43 +50,62 @@ function neighbours(m: Uint8Array, w: number, h: number, i: number): number[] {
 }
 
 /**
- * Remove spurs: branches that run from an endpoint to a junction and are shorter than
+ * Remove spurs: branches that run from a junction to a loose tip and are shorter than
  * `maxPx` (pixel path length). Lines that end at both ends, and closed loops, are never
- * touched. Repeats until nothing changes, so a short twig left behind by a removed spur
- * goes too. Every junction keeps at least two branches (the longest spurs survive if
- * needed), so a small mark isn't erased.
+ * touched. Thinning often leaves a crossing as a clump of junction pixels, sometimes split
+ * by a pixel or two of line; junctions joined by less than `maxPx` count as one. A
+ * junction's spurs go only when it also has a branch at least twice `maxPx` long, so a
+ * twig is trimmed off a line clearly longer than itself, and a small mark made of short
+ * arms (a little x or +, however thinning split its middle) stays whole. Repeats until nothing changes, so a
+ * short twig left behind by a removed spur goes too.
  */
 export function pruneSpurs(skel: Uint8Array, w: number, h: number, maxPx: number): Uint8Array {
   const m = skel.slice();
   if (!(maxPx > 0)) return m;
+  const step = (a: number, b: number) => Math.hypot((a % w) - (b % w), Math.floor(a / w) - Math.floor(b / w));
   for (let round = 0; round < 1000; round++) {
     const nb = new Map<number, number[]>();
     for (let i = 0; i < m.length; i++) if (m[i]) nb.set(i, neighbours(m, w, h, i));
-    // Junction -> spurs that reach it (pixels to remove, path length).
-    const spurs = new Map<number, Array<{ px: number[]; len: number }>>();
-    for (const [start, ns] of nb) {
-      if (ns.length !== 1) continue;
-      const px = [start];
-      let prev = start, cur = ns[0]!, len = 0;
-      for (;;) {
-        len += Math.hypot((cur % w) - (prev % w), Math.floor(cur / w) - Math.floor(prev / w));
-        const cn = nb.get(cur)!;
-        if (cn.length !== 2 || len >= maxPx) break;
-        px.push(cur);
-        const next = cn[0] === prev ? cn[1]! : cn[0]!;
-        prev = cur;
-        cur = next;
+    const isJ = (i: number) => nb.get(i)!.length >= 3;
+    // Union-find over junction pixels: touching ones, and ones joined by a short line.
+    const parent = new Map<number, number>();
+    const find = (i: number): number => { let r = i; while (parent.get(r) !== r) r = parent.get(r)!; parent.set(i, r); return r; };
+    for (const i of nb.keys()) if (isJ(i)) parent.set(i, i);
+    type Walk = { from: number; px: number[]; end: number; len: number };
+    const walks: Walk[] = [];
+    for (const i of parent.keys()) {
+      for (const first of nb.get(i)!) {
+        if (isJ(first)) { parent.set(find(first), find(i)); continue; }
+        const px: number[] = [];
+        let prev = i, cur = first, len = step(i, first);
+        while (nb.get(cur)!.length === 2 && len < 2 * maxPx) {
+          px.push(cur);
+          const cn = nb.get(cur)!;
+          const next = cn[0] === prev ? cn[1]! : cn[0]!;
+          len += step(cur, next);
+          prev = cur;
+          cur = next;
+        }
+        if (nb.get(cur)!.length === 1) px.push(cur);
+        // Only short walks are removed or merged, so the pixel list matters only for those.
+        walks.push({ from: i, px, end: cur, len });
       }
-      // Long enough, or ends at another endpoint (a lone line): keep it.
-      if (len >= maxPx || nb.get(cur)!.length < 3) continue;
-      if (!spurs.has(cur)) spurs.set(cur, []);
-      spurs.get(cur)!.push({ px, len });
+    }
+    for (const wk of walks) if (wk.len < maxPx && isJ(wk.end)) parent.set(find(wk.end), find(wk.from));
+    // Per junction: its spurs, and whether it has a long branch.
+    const spurs = new Map<number, number[][]>();
+    const long = new Set<number>();
+    for (const wk of walks) {
+      const j = find(wk.from);
+      if (wk.len < maxPx && nb.get(wk.end)!.length === 1) {
+        if (!spurs.has(j)) spurs.set(j, []);
+        spurs.get(j)!.push(wk.px);
+      } else if (wk.len >= 2 * maxPx) long.add(j);
     }
     let removed = false;
     for (const [j, list] of spurs) {
-      list.sort((a, b) => a.len - b.len);
-      const drop = Math.min(list.length, nb.get(j)!.length - 2);
-      for (let k = 0; k < drop; k++) for (const i of list[k]!.px) { m[i] = 0; removed = true; }
+      if (!long.has(j)) continue; // a small mark of short arms: keep it
+      for (const px of list) for (const i of px) { m[i] = 0; removed = true; }
     }
     if (!removed) break;
   }
@@ -224,9 +243,10 @@ export const centerline = defineStep({
       features: { type: "FeatureCollection", features: centerlineMask(mask, grid.width, grid.height, grid.frame, p.minLength, p.smoothing, p.spurLength) },
     };
   },
-  migrate: (params, from) => ({
+  migrate: (params, from, scope) => ({
     // Spur trimming arrived in v3; older recipes keep their exact output with it off.
-    params: { ...params, spurLength: 0 },
+    // Per-layer overrides inherit it from the step, so they stay as the user wrote them.
+    params: scope === "layer" ? params : { ...params, spurLength: 0 },
     note:
       (from < 2 ? "Minimum length and Simplify are now in mm on the paper (they were source pixels). Check the result. " : "") +
       "New Spur length slider (trims short side twigs) is set to 0 so the output is unchanged; raise it to clean up stroke ends.",

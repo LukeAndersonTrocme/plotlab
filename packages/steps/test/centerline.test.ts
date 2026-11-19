@@ -60,6 +60,53 @@ describe("pruneSpurs on a one-pixel skeleton", () => {
   });
 });
 
+describe("pruneSpurs on thick crossings", () => {
+  // Thinning leaves the middle of an X or + as a clump of junction pixels; it is one junction.
+  const w = 40, h = 40, c = 20;
+  const shapes: Record<string, (x: number, y: number) => boolean> = {};
+  for (const [arm, half] of [[8, 2], [6, 1.5]] as const) {
+    shapes[`X ${arm}/${half}`] = (x, y) => Math.abs(x - c) <= arm && (Math.abs(x - c - (y - c)) <= half || Math.abs(x - c + (y - c)) <= half);
+    shapes[`plus ${arm}/${half}`] = (x, y) => (Math.abs(y - c) <= half && Math.abs(x - c) <= arm) || (Math.abs(x - c) <= half && Math.abs(y - c) <= arm);
+  }
+  /** Skeleton pixels farthest out along each arm direction. */
+  const reach = (m: Uint8Array) => {
+    const r = { E: 0, W: 0, N: 0, S: 0, NE: 0, NW: 0, SE: 0, SW: 0 };
+    for (let i = 0; i < m.length; i++) {
+      if (!m[i]) continue;
+      const dx = (i % w) - c, dy = Math.floor(i / w) - c;
+      r.E = Math.max(r.E, dx); r.W = Math.max(r.W, -dx); r.S = Math.max(r.S, dy); r.N = Math.max(r.N, -dy);
+      r.SE = Math.max(r.SE, Math.min(dx, dy)); r.NW = Math.max(r.NW, Math.min(-dx, -dy));
+      r.NE = Math.max(r.NE, Math.min(dx, -dy)); r.SW = Math.max(r.SW, Math.min(-dx, dy));
+    }
+    return r;
+  };
+  for (const [name, f] of Object.entries(shapes)) {
+    it(`a small thick ${name} keeps all four arms even when the spur length beats them`, () => {
+      const skel = thin(mask(w, h, f), w, h);
+      for (const L of [4, 6, 8, 10, 12, 14, 16, 30]) {
+        const p = pruneSpurs(skel, w, h, L);
+        const r = reach(p), before = reach(skel);
+        const dirs = name.startsWith("X") ? (["NE", "NW", "SE", "SW"] as const) : (["N", "S", "E", "W"] as const);
+        for (const d of dirs) expect(r[d], `${name} L=${L} arm ${d}`).toBeGreaterThanOrEqual(before[d] - 1);
+      }
+    });
+    it(`a small thick ${name} still traces to the same strokes end to end`, async () => {
+      const at = async (spurLength: number) => {
+        const data = new Float32Array(w * h);
+        const m = mask(w, h, f);
+        for (let i = 0; i < m.length; i++) data[i] = m[i]!;
+        const layers: Layers = { kind: "layers", width: w, height: h, frame: { xMm: 0, yMm: 0, widthMm: w * 0.25, heightMm: h * 0.25 }, layers: [{ id: "l", name: "l", values: { kind: "tone", data } }] };
+        const out = (await applyStep(centerline, layers as never, { params: { minLength: 1, smoothing: 0, spurLength } }, ctx)) as unknown as { layers: GeometryLayer[] };
+        return out.layers[0]!.features.features.length;
+      };
+      const base = await at(0);
+      expect(base).toBeGreaterThanOrEqual(4);
+      expect(await at(2)).toBe(base);
+      expect(await at(3)).toBe(base);
+    });
+  }
+});
+
 describe("centerline spur length", () => {
   // A thick bar with a small bump on top: thinning leaves a short spur to the bump.
   const bar = (x: number, y: number) => (x >= 4 && x < 56 && y >= 10 && y < 17) || (x >= 28 && x < 32 && y >= 6 && y < 10);
@@ -101,6 +148,13 @@ describe("centerline migrate", () => {
   it("v1 recipes also get spur length 0", () => {
     const { recipe: r } = loadRecipe(recipe(1), registry);
     expect(r.steps[0]!.params.spurLength).toBe(0);
+  });
+  it("leaves per-layer overrides holding only what the user set", () => {
+    const r = recipe(2) as Record<string, unknown> & { steps: Array<Record<string, unknown>> };
+    r.steps[0]!.layerParams = { l1: { minLength: 2 }, l2: {} };
+    const { recipe: out } = loadRecipe(r, registry);
+    expect(out.steps[0]!.params.spurLength).toBe(0);
+    expect(out.steps[0]!.layerParams).toEqual({ l1: { minLength: 2 }, l2: {} });
   });
   it("new recipes use a non-zero default", () => {
     expect(centerline.params.spurLength.default).toBeGreaterThan(0);
