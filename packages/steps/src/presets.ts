@@ -124,5 +124,6 @@ export function presetSteps(id: string): RecipeStep[] {
 export function applyPreset(recipe: Recipe, id: string): Recipe {
   const p = presets.find((x) => x.id === id);
   if (!p) throw new Error(`unknown preset "${id}"`);
-  return { ...recipe, steps: presetSteps(id), ...(p.target ? { target: retarget(recipe.target, p.target) } : {}) };
+  // Every preset chain starts from an image; fit it to another source with `enterAt`.
+  return { ...recipe, input: "image", steps: presetSteps(id), ...(p.target ? { target: retarget(recipe.target, p.target) } : {}) };
 }

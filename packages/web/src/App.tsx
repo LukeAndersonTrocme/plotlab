@@ -6,24 +6,28 @@ import { defaultRecipe } from "./defaults.ts";
 import { HelpPanel } from "./Help.tsx";
 import { ProjectPanel } from "./ProjectPanel.tsx";
 import { EMPTY_RUN, Runner, type RunState } from "./runner.ts";
-import { decodeFile, loadSample } from "./sample.ts";
+import { decodeFile, loadSample, sampleSource } from "./sample.ts";
 import { canRedo, canUndo, commit, createHistory, preview, redo, undo, type History } from "./history.ts";
 import type { InspectTarget } from "./protocol.ts";
 import { StageView } from "./StageView.tsx";
 import { StepList } from "./StepList.tsx";
+import { CheckpointSidebar } from "./CheckpointSidebar.tsx";
+import { createCheckpoint, restoreFrom } from "./checkpoints.ts";
+import { openImage, SAMPLE_NAME, startSession } from "./session.ts";
+import { defaultLocalStorage, openLibrary, type Checkpoint, type Library, type ProjectStore, type Source as StoredSource } from "./storage/index.ts";
+import { captureThumbnail } from "./thumbnail.ts";
 
 const registry = createRegistry();
-const STORAGE_KEY = "plotlab:recipe";
 
-function loadSaved(): Recipe {
-  try {
-    const raw = localStorage.getItem(STORAGE_KEY);
-    if (raw) return loadRecipe(JSON.parse(raw), registry).recipe;
-  } catch {
-    /* fall through to default */
-  }
-  return defaultRecipe();
-}
+/** A stored recipe, upgraded (ADR 0002); throws if it can't be read. */
+const parseRecipe = (json: unknown) => {
+  const { recipe, warnings } = loadRecipe(json, registry);
+  return { recipe, warnings: warnings.map((w) => w.message) };
+};
+const decodeStored = (p: ProjectStore, s: StoredSource, warn?: (m: string) => void) => decodeFile(new File([s.bytes], p.name, { type: s.type }), warn);
+/** The label and file stem for a project's image ("sample" keeps its special wording). */
+const nameOf = (p: ProjectStore) => (p.name === SAMPLE_NAME ? "sample" : p.name);
+const errText = (e: unknown) => (e instanceof Error ? e.message : String(e));
 
 function download(name: string, data: string | Uint8Array, type: string) {
   const a = document.createElement("a");
@@ -40,7 +44,7 @@ const fmtTime = (s: number) => {
 };
 
 export function App() {
-  const [history, setHistory] = useState<History<Recipe>>(() => createHistory(loadSaved()));
+  const [history, setHistory] = useState<History<Recipe>>(() => createHistory(defaultRecipe()));
   const recipe = history.present;
   const [run, setRun] = useState<RunState>(EMPTY_RUN);
   const [live, setLive] = useState(true);
@@ -56,6 +60,14 @@ export function App() {
   const runner = useMemo(() => new Runner(setRun), []);
   const recipeRef = useRef(recipe);
   recipeRef.current = recipe;
+  // Storage (ADR 0014): the open project (its image, recipe and checkpoints) in a library.
+  const [library, setLibrary] = useState<Library | null>(null);
+  const [project, setProject] = useState<ProjectStore | null>(null);
+  const [persistent, setPersistent] = useState(true);
+  // Input waits until the last session is back, so nothing done meanwhile gets overwritten.
+  const [ready, setReady] = useState(false);
+  const [sidebar, setSidebar] = useState(false);
+  const [saved, setSaved] = useState(0);
   // Where the current source enters the chain (an SVG enters as lines, separations as layers).
   const entry = useRef<{ stage: StageKind; label: string }>({ stage: "image", label: "the sample" });
   /** Fit a recipe to the current source's entry stage; returns it and what to tell the person. */
@@ -63,31 +75,93 @@ export function App() {
     const e = enterAt(r, entry.current.stage, registry);
     return { recipe: e.recipe, note: describeEntry(entry.current.label, entry.current.stage, e) };
   };
-  const openSource = (src: Source, name: string, key: string, warnings: string[]) => {
-    entry.current = { stage: sourceStage(src), label: sourceLabel(name, src) };
+  /** Show a decoded source. Every way in (startup, open, restore) goes through here, then `enter`. */
+  const takeSource = (src: Source, name: string, key: string) => {
+    entry.current = { stage: sourceStage(src), label: name === "sample" ? "the sample" : sourceLabel(name, src) };
     runner.setSource(src, key);
-    const { recipe: r, note } = enter(recipeRef.current);
-    // Steps the new source can't use are switched off as one Back step (none if nothing changed).
-    setHistory((h) => commit(h, r));
-    runner.request(r, false);
-    const lines = [...warnings, ...(note ? [note] : [])];
-    setNotice(lines.length ? lines.join("\n") : null);
+    setSourceName(name);
   };
 
+  // Start: reopen the last project with its recipe (image and settings survive a reload).
   useEffect(() => {
-    void loadSample().then((src) => openSource(src, "the sample", "sample", []));
-    return () => runner.dispose();
+    let alive = true;
+    void (async () => {
+      const ls = defaultLocalStorage();
+      const sample = () => sampleSource(SAMPLE_NAME);
+      const lost = () => setNotice("Storage was upgraded in another tab. Reload this page to keep saving.");
+      let opened = await openLibrary({ localStorage: ls, onLost: lost });
+      let session;
+      try {
+        session = await startSession({ ...opened, localStorage: ls, sample, parse: parseRecipe });
+      } catch {
+        // Storage opened but failed on use: carry on in memory (ADR 0014: never block the work).
+        opened = await openLibrary({ factory: undefined, localStorage: ls });
+        session = await startSession({ ...opened, localStorage: ls, sample, parse: parseRecipe });
+      }
+      const s = session;
+      const img = await decodeStored(s.project, s.source, (m) => s.warnings.push(m)).catch(() => {
+        s.warnings.push("Couldn't read the saved image; showing the sample.");
+        return loadSample();
+      });
+      if (!alive) return;
+      takeSource(img, nameOf(s.project), s.project.id);
+      // Fitting the restored session to its image isn't a Back step: it's where the work starts.
+      const { recipe: start, note } = enter(s.recipe ?? recipeRef.current);
+      setHistory(createHistory(start));
+      recipeRef.current = start;
+      if (note) s.warnings.push(note);
+      if (s.warnings.length) setNotice(s.warnings.join("\n"));
+      setLibrary(opened.library);
+      setProject(s.project);
+      setPersistent(opened.persistent);
+      setReady(true);
+      runner.request(recipeRef.current, false);
+    })();
+    return () => {
+      alive = false;
+      runner.dispose();
+    };
   }, [runner]);
 
+  // Autosave what's committed (not every mid-drag preview) into the open project.
   useEffect(() => {
+    void project?.setRecipe({ recipe: history.base, savedAt: Date.now() }).catch((e) => setNotice(`Couldn't autosave: ${errText(e)}`));
+  }, [project, history.base]);
+
+  const saveCheckpoint = async () => {
+    if (!project) return;
+    const svg = document.querySelector<SVGSVGElement>(".view svg.preview");
+    const thumbnail = svg ? await captureThumbnail(svg).catch(() => undefined) : undefined;
     try {
-      localStorage.setItem(STORAGE_KEY, JSON.stringify(recipe));
-    } catch {
-      /* storage unavailable: autosave is a convenience */
+      await createCheckpoint(project, { recipe, ...(thumbnail && { thumbnail }) });
+      setSaved((n) => n + 1);
+      setNotice(sidebar ? null : "Saved a checkpoint. Press S to see your checkpoints.");
+    } catch (e) {
+      setNotice(`Couldn't save the checkpoint: ${errText(e)}`);
     }
-  }, [recipe]);
+  };
+
+  // Restoring is one Back step. A checkpoint of another image opens that project too
+  // (the image switch itself isn't a Back step, as when opening an image).
+  const restore = async (cp: Checkpoint) => {
+    if (!library || !project) return;
+    try {
+      const r = await restoreFrom(library, project, cp, history, parseRecipe);
+      if (r.source) takeSource(await decodeStored(r.project, r.source, (m) => r.warnings.push(m)), nameOf(r.project), r.project.id);
+      const { recipe: fitted, note } = enter(r.recipe);
+      if (note) r.warnings.push(note);
+      setProject(r.project);
+      setHistory((h) => commit(h, fitted));
+      setNotice(r.warnings.length ? r.warnings.join("\n") : null);
+      if (live) runner.request(fitted, false);
+      else setDirty(true);
+    } catch (e) {
+      setNotice(`Couldn't restore that checkpoint: ${errText(e)}`);
+    }
+  };
 
   const apply = (next: Recipe, proxy: boolean, _step?: AnyStep) => {
+    if (!ready) return;
     // A drag previews; releasing commits, so one drag is one Back step.
     setHistory((h) => (proxy ? preview(h, next) : commit(h, next)));
     // The time budget only changes the readout, which is computed from the last estimate.
@@ -143,6 +217,7 @@ export function App() {
   };
 
   const loadFile = async (file: File) => {
+    if (!ready) return;
     if (file.name.endsWith(".json")) {
       try {
         const { recipe: loaded, warnings } = loadRecipe(JSON.parse(await file.text()), registry);
@@ -157,9 +232,31 @@ export function App() {
     }
     try {
       const warnings: string[] = [];
-      const src = await decodeFile(file, (m) => warnings.push(m));
-      setSourceName(file.name);
-      openSource(src, file.name, `${file.name}:${file.size}:${file.lastModified}`, warnings);
+      const img = await decodeFile(file, (m) => warnings.push(m));
+      // The image is a project (id: its content hash): new, or reopened with its last settings.
+      const opened = library ? await openImage(library, { bytes: new Uint8Array(await file.arrayBuffer()), name: file.name, type: file.type }).catch((e) => e as Error) : null;
+      let next = recipe;
+      if (opened instanceof Error || !opened) {
+        warnings.push(`Couldn't keep ${file.name} in browser storage (${opened ? opened.message : "storage isn't open"}). It won't survive a reload, and checkpoints are off until you reload.`);
+        setProject(null);
+      } else {
+        if (opened.saved) {
+          try {
+            next = parseRecipe(opened.saved.recipe).recipe;
+            warnings.push(`Reopened ${file.name} with its last settings. Back returns to the settings you had.`);
+          } catch {
+            warnings.push(`${file.name}'s last settings couldn't be read; keeping the current ones.`);
+          }
+        }
+        setProject(opened.project);
+      }
+      takeSource(img, file.name, opened && !(opened instanceof Error) ? opened.project.id : `${file.name}:${file.size}:${file.lastModified}`);
+      // Reopened settings, and steps this source can't use switched off, are one Back step.
+      const { recipe: fitted, note } = enter(next);
+      setHistory((h) => commit(h, fitted));
+      if (note) warnings.push(note);
+      runner.request(fitted, false);
+      setNotice(warnings.length ? warnings.join("\n") : null);
     } catch (e) {
       setNotice(`Couldn't read ${file.name}${e instanceof Error && e.message ? `: ${e.message}` : ""}. Try PNG, JPEG, WebP, TIFF or SVG.`);
     }
@@ -238,6 +335,12 @@ export function App() {
             Update
           </button>
         )}
+        <button onClick={() => void saveCheckpoint()} disabled={!project} title="Save the current settings as a checkpoint, with a small picture">
+          ＋ Checkpoint
+        </button>
+        <button className={sidebar ? "on" : ""} onClick={() => setSidebar(!sidebar)} aria-pressed={sidebar} title="Show or hide your checkpoints (S)">
+          Checkpoints
+        </button>
         <button className="reset" onClick={startOver} title="Start over from the default recipe. Keeps your image. Back undoes it.">
           ↺ Reset
         </button>
@@ -268,6 +371,12 @@ export function App() {
             inspect={inspect}
             onInspect={inspectStage}
             onChange={(r, proxy, step) => apply(r, proxy, step)}
+            onReplace={(r) => {
+              // A preset meets the source where it enters, like opening a recipe file does.
+              const { recipe: fitted, note } = enter(r);
+              apply(fitted, false);
+              setNotice(note);
+            }}
             onRun={() => {
               setDirty(false);
               runner.request(recipe, false, true);
@@ -386,7 +495,22 @@ export function App() {
             ))}
           </details>
         </section>
+        <CheckpointSidebar
+          open={sidebar}
+          onToggle={() => setSidebar((o) => !o)}
+          library={library}
+          project={project}
+          persistent={persistent}
+          version={saved}
+          onSave={() => void saveCheckpoint()}
+          onRestore={(cp) => void restore(cp)}
+        />
       </main>
+      {!ready && (
+        <div className="starting" role="status">
+          Opening your last session…
+        </div>
+      )}
       {help && <HelpPanel markdown={help.help} onClose={() => setHelp(null)} />}
     </div>
   );

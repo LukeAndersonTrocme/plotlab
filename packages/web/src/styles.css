@@ -128,3 +128,34 @@ header button.reset { font-weight: 600; border-color: var(--accent); color: var(
 .changed-dot { width: 6px; height: 6px; border-radius: 50%; background: var(--changed); flex: none; }
 button.icon.reset-one { padding: 0 4px; font-size: 12px; line-height: 1.2; opacity: 0.7; }
 button.icon.reset-one:hover { opacity: 1; }
+
+/* M3b: Checkpoints sidebar (right edge; a bottom drawer on phones, #46 does the rest) */
+header button.on { background: var(--accent); color: #fff; border-color: var(--accent); }
+.ckpt-sidebar { width: 212px; flex: none; display: flex; flex-direction: column; gap: 6px; padding: 10px; border-left: 1px solid var(--line); background: var(--panel); min-height: 0; }
+.ckpt-head { display: flex; justify-content: space-between; align-items: center; }
+.ckpt-save { width: 100%; }
+.ckpt-all { font-size: 13px; }
+.ckpt-warn { color: #8a2a1f; }
+.ckpt-scroll { flex: 1; min-height: 0; overflow-y: auto; }
+.ckpt-group h3 { font-size: 12px; font-weight: 600; margin: 10px 0 4px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ckpt-current { color: var(--muted); font-weight: normal; }
+.ckpt-group ul { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 10px; }
+.ckpt { font-size: 12px; }
+.ckpt-thumb { display: block; width: 100%; padding: 2px; border-radius: 6px; background: var(--bg); min-height: 60px; }
+.ckpt-thumb:hover { border-color: var(--accent); }
+.ckpt-thumb img { display: block; width: 100%; height: auto; border-radius: 4px; }
+.ckpt-nothumb { display: grid; place-items: center; height: 60px; color: var(--muted); }
+.ckpt-meta { display: flex; align-items: center; gap: 4px; margin-top: 3px; }
+.ckpt-name { flex: 1; min-width: 0; text-align: left; font-weight: 500; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ckpt-rename { flex: 1; min-width: 0; font-size: 12px; }
+.ckpt-tools { display: inline-flex; gap: 2px; }
+.ckpt-tools button.icon { padding: 0 5px; font-size: 12px; }
+.ckpt-when { color: var(--muted); }
+.ckpt-note { color: var(--muted); white-space: pre-wrap; margin-top: 2px; }
+.ckpt-note-edit { width: 100%; font: inherit; font-size: 12px; margin-top: 3px; }
+@media (max-width: 760px) {
+  .ckpt-sidebar { position: fixed; left: 0; right: 0; bottom: 0; width: auto; max-height: 55vh; border-left: none; border-top: 1px solid var(--line); border-radius: 12px 12px 0 0; box-shadow: 0 -4px 16px rgba(0, 0, 0, 0.12); z-index: 5; }
+  .ckpt-group ul { flex-direction: row; overflow-x: auto; }
+  .ckpt { flex: 0 0 140px; }
+}
+.starting { position: fixed; inset: 0; display: grid; place-items: center; background: rgba(244, 242, 238, 0.6); color: var(--muted); z-index: 20; cursor: progress; }

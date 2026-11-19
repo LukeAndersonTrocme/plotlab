@@ -11,7 +11,28 @@ export async function loadSample(): Promise<Source> {
   return textSample();
 }
 
+/**
+ * The sample as a source with real bytes, so it is a project like any other image and its
+ * checkpoints can travel in a bundle. The drawn-text fallback is encoded as PNG.
+ */
+export async function sampleSource(name: string): Promise<{ bytes: Uint8Array; name: string; type: string }> {
+  try {
+    const res = await fetch(`${import.meta.env.BASE_URL}sample-mona-lisa.jpg`);
+    if (res.ok) return { bytes: new Uint8Array(await res.arrayBuffer()), name, type: "image/jpeg" };
+  } catch {
+    /* fall back */
+  }
+  const png = await drawTextSample().convertToBlob({ type: "image/png" });
+  return { bytes: new Uint8Array(await png.arrayBuffer()), name, type: "image/png" };
+}
+
 function textSample(): RawImage {
+  const c = drawTextSample();
+  const d = c.getContext("2d")!.getImageData(0, 0, c.width, c.height);
+  return imageFromRGBA(c.width, c.height, d.data);
+}
+
+function drawTextSample(): OffscreenCanvas {
   const w = 900, h = 450;
   const c = new OffscreenCanvas(w, h);
   const g = c.getContext("2d")!;
@@ -24,8 +45,7 @@ function textSample(): RawImage {
   g.fillText("plot", w / 2, h / 2 - 40);
   g.font = "italic 70px Georgia, serif";
   g.fillText("drop an image here", w / 2, h / 2 + 120);
-  const d = g.getImageData(0, 0, w, h);
-  return imageFromRGBA(w, h, d.data);
+  return c;
 }
 
 /**

@@ -37,6 +37,8 @@ export function StepList(props: {
   inspect: InspectTarget;
   onInspect: (t: InspectTarget) => void;
   onChange: (r: Recipe, proxy: boolean, step?: AnyStep) => void;
+  /** A whole new chain (a preset): the app fits it to the source before applying it. */
+  onReplace: (r: Recipe) => void;
   onRun: () => void;
   onHelp: (def: AnyStep) => void;
   onNotice: (msg: string) => void;
@@ -223,7 +225,7 @@ export function StepList(props: {
               : next.target.kind !== recipe.target.kind
                 ? ` and switch the output to ${label}`
                 : ` and change the ${label} settings`;
-          if (recipe.steps.length === 0 || window.confirm(`Replace your steps with "${p.title}"${also}?`)) props.onChange(next, false);
+          if (recipe.steps.length === 0 || window.confirm(`Replace your steps with "${p.title}"${also}?`)) props.onReplace(next);
         }}
       >
         <option value="">Start from a preset…</option>
