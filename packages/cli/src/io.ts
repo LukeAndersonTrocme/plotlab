@@ -1,19 +1,17 @@
 import { readFileSync, readdirSync } from "node:fs";
-import { createRequire } from "node:module";
 import { basename, dirname, extname, join } from "node:path";
 import { decodeTiffSource, imageFromRGBA, parseSvg, sourceStage, type RawImage, type Source } from "@plotlab/engine";
 import { PNG } from "pngjs";
 import jpeg from "jpeg-js";
+import webp from "@cwasm/webp";
 
 export const INPUT_FORMATS = ".png, .jpg, .webp, .tif, .svg";
 
-/** libwebp compiled to WASM (no native build). Loaded on first use: it compiles the module. */
-type WebpDecode = (data: Uint8Array) => { width: number; height: number; data: Uint8ClampedArray };
-let webp: WebpDecode | null = null;
-function decodeWebp(buf: Uint8Array) {
-  webp ??= (createRequire(import.meta.url)("@cwasm/webp") as { decode: WebpDecode }).decode;
-  return webp(buf);
-}
+/**
+ * libwebp compiled to WASM (no native build). A static import so the bundler can follow it;
+ * scripts/build.mjs inlines its .wasm file, which the package otherwise reads from disk.
+ */
+const decodeWebp = (buf: Uint8Array) => webp.decode(buf);
 
 /**
  * Decode a source file: PNG, JPEG, WebP and single-page TIFF (8/16-bit) enter as an image;

@@ -40,6 +40,15 @@ describe("bundled CLI", () => {
     for (const s of createRegistry().list()) expect(r.stdout).toMatch(new RegExp(`^${s.id} `, "m"));
   });
 
+  // Every input format decodes from the bare folder too: no decoder may load files
+  // (such as a .wasm) from node_modules at run time.
+  it.each(["shapes.png", "shapes.webp", "separations.tif", "drawing.svg"])("renders %s from the bundle alone", (fixture) => {
+    const golden = join(pkgDir, "..", "..", "golden");
+    const r = cli("run", join(golden, "cases", "shapes-centerline.recipe.json"), "-i", join(golden, "fixtures", fixture), "-o", join(dir, "out", fixture));
+    expect(r.status, r.stderr).toBe(0);
+    expect(readFileSync(join(dir, "out", fixture, "plot.svg"), "utf8")).toContain("<path");
+  });
+
   it("--help exits 0 and prints usage", () => {
     const r = cli("--help");
     expect(r.status, r.stderr).toBe(0);
