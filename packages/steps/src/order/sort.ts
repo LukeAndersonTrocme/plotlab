@@ -139,3 +139,22 @@ function twoOpt(
     if (!improved) break;
   }
 }
+
+/**
+ * Single stroke (a TSP tour, open-ended): order every stroke with nearest-first and 2-opt
+ * (reversing allowed), then join them end to start into one continuous line. Pen taps
+ * ([p, p]) become plain vertices. Returns [] for no strokes, otherwise exactly one path.
+ */
+export function singleStroke(paths: Position[][]): Position[][] {
+  const ordered = orderPaths(paths, { allowReverse: true, improve: true });
+  if (!ordered.length) return [];
+  const line: Position[] = [];
+  for (const p of ordered) {
+    for (const q of p) {
+      const last = line[line.length - 1];
+      if (!last || last[0] !== q[0] || last[1] !== q[1]) line.push(q);
+    }
+  }
+  // A single tap is still a pen touch.
+  return [line.length === 1 ? [line[0]!, line[0]!] : line];
+}

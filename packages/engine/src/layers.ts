@@ -43,7 +43,14 @@ export async function applyLayerStep(
   }
   const grid = { width: input.width, height: input.height, frame: input.frame };
   // Params were validated by loadRecipe; the registry erases their static type.
-  const run = (l: Layer) => def.runLayer!(l, { ...rs.params, ...rs.layerParams?.[l.id] } as never, ctx, grid);
+  // Progress runs once from 0 to 1 across all the selected layers, not once per layer.
+  const total = input.layers.filter(selected).length;
+  let done = 0;
+  const run = (l: Layer) => {
+    const k = done++;
+    const progress = ctx.progress && ((f: number) => ctx.progress!((k + f) / total));
+    return def.runLayer!(l, { ...rs.params, ...rs.layerParams?.[l.id] } as never, { ...ctx, progress }, grid);
+  };
   if (def.output === "layers") {
     const layers: Layer[] = [];
     for (const l of input.layers) layers.push(selected(l) ? ((await run(l)) as Layer) : l);

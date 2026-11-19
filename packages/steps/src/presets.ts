@@ -5,6 +5,7 @@ import { fill } from "./fill/index.ts";
 import { levels } from "./levels/index.ts";
 import { order } from "./order/index.ts";
 import { pixelate } from "./pixelate/index.ts";
+import { stipple } from "./stipple/index.ts";
 import { threshold } from "./threshold/index.ts";
 import { tone } from "./tone/index.ts";
 
@@ -69,6 +70,18 @@ export const presets: Preset[] = [
       s(fill, { mapping: "cycle", minSpacing: 0.7, maxSpacing: 2.2 }),
       s(order),
     ],
+  },
+  {
+    id: "stipple",
+    title: "Stipple portrait",
+    summary: "Evenly spread pen dots, denser where the picture is darker (experimental).",
+    steps: [s(tone, { contrast: 1.5 }), s(stipple), s(order)],
+  },
+  {
+    id: "tsp-line",
+    title: "One-line stipple (TSP)",
+    summary: "Stipple dots joined into a single continuous line that never lifts the pen (experimental).",
+    steps: [s(tone, { contrast: 1.5 }), s(stipple, { spacing: 1.6 }), s(order, { method: "single" })],
   },
 ];
 
