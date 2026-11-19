@@ -1,7 +1,7 @@
 import { defineStep, featurePaths, toPlot, type Plot } from "@plotlab/engine";
-import { orderPaths } from "./sort.ts";
+import { orderPaths, singleStroke } from "./sort.ts";
 
-export { orderPaths, travelLength } from "./sort.ts";
+export { orderPaths, singleStroke, travelLength } from "./sort.ts";
 import { help } from "../help.generated.ts";
 
 export const order = defineStep({
@@ -16,10 +16,11 @@ export const order = defineStep({
     method: {
       type: "enum",
       label: "Order",
-      help: "Nearest-first saves travel. 'As traced' keeps the order the strokes were made.",
+      help: "Nearest-first saves travel. 'As traced' keeps the order the strokes were made. 'Single stroke' joins everything in each pass into one continuous line, without lifting the pen.",
       options: [
         { value: "nearest", label: "Nearest first" },
         { value: "as-traced", label: "As traced" },
+        { value: "single", label: "Single stroke (one line)" },
       ],
       default: "nearest",
     },
@@ -42,6 +43,7 @@ export const order = defineStep({
   run(geo, p, ctx): Plot {
     const paths = geo.layers.map((l) => {
       const ps = l.features.features.flatMap(featurePaths);
+      if (p.method === "single") return singleStroke(ps);
       return p.method === "nearest" ? orderPaths(ps, { allowReverse: p.allowReverse, improve: p.improve }) : ps;
     });
     return toPlot(geo, ctx, paths);

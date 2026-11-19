@@ -115,6 +115,11 @@ export function StepList(props: {
           <button className="title link" title="Show this step's output" onClick={() => props.onInspect(index)}>
             {def.title}
           </button>
+          {def.experimental && (
+            <span className="badge experimental" title="Experimental: settings may change in a later version. Old recipes still load, with a warning.">
+              experimental
+            </span>
+          )}
           <span className="card-tools">
             <button className="icon" aria-label={`Move ${def.title} up`} disabled={index === 0} onClick={() => commit(moveStep(recipe, index, index - 1, registry))}>
               ↑
@@ -231,7 +236,7 @@ function AddStep(props: { recipe: Recipe; registry: StepRegistry; onAdd: (r: Rec
       <option value="">+ Add step…</option>
       {options.map(({ def, res }) => (
         <option key={def.id} value={def.id} title={"reason" in res ? res.reason : def.summary}>
-          {def.title} ({STAGE_NAMES[def.input as StageKind]} → {STAGE_NAMES[def.output as StageKind]}){"reason" in res ? " · doesn't fit yet" : ""}
+          {def.title} ({STAGE_NAMES[def.input as StageKind]} → {STAGE_NAMES[def.output as StageKind]}){def.experimental ? " · experimental" : ""}{"reason" in res ? " · doesn't fit yet" : ""}
         </option>
       ))}
     </select>

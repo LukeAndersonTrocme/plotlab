@@ -43,6 +43,11 @@ export interface StepDefinition<
   /** Bump when output for the same params changes. Provide `migrate` for param changes. */
   version: number;
   title: string;
+  /**
+   * New method that may still change: the UI shows a badge, and recipes written for an
+   * older version load with a warning instead of a guaranteed `migrate` (ADR 0002).
+   */
+  experimental?: boolean;
   /** One-line summary (tooltip, `steps list`). */
   summary: string;
   input: I;
