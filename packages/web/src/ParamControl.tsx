@@ -12,13 +12,19 @@ export function ParamControl(props: {
   value: unknown;
   onDrag: (v: unknown) => void;
   onCommit: (v: unknown) => void;
+  /** Differs from its default (or, in a layer's view, is overridden for that layer). */
+  changed?: boolean;
+  /** Back to the default (or drop the layer's override). Also on double-click. */
+  onReset?: () => void;
 }) {
   const { name, decl: d, value } = props;
   const id = `p-${name}-${Math.random().toString(36).slice(2, 7)}`;
+  const reset = props.changed ? props.onReset : undefined;
+  const label = <ParamLabel htmlFor={id} text={d.label} changed={props.changed} onReset={reset} />;
   if (d.type === "number" && d.seed) {
     return (
       <div className="param" title={d.help}>
-        <label htmlFor={id}>{d.label}</label>
+        {label}
         <div className="param-row">
           <input
             id={id}
@@ -41,7 +47,7 @@ export function ParamControl(props: {
     const v = value as number;
     return (
       <div className="param" title={d.help}>
-        <label htmlFor={id}>{d.label}</label>
+        {label}
         <div className="param-row">
           <input
             id={id}
@@ -51,6 +57,7 @@ export function ParamControl(props: {
             step={d.step ?? "any"}
             value={v}
             onChange={(e) => props.onDrag(Number(e.target.value))}
+            onDoubleClick={reset}
             onPointerUp={(e) => props.onCommit(Number((e.target as HTMLInputElement).value))}
             onKeyUp={(e) => props.onCommit(Number((e.target as HTMLInputElement).value))}
           />
@@ -71,9 +78,10 @@ export function ParamControl(props: {
   if (d.type === "text") {
     return (
       <div className="param" title={d.help}>
-        <label htmlFor={id}>{d.label}</label>
+        {label}
         <input
           id={id}
+          key={value as string}
           className="text"
           type="text"
           placeholder={d.placeholder}
@@ -84,11 +92,11 @@ export function ParamControl(props: {
       </div>
     );
   }
-  if (d.type === "table") return <TableControl decl={d} value={value as Record<string, Record<string, number>>} onCommit={props.onCommit} />;
+  if (d.type === "table") return <TableControl decl={d} value={value as Record<string, Record<string, number>>} onCommit={props.onCommit} label={label} />;
   if (d.type === "enum") {
     return (
       <div className="param" title={d.help}>
-        <label htmlFor={id}>{d.label}</label>
+        {label}
         <select id={id} value={value as string} onChange={(e) => props.onCommit(e.target.value)}>
           {d.options.map((o) => (
             <option key={o.value} value={o.value}>
@@ -104,12 +112,13 @@ export function ParamControl(props: {
       <label>
         <input type="checkbox" checked={value as boolean} onChange={(e) => props.onCommit(e.target.checked)} /> {d.label}
       </label>
+      {props.changed && <ChangedMark onReset={reset} />}
     </div>
   );
 }
 
 /** Per-row overrides (e.g. one band's spacing). Blank cells use the step's other settings. */
-function TableControl(props: { decl: TableParam; value: Record<string, Record<string, number>>; onCommit: (v: unknown) => void }) {
+function TableControl(props: { decl: TableParam; value: Record<string, Record<string, number>>; onCommit: (v: unknown) => void; label: JSX.Element }) {
   const { decl: d } = props;
   const value = props.value ?? {};
   const rows = Object.keys(value).sort((a, b) => Number(a) - Number(b));
@@ -124,7 +133,7 @@ function TableControl(props: { decl: TableParam; value: Record<string, Record<st
   const nextRow = String(rows.length ? Math.max(...rows.map(Number)) + 1 : 1);
   return (
     <div className="param" title={d.help}>
-      <label>{d.label}</label>
+      {props.label}
       {rows.length > 0 && (
         <table className="ptable">
           <thead>
@@ -189,5 +198,30 @@ function TableControl(props: { decl: TableParam; value: Record<string, Record<st
       )}
       <button onClick={() => props.onCommit({ ...value, [nextRow]: { [cols[0]![0]]: cols[0]![1].min } })}>+ Override a {d.rowLabel.toLowerCase()}</button>
     </div>
+  );
+}
+
+/** A param's label. Changed values get a dot and a ↺; double-clicking the label resets too. */
+function ParamLabel(props: { htmlFor: string; text: string; changed?: boolean; onReset?: () => void }) {
+  return (
+    <div className="param-label">
+      <label htmlFor={props.htmlFor} onDoubleClick={props.onReset} title={props.onReset ? "Double-click to reset" : undefined}>
+        {props.text}
+      </label>
+      {props.changed && <ChangedMark onReset={props.onReset} />}
+    </div>
+  );
+}
+
+function ChangedMark(props: { onReset?: () => void }) {
+  return (
+    <>
+      <span className="changed-dot" title="Changed from the default" aria-label="changed" />
+      {props.onReset && (
+        <button className="icon reset-one" title="Back to the default" aria-label="Reset to default" onClick={props.onReset}>
+          ↺
+        </button>
+      )}
+    </>
   );
 }

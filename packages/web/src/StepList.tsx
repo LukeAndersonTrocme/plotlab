@@ -2,9 +2,12 @@ import { useState } from "react";
 import {
   checkChain,
   insertStep,
+  isChanged,
   isVisible,
   moveStep,
   removeStep,
+  resetParam,
+  resetStep,
   type AnyStep,
   type LayerInfo,
   type ParamDecl,
@@ -80,6 +83,10 @@ export function StepList(props: {
     const layerStep = Boolean(def.runLayer);
     const layer = editing[index] ?? null;
     const values = layer === null ? rs.params : { ...rs.params, ...rs.layerParams?.[layer] };
+    const changedHere = (name: string, decl: ParamDecl) =>
+      layer === null ? isChanged(decl, rs.params[name]) : rs.layerParams?.[layer]?.[name] !== undefined;
+    const stepChanged =
+      Object.keys(rs.layerParams ?? {}).length > 0 || Object.entries(def.params).some(([n, d]) => isChanged(d as ParamDecl, rs.params[n]));
     const stale = props.stale.includes(index);
     const ran = props.steps.some((s) => s.index === index);
     items.push(
@@ -143,6 +150,16 @@ export function StepList(props: {
                 else props.onChange({ ...recipe, steps }, false);
               }}
             />
+            {stepChanged && (
+              <button
+                className="icon"
+                title="Defaults for this step: put every setting back (keeps the seed)"
+                aria-label={`Defaults for ${def.title}`}
+                onClick={() => props.onChange(resetStep(recipe, index, registry), false)}
+              >
+                ↺
+              </button>
+            )}
             <button className="help-btn" onClick={() => props.onHelp(def)} aria-label={`Help for ${def.title}`}>
               ?
             </button>
@@ -171,6 +188,8 @@ export function StepList(props: {
                 value={values[name]}
                 onDrag={(v) => setParam(index, name, v, true)}
                 onCommit={(v) => setParam(index, name, v, false)}
+                changed={changedHere(name, decl as ParamDecl)}
+                onReset={() => props.onChange(resetParam(recipe, index, name, registry, layer ?? undefined), false)}
               />
             ) : null,
           )}

@@ -5,6 +5,7 @@
   --muted: #6b6860;
   --line: #dedad2;
   --accent: #2f5d8a;
+  --changed: #c8741e;
   --paper: #fffdf8;
   --warn: #a8361a;
   font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
@@ -117,3 +118,13 @@ button.link { border: none; background: none; padding: 0; color: inherit; font-w
 .ptable th { text-align: left; font-weight: normal; color: var(--muted); padding: 0 4px 2px 0; }
 .ptable td { padding: 1px 4px 1px 0; }
 .num.tiny { width: 56px; }
+
+/* M3a: Back/Forward, Reset, changed marks */
+.history-btns { display: inline-flex; gap: 4px; }
+header button.reset { font-weight: 600; border-color: var(--accent); color: var(--accent); }
+.param-label { display: flex; align-items: center; gap: 4px; font-size: 13px; margin-bottom: 2px; }
+.param-label > label { margin: 0; cursor: default; user-select: none; }
+.param-bool { display: flex; align-items: center; gap: 4px; }
+.changed-dot { width: 6px; height: 6px; border-radius: 50%; background: var(--changed); flex: none; }
+button.icon.reset-one { padding: 0 4px; font-size: 12px; line-height: 1.2; opacity: 0.7; }
+button.icon.reset-one:hover { opacity: 1; }
