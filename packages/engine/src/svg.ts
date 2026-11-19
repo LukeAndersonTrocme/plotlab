@@ -18,6 +18,7 @@ export interface XmlNode {
   children: XmlNode[];
 }
 
+const SVG_NS = "http://www.w3.org/2000/svg";
 const BASIC_ENTITIES: Record<string, string> = { lt: "<", gt: ">", amp: "&", quot: '"', apos: "'" };
 
 /**
@@ -27,10 +28,12 @@ const BASIC_ENTITIES: Record<string, string> = { lt: "<", gt: ">", amp: "&", quo
  */
 export function parseXml(text: string): XmlNode {
   const entities: Record<string, string> = { ...BASIC_ENTITIES };
-  const decode = (s: string) =>
+  const decode = (s: string, at: number) =>
     s.replace(/&(#x[0-9a-fA-F]+|#\d+|[A-Za-z_][\w.-]*);/g, (m, e: string) => {
-      if (e[0] === "#") return String.fromCodePoint(e[1] === "x" ? parseInt(e.slice(2), 16) : parseInt(e.slice(1), 10));
-      return entities[e] ?? m;
+      if (e[0] !== "#") return entities[e] ?? m;
+      const code = e[1] === "x" ? parseInt(e.slice(2), 16) : parseInt(e.slice(1), 10);
+      if (!(code >= 1 && code <= 0x10ffff)) fail(at, `${m} is not a character`);
+      return String.fromCodePoint(code);
     });
   const lineAt = (i: number) => text.slice(0, i).split("\n").length;
   const fail = (i: number, what: string): never => {
@@ -55,8 +58,14 @@ export function parseXml(text: string): XmlNode {
       // DOCTYPE, maybe with an internal subset in [...].
       const open = text.indexOf("[", i), close = text.indexOf(">", i);
       if (open >= 0 && open < close) {
-        const end = text.indexOf("]", open);
-        if (end < 0) fail(i, "unclosed DOCTYPE");
+        // The subset ends at the first ] outside a quoted entity value.
+        let end = open + 1;
+        for (let q = ""; end < text.length && (q || text[end] !== "]"); end++) {
+          const c = text[end]!;
+          if (q) q = c === q ? "" : q;
+          else if (c === '"' || c === "'") q = c;
+        }
+        if (end >= text.length) fail(i, "unclosed DOCTYPE");
         for (const m of text.slice(open, end).matchAll(/<!ENTITY\s+([\w.-]+)\s+(?:"([^"]*)"|'([^']*)')\s*>/g)) entities[m[1]!] = m[2] ?? m[3] ?? "";
         i = skipTo(end, ">");
       } else i = skipTo(i, ">");
@@ -85,7 +94,7 @@ export function parseXml(text: string): XmlNode {
           if (a![4] === ">") stack.push(node);
           break;
         }
-        node.attrs[a![1]!] = decode(a![2] ?? a![3] ?? "");
+        node.attrs[a![1]!] = decode(a![2] ?? a![3] ?? "", j);
       }
       i = j;
     }
@@ -121,7 +130,23 @@ function maxScale(m: Matrix): number {
 
 const NUMBER = /[+-]?(?:\d+\.?\d*|\.\d+)(?:[eE][+-]?\d+)?/g;
 const NUMBER_AT = new RegExp(NUMBER.source, "y");
-const numbers = (s: string | undefined): number[] => (s?.match(NUMBER) ?? []).map(Number);
+const TOO_LARGE = "this SVG has a number too large to draw";
+/** A parsed number, or the friendly error for 1e400 and the like. */
+function finite(n: number): number {
+  if (!Number.isFinite(n)) throw new Error(TOO_LARGE);
+  return n;
+}
+const numbers = (s: string | undefined): number[] => (s?.match(NUMBER) ?? []).map((x) => finite(Number(x)));
+/** Most segments one curve or arc is flattened into; beyond it the curve is simplified (with a warning). */
+export const MAX_CURVE_SEGMENTS = 10000;
+/** Segments for a curve: at least 1, at most MAX_CURVE_SEGMENTS (NaN from 0/0 means a straight curve). */
+function segments(raw: number, stats: { capped: number }): number {
+  if (raw > MAX_CURVE_SEGMENTS) {
+    stats.capped++;
+    return MAX_CURVE_SEGMENTS;
+  }
+  return Math.max(1, Math.ceil(raw) || 1);
+}
 
 function parseTransform(s: string | undefined): Matrix {
   let m = IDENTITY;
@@ -150,7 +175,7 @@ const UNIT_MM: Record<string, number> = { "": 25.4 / 96, px: 25.4 / 96, mm: 1, c
 function lengthMm(s: string | undefined): number | null {
   const m = /^\s*([+-]?(?:\d+\.?\d*|\.\d+)(?:[eE][+-]?\d+)?)\s*([a-zA-Z]*)\s*$/.exec(s ?? "");
   const unit = UNIT_MM[m?.[2]?.toLowerCase() ?? "%"];
-  return m && unit !== undefined ? Number(m[1]) * unit : null;
+  return m && unit !== undefined ? finite(Number(m[1]) * unit) : null;
 }
 
 /** A polyline in mm; closed ones become polygon rings. */
@@ -166,9 +191,15 @@ class PathBuilder {
   constructor(
     private m: Matrix,
     private tol: number,
+    private stats: { capped: number },
   ) {}
+  private pt(x: number, y: number): Position {
+    const p = apply(this.m, x, y);
+    if (!Number.isFinite(p[0]) || !Number.isFinite(p[1])) throw new Error(TOO_LARGE);
+    return p;
+  }
   move(x: number, y: number): void {
-    this.cur = { pts: [apply(this.m, x, y)], closed: false };
+    this.cur = { pts: [this.pt(x, y)], closed: false };
     this.subpaths.push(this.cur);
   }
   /** Start a subpath at (x, y) unless one is open (drawing after Z starts from the subpath start). */
@@ -176,7 +207,7 @@ class PathBuilder {
     if (!this.cur) this.move(x, y);
   }
   line(x: number, y: number): void {
-    this.cur!.pts.push(apply(this.m, x, y));
+    this.cur!.pts.push(this.pt(x, y));
   }
   close(): void {
     if (this.cur) this.cur.closed = true;
@@ -184,13 +215,13 @@ class PathBuilder {
   }
   /** Bézier through user-space control points; flattened after the transform (affine maps keep Béziers Béziers). */
   curve(ctrl: Array<[number, number]>): void {
-    const p = ctrl.map(([x, y]) => apply(this.m, x, y));
+    const p = ctrl.map(([x, y]) => this.pt(x, y));
     const second = (i: number) => Math.hypot(p[i]![0] - 2 * p[i + 1]![0] + p[i + 2]![0], p[i]![1] - 2 * p[i + 1]![1] + p[i + 2]![1]);
     // Chord error ≤ max|B''| / (8 n²): cubic |B''| ≤ 6·max second difference, quadratic 2·it.
-    const n =
-      p.length === 4
-        ? Math.ceil(Math.sqrt((3 * Math.max(second(0), second(1))) / (4 * this.tol)))
-        : Math.ceil(Math.sqrt(second(0) / (4 * this.tol)));
+    const n = segments(
+      p.length === 4 ? Math.sqrt((3 * Math.max(second(0), second(1))) / (4 * this.tol)) : Math.sqrt(second(0) / (4 * this.tol)),
+      this.stats,
+    );
     const out = this.cur!.pts;
     for (let i = 1; i < n; i++) {
       const t = i / n, u = 1 - t;
@@ -203,7 +234,7 @@ class PathBuilder {
   arc(cx: number, cy: number, rx: number, ry: number, phi: number, t0: number, dt: number, end?: [number, number]): void {
     const r = Math.max(rx, ry) * maxScale(this.m);
     const step = r > this.tol ? 2 * Math.acos(1 - this.tol / r) : Math.PI / 2;
-    const n = Math.max(1, Math.ceil(Math.abs(dt) / Math.min(step, Math.PI / 2)));
+    const n = segments(Math.abs(dt) / Math.min(step, Math.PI / 2), this.stats);
     const cp = Math.cos(phi), sp = Math.sin(phi);
     const at = (t: number): [number, number] => [cx + rx * cp * Math.cos(t) - ry * sp * Math.sin(t), cy + rx * sp * Math.cos(t) + ry * cp * Math.sin(t)];
     this.ensure(...at(t0));
@@ -249,7 +280,7 @@ function tracePath(d: string, b: PathBuilder): void {
     const m = NUMBER_AT.exec(d);
     if (!m) return null;
     i = NUMBER_AT.lastIndex;
-    return Number(m[0]);
+    return finite(Number(m[0]));
   };
   const flag = (): boolean | null => {
     skip();
@@ -334,7 +365,6 @@ const UNSUPPORTED: Record<string, string> = {
   foreignObject: "foreignObject content isn't read",
 };
 
-const local = (tag: string) => (tag.startsWith("svg:") ? tag.slice(4) : tag.startsWith("sodipodi:") ? tag.slice(9) : tag);
 const hidden = (n: XmlNode) => n.attrs.display === "none" || /(^|;)\s*display\s*:\s*none/.test(n.attrs.style ?? "");
 const coord = (n: XmlNode, a: string) => {
   const v = lengthMm(n.attrs[a]);
@@ -342,8 +372,8 @@ const coord = (n: XmlNode, a: string) => {
   return v === null ? 0 : v / UNIT_MM.px!;
 };
 
-function shapeToFeatures(n: XmlNode, tag: string, m: Matrix, tol: number): GeoFeature[] {
-  const b = new PathBuilder(m, tol);
+function shapeToFeatures(n: XmlNode, tag: string, m: Matrix, tol: number, stats: { capped: number }): GeoFeature[] {
+  const b = new PathBuilder(m, tol, stats);
   if (tag === "path") tracePath(n.attrs.d ?? "", b);
   else if (tag === "line") {
     b.move(coord(n, "x1"), coord(n, "y1"));
@@ -401,6 +431,19 @@ function viewportMatrix(vb: number[] | null, wMm: number, hMm: number, par: stri
   return [s, 0, 0, s, -vx * s + (wMm - vw * s) * ax, -vy * s + (hMm - vh * s) * ay];
 }
 
+/**
+ * A nested <svg>: its x/y and its viewBox mapped into its width/height, in the parent's user
+ * units. Content outside the nested viewport is not clipped (nothing is clipped yet).
+ */
+function nestedViewport(n: XmlNode): Matrix {
+  const at: Matrix = [1, 0, 0, 1, coord(n, "x"), coord(n, "y")];
+  const vb = numbers(n.attrs.viewBox);
+  if (vb.length !== 4 || !(vb[2]! > 0 && vb[3]! > 0)) return at;
+  const size = (a: string, fallback: number) => (lengthMm(n.attrs[a]) !== null ? coord(n, a) : fallback);
+  // viewportMatrix maps into "mm"; here the target is the parent's user units, the same arithmetic.
+  return mul(at, viewportMatrix(vb, size("width", vb[2]!), size("height", vb[3]!), n.attrs.preserveAspectRatio));
+}
+
 export interface SvgOptions {
   /** Max distance between a curve and its flattened polyline, mm. */
   toleranceMm?: number;
@@ -409,7 +452,19 @@ export interface SvgOptions {
 /** Parse an SVG document into lines in mm, grouped into layers. Throws on files with nothing to draw. */
 export function parseSvg(text: string, opts: SvgOptions = {}): { geometry: RawGeometry; warnings: string[] } {
   const tol = opts.toleranceMm ?? SVG_TOLERANCE_MM;
+  const stats = { capped: 0 };
   const root = parseXml(text);
+  // Any prefix bound to the SVG namespace (ElementTree writes ns0:svg) names SVG elements.
+  const svgPrefixes = new Set(["svg"]);
+  const scan = (n: XmlNode) => {
+    for (const [k, v] of Object.entries(n.attrs)) if (k.startsWith("xmlns:") && v === SVG_NS) svgPrefixes.add(k.slice(6));
+    n.children.forEach(scan);
+  };
+  scan(root);
+  const local = (tag: string) => {
+    const c = tag.indexOf(":");
+    return c >= 0 && svgPrefixes.has(tag.slice(0, c)) ? tag.slice(c + 1) : tag;
+  };
   if (local(root.tag) !== "svg") throw new Error(`this file is not an SVG (its root element is <${root.tag}>)`);
   const vbRaw = numbers(root.attrs.viewBox);
   const vb = vbRaw.length === 4 && vbRaw[2]! > 0 && vbRaw[3]! > 0 ? vbRaw : null;
@@ -429,9 +484,10 @@ export function parseSvg(text: string, opts: SvgOptions = {}): { geometry: RawGe
       skipped.set(tag, (skipped.get(tag) ?? 0) + 1);
       return;
     }
-    const mm = mul(m, parseTransform(n.attrs.transform));
+    let mm = mul(m, parseTransform(n.attrs.transform));
+    if (tag === "svg") mm = mul(mm, nestedViewport(n));
     if (CONTAINERS.has(tag)) for (const c of n.children) walk(c, mm, out);
-    else out.push(...shapeToFeatures(n, tag, mm, tol));
+    else out.push(...shapeToFeatures(n, tag, mm, tol, stats));
   };
 
   const named = (n: XmlNode) => local(n.tag) === "g" && !hidden(n) && Boolean(n.attrs.id || n.attrs["inkscape:label"]);
@@ -458,6 +514,9 @@ export function parseSvg(text: string, opts: SvgOptions = {}): { geometry: RawGe
   addLayer("svg", grouped ? "Ungrouped" : "SVG", loose);
 
   const warnings = [...skipped].map(([tag, k]) => `Skipped ${k} <${tag}> element${k === 1 ? "" : "s"}: ${UNSUPPORTED[tag]}.`);
+  if (stats.capped) {
+    warnings.push(`Simplified ${stats.capped} curve${stats.capped === 1 ? "" : "s"} that would need more than ${MAX_CURVE_SEGMENTS} points each (a very large shape or a tiny tolerance).`);
+  }
   if (!layers.length) throw new Error(`this SVG has no lines or shapes to draw${warnings.length ? ` (${warnings.join(" ")})` : ""}`);
   if (wMm === null || hMm === null) {
     // No size and no viewBox: the drawing's own extent, from the origin.

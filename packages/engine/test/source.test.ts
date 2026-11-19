@@ -88,6 +88,34 @@ describe("enterAt", () => {
     expect(enabled(back.recipe)).toEqual(["threshold", "centerline", "order"]);
     expect(back.switchedOn).toEqual(["Threshold", "Centerline"]);
   });
+  it("switches steps back on even when every step was off", () => {
+    const r = recipe(["threshold", "centerline"]);
+    const svgd = enterAt(r, "geometry", reg).recipe;
+    expect(enabled(svgd)).toEqual([]);
+    const back = enterAt(svgd, "image", reg);
+    expect(enabled(back.recipe)).toEqual(["threshold", "centerline"]);
+    expect(back.issues).toEqual([]);
+  });
+  it("leaves a step the person switched off by hand alone", () => {
+    const r = recipe(["threshold", "centerline", "order"]);
+    r.steps[0]!.enabled = false; // off by hand
+    const svgd = enterAt(r, "geometry", reg).recipe;
+    expect(svgd.steps.map((s) => s.offForEntry ?? false)).toEqual([false, true, false]);
+    const back = enterAt(svgd, "image", reg);
+    expect(enabled(back.recipe)).toEqual(["centerline", "order"]);
+    expect(back.recipe.steps.some((s) => s.offForEntry)).toBe(false);
+    // The chain is back as it was, and the notice says why it doesn't run.
+    expect(describeEntry("photo.jpg", "image", back)).toMatch(/Switched Centerline back on.*Centerline needs layers/);
+  });
+  it("the switched-off mark survives saving and loading the recipe", () => {
+    const svgd = enterAt(recipe(["threshold", "centerline", "order"]), "geometry", reg).recipe;
+    const reloaded = loadRecipe(JSON.parse(JSON.stringify(svgd)), reg).recipe;
+    expect(reloaded.steps.map((s) => s.offForEntry ?? false)).toEqual([true, true, false]);
+    expect(enabled(enterAt(reloaded, "image", reg).recipe)).toEqual(["threshold", "centerline", "order"]);
+    // A mark on a step that is on means nothing and is dropped.
+    const on = loadRecipe({ ...JSON.parse(JSON.stringify(svgd)), input: "image", steps: [{ step: "threshold", offForEntry: true }] }, reg).recipe;
+    expect(on.steps[0]!.offForEntry).toBeUndefined();
+  });
   it("same stage is a no-op", () => {
     const res = enterAt(photo, "image", reg);
     expect(res.recipe).toBe(photo);

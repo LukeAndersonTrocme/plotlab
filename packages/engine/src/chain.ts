@@ -108,7 +108,8 @@ export interface EntryResult {
 /**
  * Set the chain's entry stage to where a new source enters (an SVG enters as lines,
  * multi-page TIFF separations as layers). Leading steps that belong before that stage are
- * switched off, not removed, and are switched back on when a source enters earlier again.
+ * switched off, not removed, and marked `offForEntry`; marked steps are switched back on when a
+ * source enters earlier again. Steps switched off by hand are never touched.
  */
 export function enterAt(recipe: Recipe, stage: StageKind, registry: StepRegistry): EntryResult {
   if (recipe.input === stage) return { recipe, changed: false, switchedOff: [], switchedOn: [], issues: checkChain(stage, recipe.steps, registry) };
@@ -122,13 +123,19 @@ export function enterAt(recipe: Recipe, stage: StageKind, registry: StepRegistry
       if (s.enabled === false) continue;
       if (!registry.get(s.step) || rankOf(s) >= RANK[stage]) break;
       s.enabled = false;
+      s.offForEntry = true;
       switchedOff.push(title(s));
     }
   } else {
-    const lead = steps.slice(0, Math.max(0, steps.findIndex((s) => s.enabled !== false))).filter((s) => rankOf(s) >= RANK[stage] && rankOf(s) < RANK[recipe.input]);
-    for (const s of lead) s.enabled = true;
-    if (lead.length && checkChain(stage, steps, registry).length === 0) switchedOn.push(...lead.map(title));
-    else for (const s of lead) s.enabled = false;
+    // Only steps this function switched off, and only those that belong at or after the new
+    // entry: this undoes the earlier switch. If the chain still doesn't fit (a step before
+    // them was switched off by hand), `issues` says so.
+    for (const s of steps) {
+      if (s.enabled !== false || !s.offForEntry || !registry.get(s.step) || rankOf(s) < RANK[stage]) continue;
+      s.enabled = true;
+      delete s.offForEntry;
+      switchedOn.push(title(s));
+    }
   }
   return { recipe: { ...recipe, input: stage, steps }, changed: true, switchedOff, switchedOn, issues: checkChain(stage, steps, registry) };
 }

@@ -11,18 +11,23 @@ const UTIF = ((utifModule as unknown as { default?: typeof utifModule }).default
  * CMYK, odd depths) goes through UTIF's 8-bit RGBA conversion.
  */
 export function decodeTiff(bytes: Uint8Array): RawImage[] {
-  return decodePages(bytes).map((p) => p.image);
+  return readPages(bytes).map((p) => p.decode());
 }
 
+type Ifd = ReturnType<typeof UTIF.decode>[number];
+
+/** A page's tags, read up front; pixels are decoded only when asked for. */
 interface Page {
-  image: RawImage;
+  width: number;
+  height: number;
+  decode(): RawImage;
   /** The PageName tag, if the file has one. */
   name: string | null;
   /** A reduced-resolution copy (thumbnail/preview) of another page. */
   reduced: boolean;
 }
 
-function decodePages(bytes: Uint8Array): Page[] {
+function readPages(bytes: Uint8Array): Page[] {
   const buf = bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength) as ArrayBuffer;
   const ifds = UTIF.decode(buf).filter((ifd) => ifd["t256"] && ifd["t257"]);
   if (ifds.length === 0) throw new Error("this TIFF has no images in it");
@@ -30,11 +35,12 @@ function decodePages(bytes: Uint8Array): Page[] {
     const raw = ifd["t285"] as string[] | string | undefined;
     const name = (Array.isArray(raw) ? raw[0] : raw)?.replace(/\0+$/, "").trim() || null;
     const reduced = ((ifd["t254"] as number[] | undefined)?.[0] ?? 0) & 1 ? true : false;
-    return { image: decodeIfd(buf, ifd), name, reduced };
+    const dim = (t: string) => (ifd[t] as number[])[0]!;
+    return { width: dim("t256"), height: dim("t257"), decode: () => decodeIfd(buf, ifd), name, reduced };
   });
 }
 
-function decodeIfd(buf: ArrayBuffer, ifd: ReturnType<typeof UTIF.decode>[number]): RawImage {
+function decodeIfd(buf: ArrayBuffer, ifd: Ifd): RawImage {
   UTIF.decodeImage(buf, ifd);
   const w = ifd.width, h = ifd.height;
   const bps = (ifd["t258"] as number[] | undefined)?.[0] ?? 1;
@@ -74,19 +80,20 @@ export function decodeTiffLayers(bytes: Uint8Array): RawLayers {
   return pagesToLayers(fullPages(bytes));
 }
 
-/** Pages that aren't reduced-resolution previews (all of them, if that would leave none). */
+/** Pages that aren't reduced-resolution previews (all of them, if that would leave none). Thumbnails are never decoded. */
 function fullPages(bytes: Uint8Array): Page[] {
-  const pages = decodePages(bytes);
+  const pages = readPages(bytes);
   const full = pages.filter((p) => !p.reduced);
   return full.length ? full : pages;
 }
 
 function pagesToLayers(pages: Page[]): RawLayers {
-  const first = pages[0]!.image;
+  // Sizes come from the tags, so a mismatch is reported before any pixels are decoded.
+  const first = pages[0]!;
   pages.forEach((p, i) => {
-    if (p.image.width !== first.width || p.image.height !== first.height) {
+    if (p.width !== first.width || p.height !== first.height) {
       throw new Error(
-        `this TIFF's pages differ in size (page ${i + 1} is ${p.image.width} × ${p.image.height} px, page 1 is ${first.width} × ${first.height} px). ` +
+        `this TIFF's pages differ in size (page ${i + 1} is ${p.width} × ${p.height} px, page 1 is ${first.width} × ${first.height} px). ` +
           "Separations must share one size to line up as layers.",
       );
     }
@@ -96,7 +103,7 @@ function pagesToLayers(pages: Page[]): RawLayers {
     let id = (p.name ?? "").toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "") || `page-${i + 1}`;
     if (used.has(id)) id = `${id}-${i + 1}`;
     used.add(id);
-    const lum = luminance(p.image);
+    const lum = luminance(p.decode());
     const data = new Float32Array(lum.length);
     for (let j = 0; j < data.length; j++) data[j] = Math.min(1, Math.max(0, 1 - lum[j]!));
     return { id, name: p.name ?? `Page ${i + 1}`, values: { kind: "tone", data } };
@@ -107,7 +114,7 @@ function pagesToLayers(pages: Page[]): RawLayers {
 /** A TIFF as a source: one page enters as an image, several enter as layers (separations). */
 export function decodeTiffSource(bytes: Uint8Array): RawImage | RawLayers {
   const pages = fullPages(bytes);
-  return pages.length === 1 ? pages[0]!.image : pagesToLayers(pages);
+  return pages.length === 1 ? pages[0]!.decode() : pagesToLayers(pages);
 }
 
 /** True if the bytes start with a TIFF header (II*\0 or MM\0*). */

@@ -13,6 +13,13 @@ export interface RecipeStep {
   params: Record<string, unknown>;
   /** Disabled steps are skipped but kept in the recipe. */
   enabled?: boolean;
+  /**
+   * Set (with enabled: false) when the step was switched off automatically because the
+   * source enters after it (an SVG skips the image steps). Only such steps are switched
+   * back on when a source enters earlier again; steps switched off by hand stay off.
+   * Optional and ignored by older builds, so no schema bump (ADR 0002).
+   */
+  offForEntry?: boolean;
   /** Layer-acting steps: which layers to transform ("all" when absent). */
   layers?: "all" | string[];
   /** Layer-acting steps: per-layer overrides of `params`, by layer id. */
@@ -231,6 +238,7 @@ export function loadRecipe(raw: unknown, registry: StepRegistry): { recipe: Reci
       current = def.output;
     }
     const out: RecipeStep = { step: def.id, version, params: values, enabled };
+    if (!enabled && s.offForEntry === true) out.offForEntry = true;
     if (Array.isArray(s.layers) && s.layers.every((x) => typeof x === "string")) out.layers = s.layers;
     if (layerParams && typeof layerParams === "object") {
       out.layerParams = {};

@@ -1,6 +1,9 @@
-import { describe, expect, it } from "vitest";
+import * as utifModule from "utif2";
+import { describe, expect, it, vi } from "vitest";
 import { writeGrayTiff16, type GrayPage } from "../../../golden/fixtures/tiff-pages.ts";
 import { decodeTiffLayers, decodeTiffSource, encodeTiff, sourceStage } from "../src/index.ts";
+
+const UTIF = ((utifModule as unknown as { default?: typeof utifModule }).default ?? utifModule) as typeof utifModule;
 
 const page = (width: number, height: number, f: (i: number) => number, name?: string): GrayPage => ({
   width,
@@ -34,6 +37,17 @@ describe("multi-page TIFF as separations", () => {
     const ls = decodeTiffLayers(bytes);
     expect(ls.layers.map((l) => l.name)).toEqual(["Cyan", "Spot Gold", "Cyan"]);
     expect(ls.layers.map((l) => l.id)).toEqual(["cyan", "spot-gold", "cyan-3"]);
+  });
+
+  it("skips reduced-resolution (thumbnail) pages without decoding them", () => {
+    const thumb = writeGrayTiff16([page(4, 3, () => 0, "Cyan"), { ...page(2, 1, () => 0, "thumb"), reduced: true }, page(4, 3, () => 0, "Black")]);
+    const decode = vi.spyOn(UTIF, "decodeImage");
+    try {
+      expect(decodeTiffLayers(thumb).layers.map((l) => l.name)).toEqual(["Cyan", "Black"]);
+      expect(decode).toHaveBeenCalledTimes(2);
+    } finally {
+      decode.mockRestore();
+    }
   });
 
   it("refuses pages of different sizes with a plain message", () => {

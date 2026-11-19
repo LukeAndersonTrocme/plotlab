@@ -167,6 +167,37 @@ describe("SVG paths", () => {
   });
 });
 
+describe("SVG limits and odd files", () => {
+  it("rejects numbers too large to draw instead of hanging", () => {
+    expect(() => parseSvg(svg('<path d="M0 0C0 1e400 0 0 0 0"/>'))).toThrow(/number too large/);
+    expect(() => parseSvg(svg('<circle r="1e400"/>'))).toThrow(/number too large/);
+    expect(() => parseSvg(svg('<line x2="1e300" transform="scale(1e300)"/>'))).toThrow(/number too large/);
+  });
+  it("caps the points per curve, with a warning, for huge shapes and a zero tolerance", () => {
+    const t0 = performance.now();
+    const big = parseSvg(svg('<circle r="1e14"/>'));
+    expect(coords(big.geometry.layers[0]!.features.features[0]).length).toBeLessThanOrEqual(10000);
+    expect(big.warnings.join(" ")).toMatch(/Simplified 1 curve/);
+    const zero = parseSvg(svg('<path d="M0 0 C 0 80 100 80 100 0"/><circle r="5"/>'), { toleranceMm: 0 });
+    expect(coords(zero.geometry.layers[0]!.features.features[0]).length).toBeLessThanOrEqual(10001);
+    expect(performance.now() - t0).toBeLessThan(2000);
+  });
+  it("accepts any prefix bound to the SVG namespace (ElementTree writes ns0:)", () => {
+    const fs = features('<ns0:svg xmlns:ns0="http://www.w3.org/2000/svg" width="10mm" height="10mm" viewBox="0 0 10 10"><ns0:g><ns0:line x2="5"/></ns0:g></ns0:svg>');
+    expect(coords(fs[0])).toEqual([[0, 0], [5, 0]]);
+    expect(() => parseSvg('<foo:svg xmlns:foo="http://example.com/other"><foo:line x2="5"/></foo:svg>')).toThrow(/not an SVG/);
+  });
+  it("a bad numeric entity is a well-formedness error; ] inside an entity value is fine", () => {
+    expect(() => parseXml('<svg a="&#x110000;"/>')).toThrow(/isn't well-formed XML \(line 1/);
+    expect(parseXml('<!DOCTYPE svg [<!ENTITY e "a]b">]><svg a="&e;"/>').attrs.a).toBe("a]b");
+  });
+  it("nested <svg> maps its viewBox into its x/y/width/height", () => {
+    const fs = features(svg('<svg x="10" y="20" width="20" height="20" viewBox="0 0 10 10"><line x1="0" y1="0" x2="10" y2="10"/></svg><svg x="5" y="5"><line x2="1"/></svg>'));
+    close(coords(fs[0]), [[10, 20], [30, 40]]);
+    close(coords(fs[1]), [[5, 5], [6, 5]]);
+  });
+});
+
 describe("SVG transforms and layers", () => {
   it("nested g transforms compose (translate, scale, matrix, rotate)", () => {
     const fs = features(

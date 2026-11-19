@@ -9,6 +9,8 @@ export interface GrayPage {
   /** Row-major 16-bit gray, 0 = black. */
   data: Uint16Array;
   name?: string;
+  /** Mark as a reduced-resolution copy (NewSubfileType = 1), like a thumbnail. */
+  reduced?: boolean;
 }
 
 export function writeGrayTiff16(pages: GrayPage[]): Uint8Array {
@@ -52,6 +54,7 @@ export function writeGrayTiff16(pages: GrayPage[]): Uint8Array {
       [279, LONG, 1, pixels.length],
     ];
     if (p.name !== undefined) tags.push([285, ASCII, nameLen, nameOffset]);
+    if (p.reduced) tags.push([254, LONG, 1, 1]);
     tags.sort((a, b) => a[0] - b[0]);
     const ifd = new Uint8Array(2 + tags.length * 12 + 4);
     const dv = new DataView(ifd.buffer);
