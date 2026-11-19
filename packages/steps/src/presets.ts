@@ -1,4 +1,4 @@
-import { defaultParams, type AnyStep, type RecipeStep, type Target } from "@plotlab/engine";
+import { defaultParams, retarget, type AnyStep, type Recipe, type RecipeStep, type TargetRequest } from "@plotlab/engine";
 import { bands } from "./bands/index.ts";
 import { centerline } from "./centerline/index.ts";
 import { dither } from "./dither/index.ts";
@@ -18,8 +18,12 @@ export interface Preset {
   title: string;
   summary: string;
   steps: RecipeStep[];
-  /** The output this preset is made for, when it isn't the plotter (e.g. a print-only look). */
-  target?: Target;
+  /**
+   * The output this preset is made for (e.g. a print-only look). It is applied with
+   * `retarget`, like the Output panel, so mirror, registration and dpi carry over.
+   * Presets without one keep the current target.
+   */
+  target?: TargetRequest;
 }
 
 const s = (def: AnyStep, params: Record<string, unknown> = {}): RecipeStep => ({
@@ -78,7 +82,7 @@ export const presets: Preset[] = [
     title: "Atkinson print",
     summary: "One ink of crisp 1-bit dots in the early-Macintosh style, for print or screen. Not plottable yet.",
     steps: [s(dither, { method: "atkinson", dotMm: 0.4 })],
-    target: { kind: "print", dpi: 300, mode: "bitmap", halftone: null, negative: false },
+    target: { kind: "print", mode: "bitmap", halftone: null },
   },
 ];
 
@@ -87,4 +91,11 @@ export function presetSteps(id: string): RecipeStep[] {
   const p = presets.find((x) => x.id === id);
   if (!p) throw new Error(`unknown preset "${id}"`);
   return structuredClone(p.steps);
+}
+
+/** The recipe with a preset picked: its steps replace the chain, and its target (if any) is switched to. */
+export function applyPreset(recipe: Recipe, id: string): Recipe {
+  const p = presets.find((x) => x.id === id);
+  if (!p) throw new Error(`unknown preset "${id}"`);
+  return { ...recipe, steps: presetSteps(id), ...(p.target ? { target: retarget(recipe.target, p.target) } : {}) };
 }

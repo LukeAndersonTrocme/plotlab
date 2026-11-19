@@ -102,6 +102,16 @@ describe("dither", () => {
     expect([...d]).toEqual([0, 1, 0, 0, 1, 0]);
   });
 
+  it("serpentine Floyd–Steinberg mirrors the kernel on right-to-left rows (hand-worked)", async () => {
+    // Same 3×2 at 0.4 ink. Row 0 as above leaves d .4453125, e .3323242, f .4403320.
+    // Row 1 runs right to left, so "ahead" is to the left:
+    // (2,1) f .4403320 → 0, err +.4403320 → e += 7/16 → .5249694 → 1, err −.4750306
+    // → d += 7/16 → .2374866 → 0. Without the mirror, f's error would fall off the
+    // right edge and e would stay at .3323242 → 0, giving [0,1,0,0,0,0].
+    const d = await run(inkImage(3, 2, () => 0.4), { method: "floyd-steinberg", serpentine: true });
+    expect([...d]).toEqual([0, 1, 0, 0, 1, 0]);
+  });
+
   it("serpentine scanning changes error diffusion but keeps the tone", async () => {
     const img = inkImage(48, 48, (x, y) => (x + y) / 94);
     const a = await run(img, { method: "floyd-steinberg", serpentine: false });
