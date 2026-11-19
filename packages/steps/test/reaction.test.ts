@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { applyStep, checkChain, defaultParams, type Image, type Ink, type StepContext } from "@plotlab/engine";
 import { createRegistry, presetSteps, reaction } from "../src/index.ts";
+import { MAX_CELL_STEPS, simGrid } from "../src/reaction/index.ts";
 
 const ink: Ink = { id: "k", name: "k", color: "#000", mix: "multiply", widthMm: 0.5 };
 const ctx: StepContext = { paper: { widthMm: 100, heightMm: 100 }, target: { kind: "plotter" }, inks: [ink], inkFor: () => ink, passOrder: "light-to-dark" };
@@ -85,6 +86,18 @@ describe("reaction (Gray–Scott)", () => {
     let diff = 0;
     for (let y = 0; y < 40; y++) for (let x = 0; x < 40; x++) diff += Math.abs(coarse.data[y * 40 + x]! - (fine.data[(2 * y) * 80 + 2 * x]! + fine.data[(2 * y + 1) * 80 + 2 * x + 1]!) / 2);
     expect(diff / 1600).toBeLessThan(0.15);
+  });
+
+  it("bounds the worst case: the largest paper at the smallest features and most steps stays within budget", () => {
+    // The worker can't be cancelled, so cells × steps must stay under MAX_CELL_STEPS (~30 s).
+    expect(MAX_CELL_STEPS).toBeLessThanOrEqual(2.5e9);
+    const { scale, iterations } = reaction.params;
+    for (const [wMm, hMm] of [[1000, 1000], [297, 420], [180, 180], [5000, 20]] as const) {
+      const g = simGrid({ xMm: 0, yMm: 0, widthMm: wMm, heightMm: hMm }, scale.min);
+      expect(g.width * g.height * iterations.max, `${wMm}×${hMm}`).toBeLessThanOrEqual(MAX_CELL_STEPS);
+    }
+    // Below the cap the feature size is honoured: 10 cells per feature.
+    expect(simGrid({ xMm: 0, yMm: 0, widthMm: 100, heightMm: 50 }, 4)).toEqual({ width: 250, height: 125 });
   });
 
   it("reports progress up to 1", async () => {

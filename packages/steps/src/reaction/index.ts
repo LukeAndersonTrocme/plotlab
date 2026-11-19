@@ -1,4 +1,4 @@
-import { createRng, defineStep, luminance, seedParam, type EnumParam, type Image } from "@plotlab/engine";
+import { createRng, defineStep, luminance, seedParam, type EnumParam, type Frame, type Image } from "@plotlab/engine";
 import { help } from "../help.generated.ts";
 
 /**
@@ -17,8 +17,27 @@ export type PatternId = keyof typeof PATTERNS;
  * DU below (9.8 for spots, 10.7 for mazes and holes, by the peak of the power spectrum).
  */
 export const PX_PER_FEATURE = 10;
-/** Cap on the simulation grid; past it features come out larger than asked. */
-export const MAX_SIM_PIXELS = 1_000_000;
+/**
+ * Worst-case bound. The web worker has no cancel, so a run must stay short. At the cell cap
+ * a step costs about 14–15 ns per cell (Node 20, Apple laptop), so cells × steps of 2e9 is
+ * about 30 s. Past the cell cap features come out larger than asked.
+ */
+export const MAX_SIM_PIXELS = 400_000;
+export const MAX_STEPS = 5000;
+export const MAX_CELL_STEPS = MAX_SIM_PIXELS * MAX_STEPS;
+
+/** The simulation grid for a frame: PX_PER_FEATURE cells per feature, at most MAX_SIM_PIXELS. */
+export function simGrid(frame: Frame, scaleMm: number): { width: number; height: number } {
+  let cellMm = scaleMm / PX_PER_FEATURE;
+  const area = (frame.widthMm / cellMm) * (frame.heightMm / cellMm);
+  const capped = area > MAX_SIM_PIXELS;
+  if (capped) cellMm *= Math.sqrt(area / MAX_SIM_PIXELS);
+  const fit = capped ? Math.floor : Math.round;
+  const height = Math.max(4, fit(frame.heightMm / cellMm));
+  let width = Math.max(4, fit(frame.widthMm / cellMm));
+  if (width * height > MAX_SIM_PIXELS) width = Math.max(1, Math.floor(MAX_SIM_PIXELS / height));
+  return { width, height };
+}
 
 /**
  * Diffusion of U and V per cell, and the time step. The textbook setup (DU 1, DV 0.5, step 1)
@@ -188,7 +207,7 @@ export const reaction = defineStep({
       label: "Growth steps",
       help: "How long the pattern grows. More steps = more settled shapes, but slower.",
       min: 100,
-      max: 10000,
+      max: MAX_STEPS,
       step: 100,
       default: 2000,
       unit: "",
@@ -199,11 +218,7 @@ export const reaction = defineStep({
   run(img, p, ctx): Image {
     // The simulation grid is set by the feature size in mm, not by the working pixels, so a
     // proxy and the full-resolution run grow the same pattern (ADR 0005).
-    let cellMm = p.scale / PX_PER_FEATURE;
-    const area = (img.frame.widthMm / cellMm) * (img.frame.heightMm / cellMm);
-    if (area > MAX_SIM_PIXELS) cellMm *= Math.sqrt(area / MAX_SIM_PIXELS);
-    const sw = Math.max(4, Math.round(img.frame.widthMm / cellMm));
-    const sh = Math.max(4, Math.round(img.frame.heightMm / cellMm));
+    const { width: sw, height: sh } = simGrid(img.frame, p.scale);
     const light = resampleGrid(luminance(img), img.width, img.height, sw, sh);
     const v = grayScott({ light, width: sw, height: sh, lightPattern: p.light, darkPattern: p.dark, iterations: p.iterations, seed: p.seed, progress: ctx.progress });
     let lo = Infinity, hi = -Infinity;
