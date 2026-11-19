@@ -200,16 +200,18 @@ export function loadRecipe(raw: unknown, registry: StepRegistry): { recipe: Reci
     let layerParams = s.layerParams;
     if (version < def.version) {
       if (def.migrate) {
-        const m = def.migrate(params, version);
+        const m = def.migrate(params, version, "step");
         params = m.params;
         if (layerParams) {
-          layerParams = Object.fromEntries(Object.entries(layerParams).map(([k, lp]) => [k, def.migrate!(lp, version).params]));
+          layerParams = Object.fromEntries(Object.entries(layerParams).map(([k, lp]) => [k, def.migrate!(lp, version, "layer").params]));
         }
         warnings.push({ index, message: `${def.id}: upgraded v${version} → v${def.version}. ${m.note}` });
       } else {
         warnings.push({
           index,
-          message: `${def.id}: recipe was written for v${version}, running v${def.version}; output may differ`,
+          message: def.experimental
+            ? `${def.id} is experimental: recipe was written for v${version}, running v${def.version}; settings and output may differ`
+            : `${def.id}: recipe was written for v${version}, running v${def.version}; output may differ`,
         });
       }
       version = def.version;

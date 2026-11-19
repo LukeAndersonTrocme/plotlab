@@ -8,10 +8,13 @@ import { bands } from "./bands/index.ts";
 import { fill } from "./fill/index.ts";
 import { pixelate } from "./pixelate/index.ts";
 import { cells } from "./cells/index.ts";
+import { dither } from "./dither/index.ts";
+import { reaction } from "./reaction/index.ts";
+import { stipple } from "./stipple/index.ts";
 
-export { threshold, tone, levels, pixelate, bands, fill, centerline, order, cells };
-export const allSteps = [threshold, tone, levels, pixelate, centerline, bands, fill, order, cells];
+export { threshold, tone, levels, pixelate, bands, fill, centerline, order, cells, dither, reaction, stipple };
+export const allSteps = [threshold, tone, levels, pixelate, centerline, bands, fill, order, cells, dither, reaction, stipple];
 export function createRegistry(): StepRegistry {
   return new StepRegistry(allSteps);
 }
-export { presets, presetSteps, type Preset } from "./presets.ts";
+export { applyPreset, presets, presetSteps, type Preset } from "./presets.ts";

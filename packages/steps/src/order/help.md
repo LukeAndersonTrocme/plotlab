@@ -11,8 +11,12 @@ estimate use the order the strokes were traced in, and say so.
 **What the settings do physically:**
 - **Order:** "Nearest first" makes the pen hop to the closest unfinished stroke, which can cut
   plot time a lot. "As traced" keeps the order the strokes were made, which can be part of
-  the work.
-- **Allow reversing strokes:** lets the pen start a stroke from whichever end is closer.
+  the work. "Single stroke" joins every stroke in each pass into one continuous line, so
+  the pen goes down once and never lifts. On stippled dots this is the "TSP art" look: a
+  single winding line that passes through every dot. It uses nearest-first and the polish
+  below, always allowing strokes to be reversed. The joins are drawn, so expect extra
+  lines between strokes that were apart.
+- **Allow reversing strokes:** (nearest first) lets the pen start a stroke from whichever end is closer.
 - **Polish the order:** after nearest-first, looks for runs of strokes that are quicker to
   draw in the opposite direction. Usually trims travel by a few more percent.
 

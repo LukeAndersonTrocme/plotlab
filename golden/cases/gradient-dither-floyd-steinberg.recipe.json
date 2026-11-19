@@ -1,0 +1,12 @@
+{
+  "schemaVersion": 2,
+  "input": "image",
+  "target": { "kind": "raster", "dpi": 50 },
+  "paper": { "widthMm": 128, "heightMm": 48 },
+  "layout": { "fit": "fit", "marginMm": 0, "position": [0.5, 0.5] },
+  "inks": [{ "id": "black", "name": "Black", "color": "#111111", "mix": "multiply", "widthMm": 0.4 }],
+  "machine": "generic",
+  "steps": [{ "step": "dither", "version": 1, "params": { "method": "floyd-steinberg", "dotMm": 2 } }],
+  "export": "png",
+  "fixture": "gradient.png"
+}

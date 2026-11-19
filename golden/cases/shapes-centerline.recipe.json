@@ -8,7 +8,7 @@
   "machine": "generic",
   "steps": [
     { "step": "threshold", "version": 2, "params": { "mode": "fixed", "level": 50 } },
-    { "step": "centerline", "version": 2, "params": { "minLength": 4, "smoothing": 1 } },
+    { "step": "centerline", "version": 3, "params": { "minLength": 4, "smoothing": 1, "spurLength": 2 } },
     { "step": "order", "version": 2, "params": { "method": "nearest" } }
   ],
   "fixture": "shapes.png"

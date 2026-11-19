@@ -1,11 +1,14 @@
-import { defaultParams, type AnyStep, type RecipeStep } from "@plotlab/engine";
+import { defaultParams, retarget, type AnyStep, type Recipe, type RecipeStep, type TargetRequest } from "@plotlab/engine";
 import { bands } from "./bands/index.ts";
 import { cells } from "./cells/index.ts";
 import { centerline } from "./centerline/index.ts";
+import { dither } from "./dither/index.ts";
 import { fill } from "./fill/index.ts";
 import { levels } from "./levels/index.ts";
 import { order } from "./order/index.ts";
 import { pixelate } from "./pixelate/index.ts";
+import { reaction } from "./reaction/index.ts";
+import { stipple } from "./stipple/index.ts";
 import { threshold } from "./threshold/index.ts";
 import { tone } from "./tone/index.ts";
 
@@ -18,6 +21,12 @@ export interface Preset {
   title: string;
   summary: string;
   steps: RecipeStep[];
+  /**
+   * The output this preset is made for (e.g. a print-only look). It is applied with
+   * `retarget`, like the Output panel, so mirror, registration and dpi carry over.
+   * Presets without one keep the current target.
+   */
+  target?: TargetRequest;
 }
 
 const s = (def: AnyStep, params: Record<string, unknown> = {}): RecipeStep => ({
@@ -77,6 +86,31 @@ export const presets: Preset[] = [
     summary: "A grid of squares, one per cell, sized in five steps of darkness: sharp at any size.",
     steps: [s(tone), s(levels, { count: 5, smoothing: 0.5 }), s(cells, { mode: "scaled", cellMm: 4, threshold: 10, minSize: 15, maxSize: 95 }), s(order)],
   },
+  {
+    id: "atkinson-print",
+    title: "Atkinson print",
+    summary: "One ink of crisp 1-bit dots in the early-Macintosh style, for print or screen. Not plottable yet.",
+    steps: [s(dither, { method: "atkinson", dotMm: 0.4 })],
+    target: { kind: "print", mode: "bitmap", halftone: null },
+  },
+  {
+    id: "turing",
+    title: "Turing pattern",
+    summary: "Grow spots, mazes and holes that follow the picture's tones, then trace each one with a single pen line. Experimental and slow.",
+    steps: [s(reaction), s(threshold), s(centerline, { minLength: 0, smoothing: 0.1 }), s(order)],
+  },
+  {
+    id: "stipple",
+    title: "Stipple portrait",
+    summary: "Evenly spread pen dots, denser where the picture is darker (experimental).",
+    steps: [s(tone, { contrast: 1.5 }), s(stipple), s(order)],
+  },
+  {
+    id: "tsp-line",
+    title: "One-line stipple (TSP)",
+    summary: "Stipple dots joined into a single continuous line that never lifts the pen (experimental).",
+    steps: [s(tone, { contrast: 1.5 }), s(stipple, { spacing: 1.6 }), s(order, { method: "single" })],
+  },
 ];
 
 /** A fresh copy of a preset's steps, ready to put in a recipe. */
@@ -84,4 +118,11 @@ export function presetSteps(id: string): RecipeStep[] {
   const p = presets.find((x) => x.id === id);
   if (!p) throw new Error(`unknown preset "${id}"`);
   return structuredClone(p.steps);
+}
+
+/** The recipe with a preset picked: its steps replace the chain, and its target (if any) is switched to. */
+export function applyPreset(recipe: Recipe, id: string): Recipe {
+  const p = presets.find((x) => x.id === id);
+  if (!p) throw new Error(`unknown preset "${id}"`);
+  return { ...recipe, steps: presetSteps(id), ...(p.target ? { target: retarget(recipe.target, p.target) } : {}) };
 }
