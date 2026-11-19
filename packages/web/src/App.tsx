@@ -371,6 +371,12 @@ export function App() {
             inspect={inspect}
             onInspect={inspectStage}
             onChange={(r, proxy, step) => apply(r, proxy, step)}
+            onReplace={(r) => {
+              // A preset meets the source where it enters, like opening a recipe file does.
+              const { recipe: fitted, note } = enter(r);
+              apply(fitted, false);
+              setNotice(note);
+            }}
             onRun={() => {
               setDirty(false);
               runner.request(recipe, false, true);

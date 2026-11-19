@@ -1,6 +1,6 @@
 import { readdirSync, readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
-import { loadRecipe, type Recipe } from "@plotlab/engine";
+import { enterAt, loadRecipe, type Recipe } from "@plotlab/engine";
 import { applyPreset, createRegistry, presets, presetSteps } from "../src/index.ts";
 
 const casesDir = new URL("../../../golden/cases/", import.meta.url);
@@ -41,6 +41,14 @@ describe("presets", () => {
     it("overrides the preset's print look but keeps the rest of the current print settings", () => {
       const out = applyPreset(base({ kind: "print", dpi: 1200, mode: "gray", halftone: { lpi: 30 }, negative: true }), "atkinson-print");
       expect(out.target).toEqual({ kind: "print", dpi: 1200, mode: "bitmap", halftone: null, negative: true });
+    });
+    it("starts the chain at an image, so an SVG or separations source can switch steps off to fit", () => {
+      const r = { ...base({ kind: "plotter" }), input: "geometry" as const };
+      const out = applyPreset(r, "topo-hatch");
+      expect(out.input).toBe("image");
+      const fitted = enterAt(out, "geometry", createRegistry());
+      expect(fitted.switchedOff.length).toBeGreaterThan(0);
+      expect(fitted.issues).toEqual([]);
     });
   });
 });
