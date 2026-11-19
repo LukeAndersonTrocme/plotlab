@@ -5,6 +5,7 @@ import { fill } from "./fill/index.ts";
 import { levels } from "./levels/index.ts";
 import { order } from "./order/index.ts";
 import { pixelate } from "./pixelate/index.ts";
+import { reaction } from "./reaction/index.ts";
 import { stipple } from "./stipple/index.ts";
 import { threshold } from "./threshold/index.ts";
 import { tone } from "./tone/index.ts";
@@ -70,6 +71,12 @@ export const presets: Preset[] = [
       s(fill, { mapping: "cycle", minSpacing: 0.7, maxSpacing: 2.2 }),
       s(order),
     ],
+  },
+  {
+    id: "turing",
+    title: "Turing pattern",
+    summary: "Grow spots, mazes and holes that follow the picture's tones, then trace each one with a single pen line. Experimental and slow.",
+    steps: [s(reaction), s(threshold), s(centerline, { minLength: 0, smoothing: 0.1 }), s(order)],
   },
   {
     id: "stipple",
