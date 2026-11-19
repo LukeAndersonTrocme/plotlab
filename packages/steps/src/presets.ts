@@ -1,5 +1,6 @@
 import { defaultParams, retarget, type AnyStep, type Recipe, type RecipeStep, type TargetRequest } from "@plotlab/engine";
 import { bands } from "./bands/index.ts";
+import { cells } from "./cells/index.ts";
 import { centerline } from "./centerline/index.ts";
 import { dither } from "./dither/index.ts";
 import { fill } from "./fill/index.ts";
@@ -78,6 +79,12 @@ export const presets: Preset[] = [
       s(fill, { mapping: "cycle", minSpacing: 0.7, maxSpacing: 2.2 }),
       s(order),
     ],
+  },
+  {
+    id: "vector-mosaic",
+    title: "Vector mosaic",
+    summary: "A grid of squares, one per cell, sized in five steps of darkness: sharp at any size.",
+    steps: [s(tone), s(levels, { count: 5, smoothing: 0.5 }), s(cells, { mode: "scaled", cellMm: 4, threshold: 10, minSize: 15, maxSize: 95 }), s(order)],
   },
   {
     id: "atkinson-print",
