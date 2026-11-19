@@ -1,0 +1,12 @@
+{
+  "schemaVersion": 2,
+  "input": "image",
+  "target": { "kind": "plotter", "registration": true },
+  "paper": { "widthMm": 70, "heightMm": 90 },
+  "layout": { "fit": "fit", "marginMm": 12, "position": [0.5, 0.5] },
+  "inks": [{ "id": "black", "name": "Black", "color": "#111111", "mix": "multiply", "widthMm": 0.4 }],
+  "machine": "generic",
+  "preset": "atkinson-print",
+  "export": "plates",
+  "fixture": "mona-lisa-600.jpg"
+}
