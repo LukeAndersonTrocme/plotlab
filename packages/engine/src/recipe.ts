@@ -85,7 +85,7 @@ const UPGRADERS: Record<number, (r: Raw) => Raw> = {
   },
 };
 
-function readTarget(v: unknown, errors: RecipeWarning[]): Target {
+function readTarget(v: unknown, errors: RecipeWarning[], warnings: RecipeWarning[]): Target {
   if (v === undefined) return { kind: "plotter" };
   const t = obj(v);
   if (!TARGET_KINDS.includes(t.kind as never)) {
@@ -102,7 +102,13 @@ function readTarget(v: unknown, errors: RecipeWarning[]): Target {
     const halftone = t.halftone ? { lpi: typeof h.lpi === "number" && h.lpi > 0 ? h.lpi : 45, angles } : null;
     return { kind: "print", dpi, mode: t.mode === "gray" ? "gray" : "bitmap", halftone, negative: t.negative === true, ...fin };
   }
-  if (t.kind === "plotter") return { kind: "plotter", ...fin };
+  if (t.kind === "plotter") {
+    // Optional and advisory, so no schema bump: older builds just ignore it (ADR 0002).
+    const b = t.budgetMin;
+    const ok = typeof b === "number" && Number.isFinite(b) && b > 0;
+    if (b !== undefined && !ok) warnings.push({ index: -1, message: `target.budgetMin must be a positive number of minutes; ignoring ${JSON.stringify(b)}` });
+    return { kind: "plotter", ...fin, ...(ok ? { budgetMin: b } : {}) };
+  }
   return { kind: "vector" };
 }
 
@@ -168,7 +174,7 @@ export function loadRecipe(raw: unknown, registry: StepRegistry): { recipe: Reci
   if (!paper || typeof paper.widthMm !== "number" || typeof paper.heightMm !== "number") {
     errors.push({ index: -1, message: "paper must be { widthMm, heightMm }" });
   }
-  const target = readTarget(r.target, errors);
+  const target = readTarget(r.target, errors, warnings);
   const layout = readLayout(r.layout, warnings);
   const inks = readInks(r.inks, errors);
   const layerInks: Record<string, string> = {};

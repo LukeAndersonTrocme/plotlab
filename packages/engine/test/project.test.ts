@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { inkFor, loadRecipe, retarget, showsTime, StepRegistry, toPlot, workingMmPerPx, type Geometry, type Ink, type Recipe } from "../src/index.ts";
+import { budgetOnlyChange, inkFor, loadRecipe, retarget, showsTime, StepRegistry, toPlot, workingMmPerPx, type Geometry, type Ink, type Recipe } from "../src/index.ts";
 
 const ink = (id: string, color: string, widthMm = 0.5): Ink => ({ id, name: id, color, mix: "multiply", widthMm });
 const recipe = (over: Partial<Recipe> = {}): Recipe =>
@@ -59,6 +59,43 @@ describe("recipe v2 validation", () => {
   });
 });
 
+describe("time budget (plotter targets)", () => {
+  const load = (target: unknown) =>
+    loadRecipe({ schemaVersion: 2, paper: { widthMm: 100, heightMm: 100 }, inks: [ink("k", "#000000", 0.3)], steps: [], target }, new StepRegistry());
+
+  it("round-trips a budget in minutes", () => {
+    const { recipe, warnings } = load({ kind: "plotter", budgetMin: 5 });
+    expect(recipe.target).toEqual({ kind: "plotter", budgetMin: 5 });
+    expect(warnings).toEqual([]);
+    expect(load(JSON.parse(JSON.stringify(recipe.target))).recipe.target).toEqual(recipe.target);
+  });
+  it("absent means no budget", () => {
+    expect("budgetMin" in load({ kind: "plotter" }).recipe.target).toBe(false);
+  });
+  it.each([0, -3, "5", Number.NaN, null])("drops an invalid budget (%s) with a warning", (budgetMin) => {
+    const { recipe, warnings } = load({ kind: "plotter", budgetMin });
+    expect("budgetMin" in recipe.target).toBe(false);
+    expect(warnings.map((w) => w.message).join("\n")).toMatch(/budgetMin/);
+  });
+  it("ignores a budget on non-plotter targets", () => {
+    expect("budgetMin" in load({ kind: "vector", budgetMin: 5 }).recipe.target).toBe(false);
+    expect("budgetMin" in load({ kind: "raster", dpi: 300, budgetMin: 5 }).recipe.target).toBe(false);
+  });
+});
+
+describe("budgetOnlyChange", () => {
+  const r = recipe({ target: { kind: "plotter", budgetMin: 5 } });
+  it("true when only the budget differs (set, changed or cleared)", () => {
+    expect(budgetOnlyChange(r, { ...r, target: { kind: "plotter", budgetMin: 8 } })).toBe(true);
+    expect(budgetOnlyChange(r, { ...r, target: { kind: "plotter" } })).toBe(true);
+  });
+  it("false for any other change, or no change", () => {
+    expect(budgetOnlyChange(r, r)).toBe(false);
+    expect(budgetOnlyChange(r, { ...r, target: { kind: "plotter", budgetMin: 8, mirror: true } })).toBe(false);
+    expect(budgetOnlyChange(r, { ...r, target: { kind: "plotter", budgetMin: 8 }, workingMmPerPx: 0.2 })).toBe(false);
+  });
+});
+
 describe("retarget", () => {
   it("keeps mirror and registration, and keeps dpi when it has one", () => {
     expect(retarget({ kind: "plotter", mirror: true, registration: true }, { kind: "raster" })).toEqual({ kind: "raster", dpi: 300 });
@@ -83,5 +120,8 @@ describe("retarget", () => {
     const cur = { kind: "print" as const, dpi: 800, mode: "bitmap" as const, halftone: { lpi: 30, angles: {} }, negative: true, mirror: true };
     expect(retarget(cur, { kind: "print" })).toEqual(cur);
     expect(retarget(cur, { kind: "print", halftone: null })).toEqual({ ...cur, halftone: null });
+  });
+  it("switching to the plotter keeps a time budget", () => {
+    expect(retarget({ kind: "plotter", budgetMin: 5, mirror: true }, { kind: "plotter" })).toEqual({ kind: "plotter", budgetMin: 5, mirror: true });
   });
 });

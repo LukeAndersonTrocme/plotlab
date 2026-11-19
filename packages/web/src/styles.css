@@ -6,6 +6,7 @@
   --line: #dedad2;
   --accent: #2f5d8a;
   --paper: #fffdf8;
+  --warn: #a8361a;
   font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
   color: var(--ink);
   background: var(--bg);
@@ -45,6 +46,8 @@ main { display: flex; flex: 1; min-height: 0; }
 .stats { display: flex; gap: 16px; align-items: baseline; color: var(--muted); flex-wrap: wrap; }
 .stats .big { font-size: 22px; color: var(--ink); }
 .stats .toggle { margin-left: auto; }
+.stats .over-budget { color: var(--warn); }
+.stats .budget.over-budget { font-weight: 600; max-width: 46ch; }
 .refining { color: var(--accent); }
 .preview { flex: 1; min-height: 0; width: 100%; margin: 10px 0; }
 .preview.empty { display: grid; place-items: center; color: var(--muted); }

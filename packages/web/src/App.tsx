@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { exportFormats, FORMAT_LABEL, loadRecipe, type AnyStep, type ExportFormat, type Recipe } from "@plotlab/engine";
+import { budgetOnlyChange, exportFormats, FORMAT_LABEL, loadRecipe, type AnyStep, type ExportFormat, type Recipe } from "@plotlab/engine";
+import { budgetCheck } from "@plotlab/machines";
 import { createRegistry } from "@plotlab/steps";
 import { defaultRecipe } from "./defaults.ts";
 import { HelpPanel } from "./Help.tsx";
@@ -72,6 +73,8 @@ export function App() {
 
   const apply = (next: Recipe, proxy: boolean, step?: AnyStep) => {
     setRecipe(next);
+    // The time budget only changes the readout, which is computed from the last estimate.
+    if (budgetOnlyChange(recipe, next)) return;
     // On-demand steps' own settings wait for their Run button; the worker holds them back.
     if (!live) {
       setDirty(true);
@@ -214,11 +217,17 @@ export function App() {
 
         <section className="view">
           <div className="stats">
-            {run.estimate && (
-              <span className="big" title="Estimated from the machine profile; includes pen changes.">
-                ~{fmtTime(run.estimate.totalS)}
-              </span>
-            )}
+            {run.estimate && (() => {
+              const b = recipe.target.kind === "plotter" && recipe.target.budgetMin ? budgetCheck(run.estimate, recipe.target.budgetMin) : null;
+              return (
+                <>
+                  <span className={`big${b?.over ? " over-budget" : ""}`} title="Estimated from the machine profile; includes pen changes.">
+                    ~{fmtTime(run.estimate.totalS)}
+                  </span>
+                  {b && <span className={b.over ? "budget over-budget" : "budget"} role={b.over ? "alert" : undefined}>{b.over ? `⚠ Over budget: ${b.message}` : b.message}</span>}
+                </>
+              );
+            })()}
             {run.estimate && plot && !plot.ordered && <span className="caveat">traced order: add Stroke order for a better estimate</span>}
             {plot && <span>{strokes} strokes</span>}
             {run.estimate && run.estimate.penChanges > 0 && <span>{run.estimate.penChanges} pen changes</span>}

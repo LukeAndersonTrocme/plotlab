@@ -2,17 +2,19 @@ import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { basename, extname, join } from "node:path";
 import { parseArgs } from "node:util";
 import { exportFormats, exportOutput, loadRecipe, Pipeline, RecipeError, showsTime, StepError, type ExportFormat, type StepDefinition } from "@plotlab/engine";
-import { estimatePlot, getMachine } from "@plotlab/machines";
+import { budgetCheck, estimatePlot, getMachine } from "@plotlab/machines";
+import { resolveBudget } from "./budget.ts";
 import { createRegistry } from "@plotlab/steps";
 import { expandInput, readImage } from "./io.ts";
 
 const USAGE = `plotlab: image → plotter / digital / print pipeline
 
 Usage:
-  plotlab run <recipe.json> -i <input|'frames/*.png'> -o <out-dir> [-f svg|pdf|png|tiff|plates]
+  plotlab run <recipe.json> -i <input|'frames/*.png'> -o <out-dir> [-f svg|pdf|png|tiff|plates] [--budget <min>]
 
   -f picks the file type; the default is the recipe target's main one
   (plotter: svg, vector: svg, raster: png, print: plates = one TIFF per ink + proof).
+  --budget sets a time budget in minutes for this run (plotter targets), overriding the recipe's.
   plotlab steps list
   plotlab steps describe <step>
 `;
@@ -43,7 +45,7 @@ async function run(args: string[]): Promise<number> {
   const { values, positionals } = parseArgs({
     args,
     allowPositionals: true,
-    options: { input: { type: "string", short: "i" }, out: { type: "string", short: "o" }, format: { type: "string", short: "f" } },
+    options: { input: { type: "string", short: "i" }, out: { type: "string", short: "o" }, format: { type: "string", short: "f" }, budget: { type: "string" } },
   });
   const recipePath = positionals[0];
   if (!recipePath || !values.input || !values.out) {
@@ -53,6 +55,7 @@ async function run(args: string[]): Promise<number> {
   const registry = createRegistry();
   const { recipe, warnings } = loadRecipe(JSON.parse(readFileSync(recipePath, "utf8")), registry);
   for (const w of warnings) process.stderr.write(`warning: ${w.index >= 0 ? `step ${w.index}: ` : ""}${w.message}\n`);
+  const budgetMin = resolveBudget(values.budget, recipe.target, (m) => process.stderr.write(`warning: ${m}\n`));
   const formats: ExportFormat[] = ["svg", "pdf", "png", "tiff", "plates"];
   const format = (values.format ?? exportFormats(recipe.target)[0]) as ExportFormat;
   if (!formats.includes(format)) throw new Error(`unknown format "${values.format}"; use one of ${formats.join(", ")}`);
@@ -77,6 +80,10 @@ async function run(args: string[]): Promise<number> {
       if (showsTime(recipe.target)) {
         const e = estimatePlot(plot, getMachine(recipe.machine));
         line += `  ~${fmtTime(e.totalS)}${plot.ordered ? "" : " (traced order)"}`;
+        if (budgetMin !== undefined) {
+          const b = budgetCheck(e, budgetMin);
+          line += `  ${b.over ? "OVER BUDGET: " : ""}${b.message}`;
+        }
       }
     }
     process.stdout.write(line + "\n");
