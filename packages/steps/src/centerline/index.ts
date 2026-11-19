@@ -49,6 +49,69 @@ function neighbours(m: Uint8Array, w: number, h: number, i: number): number[] {
   return out;
 }
 
+/**
+ * Remove spurs: branches that run from a junction to a loose tip and are shorter than
+ * `maxPx` (pixel path length). Lines that end at both ends, and closed loops, are never
+ * touched. Thinning often leaves a crossing as a clump of junction pixels, sometimes split
+ * by a pixel or two of line; junctions joined by less than `maxPx` count as one. A
+ * junction's spurs go only when it also has a branch at least twice `maxPx` long, so a
+ * twig is trimmed off a line clearly longer than itself, and a small mark made of short
+ * arms (a little x or +, however thinning split its middle) stays whole. Repeats until nothing changes, so a
+ * short twig left behind by a removed spur goes too.
+ */
+export function pruneSpurs(skel: Uint8Array, w: number, h: number, maxPx: number): Uint8Array {
+  const m = skel.slice();
+  if (!(maxPx > 0)) return m;
+  const step = (a: number, b: number) => Math.hypot((a % w) - (b % w), Math.floor(a / w) - Math.floor(b / w));
+  for (let round = 0; round < 1000; round++) {
+    const nb = new Map<number, number[]>();
+    for (let i = 0; i < m.length; i++) if (m[i]) nb.set(i, neighbours(m, w, h, i));
+    const isJ = (i: number) => nb.get(i)!.length >= 3;
+    // Union-find over junction pixels: touching ones, and ones joined by a short line.
+    const parent = new Map<number, number>();
+    const find = (i: number): number => { let r = i; while (parent.get(r) !== r) r = parent.get(r)!; parent.set(i, r); return r; };
+    for (const i of nb.keys()) if (isJ(i)) parent.set(i, i);
+    type Walk = { from: number; px: number[]; end: number; len: number };
+    const walks: Walk[] = [];
+    for (const i of parent.keys()) {
+      for (const first of nb.get(i)!) {
+        if (isJ(first)) { parent.set(find(first), find(i)); continue; }
+        const px: number[] = [];
+        let prev = i, cur = first, len = step(i, first);
+        while (nb.get(cur)!.length === 2 && len < 2 * maxPx) {
+          px.push(cur);
+          const cn = nb.get(cur)!;
+          const next = cn[0] === prev ? cn[1]! : cn[0]!;
+          len += step(cur, next);
+          prev = cur;
+          cur = next;
+        }
+        if (nb.get(cur)!.length === 1) px.push(cur);
+        // Only short walks are removed or merged, so the pixel list matters only for those.
+        walks.push({ from: i, px, end: cur, len });
+      }
+    }
+    for (const wk of walks) if (wk.len < maxPx && isJ(wk.end)) parent.set(find(wk.end), find(wk.from));
+    // Per junction: its spurs, and whether it has a long branch.
+    const spurs = new Map<number, number[][]>();
+    const long = new Set<number>();
+    for (const wk of walks) {
+      const j = find(wk.from);
+      if (wk.len < maxPx && nb.get(wk.end)!.length === 1) {
+        if (!spurs.has(j)) spurs.set(j, []);
+        spurs.get(j)!.push(wk.px);
+      } else if (wk.len >= 2 * maxPx) long.add(j);
+    }
+    let removed = false;
+    for (const [j, list] of spurs) {
+      if (!long.has(j)) continue; // a small mark of short arms: keep it
+      for (const px of list) for (const i of px) { m[i] = 0; removed = true; }
+    }
+    if (!removed) break;
+  }
+  return m;
+}
+
 /** Walk the skeleton graph into polylines of pixel indices. */
 export function traceSkeleton(m: Uint8Array, w: number, h: number): number[][] {
   const n = w * h;
@@ -107,8 +170,10 @@ export function simplify(pts: Position[], tol: number): Position[] {
 const length = (p: Position[]) => p.reduce((s, q, i) => (i ? s + Math.hypot(q[0] - p[i - 1]![0], q[1] - p[i - 1]![1]) : 0), 0);
 
 /** Trace one 0/1 mask laid over `frame` into strokes in paper mm. */
-export function centerlineMask(mask: Uint8Array, w: number, h: number, frame: Frame, minLengthMm: number, tolMm: number): LineFeature[] {
-  const skel = thin(mask, w, h);
+export function centerlineMask(
+  mask: Uint8Array, w: number, h: number, frame: Frame, minLengthMm: number, tolMm: number, spurMm = 0,
+): LineFeature[] {
+  const skel = pruneSpurs(thin(mask, w, h), w, h, spurMm / (frame.widthMm / w));
   const out: LineFeature[] = [];
   for (const ids of traceSkeleton(skel, w, h)) {
     let pts: Position[] = ids.map((i) => {
@@ -122,9 +187,12 @@ export function centerlineMask(mask: Uint8Array, w: number, h: number, frame: Fr
   return out;
 }
 
+/** Default spur trim in mm (see help.md). */
+const SPUR_DEFAULT = 2;
+
 export const centerline = defineStep({
   id: "centerline",
-  version: 2,
+  version: 3,
   title: "Centerline",
   summary: "Draw one stroke down the middle of each shape, like tracing it with a single pen line.",
   input: "layers",
@@ -151,6 +219,16 @@ export const centerline = defineStep({
       default: 0.2,
       unit: "mm",
     },
+    spurLength: {
+      type: "number",
+      label: "Spur length",
+      help: "Trim side twigs shorter than this that end in a loose tip. Lines and loops are kept.",
+      min: 0,
+      max: 10,
+      step: 0.1,
+      default: SPUR_DEFAULT,
+      unit: "mm",
+    },
   },
   help: help.centerline ?? "",
   accepts: ["tone"],
@@ -162,11 +240,15 @@ export const centerline = defineStep({
     return {
       id: layer.id,
       name: layer.name,
-      features: { type: "FeatureCollection", features: centerlineMask(mask, grid.width, grid.height, grid.frame, p.minLength, p.smoothing) },
+      features: { type: "FeatureCollection", features: centerlineMask(mask, grid.width, grid.height, grid.frame, p.minLength, p.smoothing, p.spurLength) },
     };
   },
-  migrate: (params) => ({
-    params,
-    note: "Minimum length and Simplify are now in mm on the paper (they were source pixels). Check the result.",
+  migrate: (params, from, scope) => ({
+    // Spur trimming arrived in v3; older recipes keep their exact output with it off.
+    // Per-layer overrides inherit it from the step, so they stay as the user wrote them.
+    params: scope === "layer" ? params : { ...params, spurLength: 0 },
+    note:
+      (from < 2 ? "Minimum length and Simplify are now in mm on the paper (they were source pixels). Check the result. " : "") +
+      "New Spur length slider (trims short side twigs) is set to 0 so the output is unchanged; raise it to clean up stroke ends.",
   }),
 });
