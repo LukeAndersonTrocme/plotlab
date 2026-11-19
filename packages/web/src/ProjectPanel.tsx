@@ -1,7 +1,8 @@
-import { DEFAULT_PRINT, finishing, MARK_INSET_MM, screenAngle, type Ink, type LayerInfo, type Recipe, type Target, type TargetKind } from "@plotlab/engine";
+import { useEffect, useState } from "react";
+import { finishing, MARK_INSET_MM, retarget, screenAngle, type Ink, type LayerInfo, type Recipe, type Target, type TargetKind } from "@plotlab/engine";
 import { PAPERS } from "./defaults.ts";
 
-const TARGETS: Array<{ kind: TargetKind; label: string; hint: string }> = [
+export const TARGETS: Array<{ kind: TargetKind; label: string; hint: string }> = [
   { kind: "plotter", label: "Plotter", hint: "Pens on paper. Shows plot time and pen changes." },
   { kind: "raster", label: "Digital image", hint: "A PNG or TIFF at the resolution below; inks mix like ink on paper." },
   { kind: "vector", label: "Digital vector", hint: "An SVG or PDF with strokes at their ink width; layers that aren't lines are embedded as images." },
@@ -9,6 +10,55 @@ const TARGETS: Array<{ kind: TargetKind; label: string; hint: string }> = [
 ];
 
 type PrintTarget = Extract<Target, { kind: "print" }>;
+type PlotterTarget = Extract<Target, { kind: "plotter" }>;
+
+/**
+ * Time budget in minutes. Keeps its own draft text so partial input ("0", "0.") survives;
+ * a valid positive number is committed as you type, an empty field clears the budget,
+ * and anything else snaps back to the committed value on blur or Enter.
+ */
+function BudgetField(props: { budgetMin: number | undefined; onChange: (budgetMin: number | undefined) => void }) {
+  const committed = props.budgetMin === undefined ? "" : String(props.budgetMin);
+  const [draft, setDraft] = useState(committed);
+  // Follow outside changes (undo, loading a recipe) unless the draft already means the same.
+  useEffect(() => {
+    setDraft((d) => (parseBudget(d) === props.budgetMin ? d : committed));
+  }, [props.budgetMin, committed]);
+  const settle = () => setDraft(committed);
+  return (
+    <div className="param">
+      <label htmlFor="time-budget" title="Optional. The time readout warns when the estimate goes over, and says what to change. Nothing is changed for you.">
+        Time budget
+      </label>
+      <div className="param-row">
+        <input
+          id="time-budget"
+          className="num"
+          type="text"
+          inputMode="decimal"
+          placeholder="none"
+          value={draft}
+          onChange={(e) => {
+            const text = e.target.value;
+            setDraft(text);
+            const n = parseBudget(text);
+            if (text.trim() === "") props.onChange(undefined);
+            else if (n !== undefined && n !== props.budgetMin) props.onChange(n);
+          }}
+          onBlur={settle}
+          onKeyDown={(e) => e.key === "Enter" && settle()}
+        />
+        <span className="unit">min</span>
+      </div>
+    </div>
+  );
+}
+
+function parseBudget(text: string): number | undefined {
+  if (text.trim() === "") return undefined;
+  const n = Number(text);
+  return Number.isFinite(n) && n > 0 ? n : undefined;
+}
 
 const ANCHORS: Array<[number, number]> = [0, 0.5, 1].flatMap((y) => [0, 0.5, 1].map((x): [number, number] => [x, y]));
 
@@ -37,14 +87,7 @@ export function ProjectPanel(props: {
   const set = (patch: Partial<Recipe>, proxy = false) => onChange({ ...r, ...patch }, proxy);
   const setInk = (i: number, patch: Partial<Ink>, proxy = false) =>
     set({ inks: r.inks.map((ink, j) => (j === i ? { ...ink, ...patch } : ink)) }, proxy);
-  const setTarget = (kind: TargetKind) => {
-    const dpi = "dpi" in r.target ? r.target.dpi : 300;
-    const fin = finishing(r.target);
-    const keep = { ...(fin.mirror ? { mirror: true } : {}), ...(fin.registration ? { registration: true } : {}) };
-    const t: Target =
-      kind === "raster" ? { kind, dpi } : kind === "print" ? { kind, dpi: Math.max(dpi, 600), ...DEFAULT_PRINT, ...keep } : kind === "plotter" ? { kind, ...keep } : { kind };
-    set({ target: t });
-  };
+  const setTarget = (kind: TargetKind) => set({ target: retarget(r.target, { kind }) });
   const paperName =
     Object.entries(PAPERS).find(([, p]) => Math.min(p.widthMm, p.heightMm) === Math.min(r.paper.widthMm, r.paper.heightMm))?.[0] ?? "";
   const landscape = r.paper.widthMm > r.paper.heightMm;
@@ -127,6 +170,10 @@ export function ProjectPanel(props: {
             </label>
           </>
         )}
+        {r.target.kind === "plotter" && <BudgetField budgetMin={r.target.budgetMin} onChange={(budgetMin) => {
+          const { budgetMin: _old, ...rest } = r.target as PlotterTarget;
+          set({ target: budgetMin === undefined ? rest : { ...rest, budgetMin } });
+        }} />}
         {(r.target.kind === "plotter" || r.target.kind === "print") && (
           <>
             <label className="toggle" title="Flip left-right: for screens and plates printed face down, or transfers.">

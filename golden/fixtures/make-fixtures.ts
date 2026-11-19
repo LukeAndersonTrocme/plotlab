@@ -27,3 +27,6 @@ write("shapes.png", 160, 120, (x, y) => {
   const diag = Math.abs(x - 95 - (y - 50)) < 5 && y > 50 && y < 105;
   return ring || bar || diag ? 0.1 : 0.95;
 });
+
+// A left-to-right ramp from white to black, for tone steps such as Dither.
+write("gradient.png", 128, 48, (x) => 1 - x / 127);

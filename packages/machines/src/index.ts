@@ -3,6 +3,7 @@ import type { MachineProfile } from "./profile.ts";
 
 export * from "./profile.ts";
 export * from "./estimate.ts";
+export * from "./budget.ts";
 
 export const builtinMachines: Record<string, MachineProfile> = {
   generic: generic as MachineProfile,

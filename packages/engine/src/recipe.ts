@@ -85,7 +85,7 @@ const UPGRADERS: Record<number, (r: Raw) => Raw> = {
   },
 };
 
-function readTarget(v: unknown, errors: RecipeWarning[]): Target {
+function readTarget(v: unknown, errors: RecipeWarning[], warnings: RecipeWarning[]): Target {
   if (v === undefined) return { kind: "plotter" };
   const t = obj(v);
   if (!TARGET_KINDS.includes(t.kind as never)) {
@@ -102,7 +102,13 @@ function readTarget(v: unknown, errors: RecipeWarning[]): Target {
     const halftone = t.halftone ? { lpi: typeof h.lpi === "number" && h.lpi > 0 ? h.lpi : 45, angles } : null;
     return { kind: "print", dpi, mode: t.mode === "gray" ? "gray" : "bitmap", halftone, negative: t.negative === true, ...fin };
   }
-  if (t.kind === "plotter") return { kind: "plotter", ...fin };
+  if (t.kind === "plotter") {
+    // Optional and advisory, so no schema bump: older builds just ignore it (ADR 0002).
+    const b = t.budgetMin;
+    const ok = typeof b === "number" && Number.isFinite(b) && b > 0;
+    if (b !== undefined && !ok) warnings.push({ index: -1, message: `target.budgetMin must be a positive number of minutes; ignoring ${JSON.stringify(b)}` });
+    return { kind: "plotter", ...fin, ...(ok ? { budgetMin: b } : {}) };
+  }
   return { kind: "vector" };
 }
 
@@ -168,7 +174,7 @@ export function loadRecipe(raw: unknown, registry: StepRegistry): { recipe: Reci
   if (!paper || typeof paper.widthMm !== "number" || typeof paper.heightMm !== "number") {
     errors.push({ index: -1, message: "paper must be { widthMm, heightMm }" });
   }
-  const target = readTarget(r.target, errors);
+  const target = readTarget(r.target, errors, warnings);
   const layout = readLayout(r.layout, warnings);
   const inks = readInks(r.inks, errors);
   const layerInks: Record<string, string> = {};
@@ -200,16 +206,18 @@ export function loadRecipe(raw: unknown, registry: StepRegistry): { recipe: Reci
     let layerParams = s.layerParams;
     if (version < def.version) {
       if (def.migrate) {
-        const m = def.migrate(params, version);
+        const m = def.migrate(params, version, "step");
         params = m.params;
         if (layerParams) {
-          layerParams = Object.fromEntries(Object.entries(layerParams).map(([k, lp]) => [k, def.migrate!(lp, version).params]));
+          layerParams = Object.fromEntries(Object.entries(layerParams).map(([k, lp]) => [k, def.migrate!(lp, version, "layer").params]));
         }
         warnings.push({ index, message: `${def.id}: upgraded v${version} → v${def.version}. ${m.note}` });
       } else {
         warnings.push({
           index,
-          message: `${def.id}: recipe was written for v${version}, running v${def.version}; output may differ`,
+          message: def.experimental
+            ? `${def.id} is experimental: recipe was written for v${version}, running v${def.version}; settings and output may differ`
+            : `${def.id}: recipe was written for v${version}, running v${def.version}; output may differ`,
         });
       }
       version = def.version;
