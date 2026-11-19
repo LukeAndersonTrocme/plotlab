@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
-import { deleteCheckpoint, listAllGrouped, listForSource, updateCheckpoint, type CheckpointGroup } from "./checkpoints.ts";
-import { estimateStorage, storageWarning, type Checkpoint, type ProjectStore, type SourceHash } from "./storage/index.ts";
+import { deleteCheckpoint, listAllGrouped, listForProject, updateCheckpoint, type CheckpointGroup } from "./checkpoints.ts";
+import { estimateStorage, storageWarning, type Checkpoint, type Library, type ProjectStore } from "./storage/index.ts";
 
 /** True when a key press belongs to a text field, not to the app's shortcuts. */
 function typing(t: EventTarget | null): boolean {
@@ -11,12 +11,12 @@ function typing(t: EventTarget | null): boolean {
 
 const when = (t: number) => new Date(t).toLocaleString(undefined, { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" });
 
-function Thumb(props: { store: ProjectStore; id: string }) {
+function Thumb(props: { project: ProjectStore; id: string }) {
   const [url, setUrl] = useState<string>();
   useEffect(() => {
     let alive = true;
     let u: string | undefined;
-    void props.store.getThumbnail(props.id).then((bytes) => {
+    void props.project.getThumbnail(props.id).then((bytes) => {
       if (!alive || !bytes) return;
       u = URL.createObjectURL(new Blob([bytes], { type: "image/png" }));
       setUrl(u);
@@ -25,23 +25,23 @@ function Thumb(props: { store: ProjectStore; id: string }) {
       alive = false;
       if (u) URL.revokeObjectURL(u);
     };
-  }, [props.store, props.id]);
+  }, [props.project, props.id]);
   return url ? <img src={url} alt="" /> : <span className="ckpt-nothumb">no preview</span>;
 }
 
-function Item(props: { store: ProjectStore; cp: Checkpoint; onRestore: () => void; onChanged: () => void; onDelete: () => void }) {
-  const { cp, store } = props;
+function Item(props: { project: ProjectStore; cp: Checkpoint; onRestore: () => void; onChanged: () => void; onDelete: () => void }) {
+  const { cp, project } = props;
   const [renaming, setRenaming] = useState(false);
   const [noting, setNoting] = useState(false);
   const label = cp.name || when(cp.createdAt);
   const save = async (patch: { name?: string; note?: string }) => {
-    await updateCheckpoint(store, cp.id, patch);
+    await updateCheckpoint(project, cp.id, patch);
     props.onChanged();
   };
   return (
     <li className="ckpt">
       <button className="ckpt-thumb" onClick={props.onRestore} title={`Restore “${label}” (Back undoes it)`} aria-label={`Restore ${label}`}>
-        <Thumb store={store} id={cp.id} />
+        <Thumb project={project} id={cp.id} />
       </button>
       <div className="ckpt-meta">
         {renaming ? (
@@ -97,33 +97,32 @@ function Item(props: { store: ProjectStore; cp: Checkpoint; onRestore: () => voi
 
 /**
  * The checkpoints sidebar (right edge; a bottom drawer on phones). `S` toggles it. Shows
- * the current source's checkpoints, or all of them grouped by source.
+ * the open project's checkpoints, or checkpoints across projects, grouped by image.
  * Swipe-to-delete on phones is left for the mobile pass (#46).
  */
 export function CheckpointSidebar(props: {
   open: boolean;
   onToggle: () => void;
-  store: ProjectStore | null;
+  library: Library | null;
+  project: ProjectStore | null;
   persistent: boolean;
-  sourceHash: SourceHash;
-  sourceName: string;
   /** Bumped after a save so the list reloads. */
   version: number;
   onSave: () => void;
-  onRestore: (cp: Checkpoint, group: CheckpointGroup) => void;
+  onRestore: (cp: Checkpoint) => void;
 }) {
-  const { store, sourceHash } = props;
+  const { library, project } = props;
   const [showAll, setShowAll] = useState(false);
   const [groups, setGroups] = useState<CheckpointGroup[]>([]);
   const [reload, setReload] = useState(0);
   const [warning, setWarning] = useState<string | null>(null);
-  const [deleted, setDeleted] = useState<{ cp: Checkpoint; thumb: Uint8Array | undefined } | null>(null);
+  const [deleted, setDeleted] = useState<{ project: ProjectStore; cp: Checkpoint; thumb: Uint8Array | undefined } | null>(null);
 
   const toggle = useRef(props.onToggle);
   toggle.current = props.onToggle;
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      if (e.key.toLowerCase() !== "s" || e.metaKey || e.ctrlKey || e.altKey || typing(e.target)) return;
+      if (e.key.toLowerCase() !== "s" || e.repeat || e.metaKey || e.ctrlKey || e.altKey || typing(e.target)) return;
       e.preventDefault();
       toggle.current();
     };
@@ -132,30 +131,27 @@ export function CheckpointSidebar(props: {
   }, []);
 
   useEffect(() => {
-    if (!props.open || !store) return;
+    if (!props.open || !library || !project) return;
     let alive = true;
-    const load = showAll
-      ? listAllGrouped(store, sourceHash)
-      : listForSource(store, sourceHash).then((checkpoints) => [{ sourceHash, name: props.sourceName, available: true, checkpoints }]);
-    void load.then((g) => alive && setGroups(g));
+    const load = showAll ? listAllGrouped(library, project.id) : listForProject(project).then((checkpoints) => [{ project, checkpoints }]);
+    void load.then((g) => alive && setGroups(g)).catch(() => {});
     void estimateStorage().then((e) => alive && setWarning(storageWarning(e)));
     return () => {
       alive = false;
     };
-  }, [props.open, store, sourceHash, props.sourceName, showAll, props.version, reload]);
+  }, [props.open, library, project, showAll, props.version, reload]);
 
   if (!props.open) return null;
   const changed = () => setReload((n) => n + 1);
-  const remove = async (cp: Checkpoint) => {
-    if (!store) return;
-    const thumb = await store.getThumbnail(cp.id);
-    await deleteCheckpoint(store, cp.id);
-    setDeleted({ cp, thumb });
+  const remove = async (p: ProjectStore, cp: Checkpoint) => {
+    const thumb = await p.getThumbnail(cp.id);
+    await deleteCheckpoint(p, cp.id);
+    setDeleted({ project: p, cp, thumb });
     changed();
   };
   const undoDelete = async () => {
-    if (!store || !deleted) return;
-    await store.putCheckpoint(deleted.cp, deleted.thumb);
+    if (!deleted) return;
+    await deleted.project.putCheckpoint(deleted.cp, deleted.thumb);
     setDeleted(null);
     changed();
   };
@@ -169,10 +165,10 @@ export function CheckpointSidebar(props: {
           ×
         </button>
       </div>
-      <button className="primary ckpt-save" onClick={props.onSave} disabled={!store}>
+      <button className="primary ckpt-save" onClick={props.onSave} disabled={!project}>
         ＋ Checkpoint
       </button>
-      <label className="toggle ckpt-all" title="Show the checkpoints of every image, grouped by image">
+      <label className="toggle ckpt-all" title="Show checkpoints across all your projects, grouped by image">
         <input type="checkbox" checked={showAll} onChange={(e) => setShowAll(e.target.checked)} /> Show all
       </label>
       {!props.persistent && <div className="hint">This browser isn't allowing storage (private mode?), so checkpoints last only until you reload or close the tab.</div>}
@@ -190,18 +186,17 @@ export function CheckpointSidebar(props: {
         {groups
           .filter((g) => g.checkpoints.length)
           .map((g) => (
-            <section key={g.sourceHash} className="ckpt-group">
+            <section key={g.project.id} className="ckpt-group">
               {showAll && (
-                <h3 title={g.available ? undefined : "This image is no longer stored; restoring keeps the current image."}>
-                  {g.name}
-                  {g.sourceHash === sourceHash && <span className="ckpt-current"> · current</span>}
+                <h3>
+                  {g.project.name}
+                  {g.project.id === project?.id && <span className="ckpt-current"> · current</span>}
                 </h3>
               )}
               <ul>
-                {store &&
-                  g.checkpoints.map((cp) => (
-                    <Item key={cp.id} store={store} cp={cp} onRestore={() => props.onRestore(cp, g)} onChanged={changed} onDelete={() => void remove(cp)} />
-                  ))}
+                {g.checkpoints.map((cp) => (
+                  <Item key={cp.id} project={g.project} cp={cp} onRestore={() => props.onRestore(cp)} onChanged={changed} onDelete={() => void remove(g.project, cp)} />
+                ))}
               </ul>
             </section>
           ))}

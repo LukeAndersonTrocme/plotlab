@@ -1,99 +1,198 @@
 import { describe, expect, it } from "vitest";
 import { IDBFactory } from "fake-indexeddb";
-import { indexedDbStore, memoryStore, sha256Hex, type ProjectStore } from "../src/storage/index.ts";
+import { indexedDbLibrary, memoryLibrary, sha256Hex, type Checkpoint, type Library } from "../src/storage/index.ts";
 
 const bytes = (...b: number[]) => new Uint8Array(b);
+const src = (name: string, ...b: number[]) => ({ bytes: bytes(...b), name, type: "image/png" });
+const cp = (id: string, sourceHash: string, createdAt = 1): Checkpoint => ({ id, sourceHash, createdAt, recipe: { id }, name: "", note: "" });
 
-/** The contract every adapter meets (ADR 0014). The folder adapter (#7) will run it too. */
-const adapters: [string, () => Promise<ProjectStore>][] = [
-  ["memory", async () => memoryStore()],
-  ["indexeddb", () => indexedDbStore({ factory: new IDBFactory() })],
+/**
+ * The storage contract (ADR 0014). Every adapter runs it, the project-folder adapter (#7)
+ * included, so it only asks for what a folder can hold. How each call maps onto a folder:
+ *
+ *   Library                     a workspace folder (or one connected project folder)
+ *     listProjects              its project folders; id = SHA-256 of each source.<ext>
+ *     createProject             a new <name>/ folder with source.<ext>
+ *     openProject / deleteProject  that folder
+ *     get/setLastOpened         a browser preference (not part of the format)
+ *   ProjectStore                <project>/
+ *     getSource                 source.<ext> (type ↔ extension)
+ *     get/setRecipe             recipe.json (savedAt ↔ the file's modified time)
+ *     put/get/list/deleteCheckpoint   checkpoints/<id>.json (holds the source hash)
+ *     getThumbnail              checkpoints/<id>.png
+ */
+const adapters: [string, () => Promise<Library>][] = [
+  ["memory", async () => memoryLibrary()],
+  ["indexeddb", () => indexedDbLibrary({ factory: new IDBFactory() })],
 ];
 
 describe.each(adapters)("storage contract: %s adapter", (_name, open) => {
-  it("stores a source by its content hash and gives it back", async () => {
-    const s = await open();
-    const meta = await s.putSource(bytes(1, 2, 3), { name: "cat.png", type: "image/png" });
-    expect(meta.hash).toBe(await sha256Hex(bytes(1, 2, 3)));
-    expect(meta).toMatchObject({ name: "cat.png", type: "image/png", size: 3 });
-    const got = await s.getSource(meta.hash);
-    expect(got?.name).toBe("cat.png");
-    expect([...got!.bytes]).toEqual([1, 2, 3]);
-    expect(await s.getSource("nope")).toBeUndefined();
+  it("a project is one source, its id the content hash of the bytes", async () => {
+    const lib = await open();
+    const info = await lib.createProject(src("cat.png", 1, 2, 3));
+    expect(info).toEqual({ id: await sha256Hex(bytes(1, 2, 3)), name: "cat.png" });
+    const p = await lib.openProject(info.id);
+    expect(p?.id).toBe(info.id);
+    expect(p?.name).toBe("cat.png");
+    const s = await p!.getSource();
+    expect(s.type).toBe("image/png");
+    expect([...s.bytes]).toEqual([1, 2, 3]);
+    expect(await lib.openProject("nope")).toBeUndefined();
   });
 
-  it("the same bytes give the same hash and are stored once", async () => {
-    const s = await open();
-    const a = await s.putSource(bytes(9, 9), { name: "a.jpg", type: "image/jpeg" });
-    const b = await s.putSource(bytes(9, 9), { name: "renamed.jpg", type: "image/jpeg" });
-    const c = await s.putSource(bytes(9, 8), { name: "other.jpg", type: "image/jpeg" });
-    expect(b.hash).toBe(a.hash);
-    expect(c.hash).not.toBe(a.hash);
-    const list = await s.listSources();
-    expect(list.map((m) => m.hash).sort()).toEqual([a.hash, c.hash].sort());
-    // The first name sticks: re-adding the same image isn't a new source.
-    expect(list.find((m) => m.hash === a.hash)?.name).toBe("a.jpg");
+  it("opening the same image again reopens its project, with its recipe", async () => {
+    const lib = await open();
+    const a = await lib.createProject(src("a.png", 9, 9));
+    await (await lib.openProject(a.id))!.setRecipe({ recipe: { r: 1 }, savedAt: 5 });
+    const again = await lib.createProject(src("renamed.png", 9, 9));
+    const other = await lib.createProject(src("b.png", 9, 8));
+    expect(again).toEqual(a);
+    expect(other.id).not.toBe(a.id);
+    expect((await lib.listProjects()).map((p) => p.id).sort()).toEqual([a.id, other.id].sort());
+    expect(await (await lib.openProject(a.id))!.getRecipe()).toEqual({ recipe: { r: 1 }, savedAt: 5 });
+    expect(await (await lib.openProject(other.id))!.getRecipe()).toBeUndefined();
   });
 
-  it("deletes a source", async () => {
-    const s = await open();
-    const { hash } = await s.putSource(bytes(4), { name: "x.png", type: "image/png" });
-    await s.deleteSource(hash);
-    expect(await s.getSource(hash)).toBeUndefined();
-    expect(await s.listSources()).toEqual([]);
+  it("deletes a project with its recipe and checkpoints", async () => {
+    const lib = await open();
+    const { id } = await lib.createProject(src("x.png", 4));
+    const p = (await lib.openProject(id))!;
+    await p.setRecipe({ recipe: {}, savedAt: 1 });
+    await p.putCheckpoint(cp("c1", id), bytes(1));
+    await lib.deleteProject(id);
+    expect(await lib.openProject(id)).toBeUndefined();
+    expect(await lib.listProjects()).toEqual([]);
+    // Recreating it starts empty.
+    await lib.createProject(src("x.png", 4));
+    const fresh = (await lib.openProject(id))!;
+    expect(await fresh.listCheckpoints()).toEqual([]);
+    expect(await fresh.getRecipe()).toBeUndefined();
+    expect(await fresh.getThumbnail("c1")).toBeUndefined();
   });
 
-  it("keeps the current recipe and its source", async () => {
-    const s = await open();
-    expect(await s.getCurrent()).toBeUndefined();
-    await s.setCurrent({ recipe: { steps: [1] }, sourceHash: "abc" });
-    await s.setCurrent({ recipe: { steps: [2] }, sourceHash: "abc" });
-    expect(await s.getCurrent()).toEqual({ recipe: { steps: [2] }, sourceHash: "abc" });
+  it("remembers the last opened project", async () => {
+    const lib = await open();
+    expect(await lib.getLastOpened()).toBeUndefined();
+    await lib.setLastOpened("abc");
+    expect(await lib.getLastOpened()).toBe("abc");
   });
 
-  it("puts, lists, gets and deletes checkpoints, thumbnails apart", async () => {
-    const s = await open();
-    const cp = (id: string, sourceHash: string, createdAt: number) => ({ id, sourceHash, createdAt, recipe: { id }, name: "", note: "" });
-    await s.putCheckpoint(cp("a", "s1", 1), bytes(7, 7));
-    await s.putCheckpoint(cp("b", "s2", 2));
-    await s.putCheckpoint(cp("c", "s1", 3));
-    expect((await s.listCheckpoints()).map((c) => c.id).sort()).toEqual(["a", "b", "c"]);
-    expect((await s.listCheckpoints({ sourceHash: "s1" })).map((c) => c.id).sort()).toEqual(["a", "c"]);
-    expect(await s.getCheckpoint("b")).toEqual(cp("b", "s2", 2));
-    expect([...(await s.getThumbnail("a"))!]).toEqual([7, 7]);
-    expect(await s.getThumbnail("b")).toBeUndefined();
-    // Putting again replaces the record but keeps the thumbnail when none is given.
-    await s.putCheckpoint({ ...cp("a", "s1", 1), name: "dark" });
-    expect((await s.getCheckpoint("a"))?.name).toBe("dark");
-    expect(await s.getThumbnail("a")).toBeDefined();
-    await s.deleteCheckpoint("a");
-    expect(await s.getCheckpoint("a")).toBeUndefined();
-    expect(await s.getThumbnail("a")).toBeUndefined();
-    expect((await s.listCheckpoints()).map((c) => c.id).sort()).toEqual(["b", "c"]);
+  it("keeps each project's checkpoints apart, thumbnails beside them", async () => {
+    const lib = await open();
+    const a = (await lib.openProject((await lib.createProject(src("a.png", 1))).id))!;
+    const b = (await lib.openProject((await lib.createProject(src("b.png", 2))).id))!;
+    await a.putCheckpoint(cp("1", a.id), bytes(7, 7));
+    await b.putCheckpoint(cp("2", b.id));
+    await a.putCheckpoint(cp("3", a.id));
+    expect((await a.listCheckpoints()).map((c) => c.id).sort()).toEqual(["1", "3"]);
+    expect((await b.listCheckpoints()).map((c) => c.id)).toEqual(["2"]);
+    expect(await a.getCheckpoint("2")).toBeUndefined();
+    expect(await b.getCheckpoint("2")).toEqual(cp("2", b.id));
+    expect([...(await a.getThumbnail("1"))!]).toEqual([7, 7]);
+    expect(await b.getThumbnail("2")).toBeUndefined();
+    // Putting again replaces the record and keeps the thumbnail when none is given.
+    await a.putCheckpoint({ ...cp("1", a.id), name: "dark" });
+    expect((await a.getCheckpoint("1"))?.name).toBe("dark");
+    expect(await a.getThumbnail("1")).toBeDefined();
+    await a.deleteCheckpoint("1");
+    expect(await a.getCheckpoint("1")).toBeUndefined();
+    expect(await a.getThumbnail("1")).toBeUndefined();
+    expect((await a.listCheckpoints()).map((c) => c.id)).toEqual(["3"]);
   });
 
   it("returns copies, so callers can't change what is stored", async () => {
-    const s = await open();
-    await s.setCurrent({ recipe: { a: 1 }, sourceHash: "h" });
-    const c = await s.getCurrent();
-    (c!.recipe as { a: number }).a = 2;
-    expect(await s.getCurrent()).toEqual({ recipe: { a: 1 }, sourceHash: "h" });
+    const lib = await open();
+    const input = src("a.png", 1, 2);
+    const p = (await lib.openProject((await lib.createProject(input)).id))!;
+    input.bytes[0] = 99;
+    (await p.getSource()).bytes[1] = 99;
+    expect([...(await p.getSource()).bytes]).toEqual([1, 2]);
+
+    const r = { recipe: { a: 1 }, savedAt: 1 };
+    await p.setRecipe(r);
+    r.recipe.a = 2;
+    ((await p.getRecipe())!.recipe as { a: number }).a = 3;
+    expect(await p.getRecipe()).toEqual({ recipe: { a: 1 }, savedAt: 1 });
+
+    const c = cp("k", p.id);
+    const thumb = bytes(5);
+    await p.putCheckpoint(c, thumb);
+    c.name = "changed";
+    thumb[0] = 0;
+    (await p.getCheckpoint("k"))!.name = "changed too";
+    (await p.listCheckpoints())[0]!.note = "and this";
+    (await p.getThumbnail("k"))![0] = 0;
+    expect(await p.getCheckpoint("k")).toEqual(cp("k", p.id));
+    expect([...(await p.getThumbnail("k"))!]).toEqual([5]);
   });
 });
+
+/** An IDBFactory whose open() hands back a request we control. */
+function stuckFactory(onOpen: (req: Record<string, unknown>) => void = () => {}) {
+  const closed: string[] = [];
+  return {
+    closed,
+    factory: {
+      open() {
+        const req: Record<string, unknown> = {};
+        queueMicrotask(() => onOpen(req));
+        return req;
+      },
+    } as unknown as IDBFactory,
+  };
+}
 
 describe("indexeddb adapter", () => {
   it("survives a reload: a second open of the same database sees the data", async () => {
     const factory = new IDBFactory();
-    const s1 = await indexedDbStore({ factory });
-    const { hash } = await s1.putSource(bytes(5, 6), { name: "p.png", type: "image/png" });
-    await s1.setCurrent({ recipe: { r: 1 }, sourceHash: hash });
-    const s2 = await indexedDbStore({ factory });
-    expect(await s2.getCurrent()).toEqual({ recipe: { r: 1 }, sourceHash: hash });
-    expect([...(await s2.getSource(hash))!.bytes]).toEqual([5, 6]);
-    expect(s2.persistent).toBe(true);
+    const lib1 = await indexedDbLibrary({ factory });
+    const { id } = await lib1.createProject(src("p.png", 5, 6));
+    await (await lib1.openProject(id))!.setRecipe({ recipe: { r: 1 }, savedAt: 2 });
+    await lib1.setLastOpened(id);
+    const lib2 = await indexedDbLibrary({ factory });
+    expect(await lib2.getLastOpened()).toBe(id);
+    const p = (await lib2.openProject(id))!;
+    expect(await p.getRecipe()).toEqual({ recipe: { r: 1 }, savedAt: 2 });
+    expect([...(await p.getSource()).bytes]).toEqual([5, 6]);
+    expect(lib2.persistent).toBe(true);
   });
 
-  it("rejects when IndexedDB isn't there", async () => {
-    await expect(indexedDbStore({ factory: undefined })).rejects.toThrow();
+  it("rejects with an Error when IndexedDB isn't there", async () => {
+    await expect(indexedDbLibrary({ factory: undefined })).rejects.toThrow(Error);
+  });
+
+  it("gives up after a timeout if opening never settles", async () => {
+    const { factory } = stuckFactory();
+    await expect(indexedDbLibrary({ factory, timeoutMs: 20 })).rejects.toThrow(/didn't open/);
+  });
+
+  it("gives up when another tab blocks the upgrade", async () => {
+    const { factory } = stuckFactory((req) => (req.onblocked as () => void)());
+    await expect(indexedDbLibrary({ factory, timeoutMs: 5000 })).rejects.toThrow(/another tab/);
+  });
+
+  it("when another tab upgrades the database: closes, reports it, and later calls fail with a clear Error", async () => {
+    const factory = new IDBFactory();
+    let lost = 0;
+    const lib = await indexedDbLibrary({ factory, onLost: () => lost++ });
+    const { id } = await lib.createProject(src("p.png", 1));
+    const p = (await lib.openProject(id))!;
+    // A newer build opens the same database at a higher version.
+    const next = factory.open("plotlab", 99);
+    await new Promise((r) => (next.onsuccess = r));
+    next.result.close();
+    expect(lost).toBe(1);
+    await expect(p.setRecipe({ recipe: {}, savedAt: 1 })).rejects.toThrow(/another tab/);
+  });
+
+  it("a callback that throws rejects with that error, no unhandled rejection", async () => {
+    const lib = await indexedDbLibrary({ factory: new IDBFactory() });
+    const { id } = await lib.createProject(src("p.png", 1));
+    const p = (await lib.openProject(id))!;
+    // A recipe that can't be cloned makes put() throw inside the transaction.
+    await expect(p.setRecipe({ recipe: { f: () => 1 }, savedAt: 1 })).rejects.toBeInstanceOf(Error);
+    // The library still works afterwards.
+    await p.setRecipe({ recipe: { ok: true }, savedAt: 2 });
+    expect((await p.getRecipe())?.recipe).toEqual({ ok: true });
   });
 });

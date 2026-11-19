@@ -1,9 +1,9 @@
 /**
- * Checkpoints (GLOSSARY): saved by hand, listed per source or all grouped by source,
- * renamed, noted, deleted, and restored as one Back step. No cap on how many.
+ * Checkpoints (GLOSSARY): saved by hand in a project, listed for the open project or
+ * across all projects, renamed, noted, deleted, and restored as one Back step. No cap.
  */
 import { commit, type History } from "./history.ts";
-import { SAMPLE_SOURCE, type Checkpoint, type ProjectStore, type SourceHash } from "./storage/index.ts";
+import type { Checkpoint, Library, ProjectId, ProjectStore, Source } from "./storage/index.ts";
 
 let counter = 0;
 /** Sortable by time, unique within a session and very likely across devices (bundle merge is by id). */
@@ -14,68 +14,72 @@ function newId(now: number): string {
 }
 
 export async function createCheckpoint(
-  store: ProjectStore,
-  input: { recipe: unknown; sourceHash: SourceHash; thumbnail?: Uint8Array; name?: string; note?: string; now?: number },
+  project: ProjectStore,
+  input: { recipe: unknown; thumbnail?: Uint8Array; name?: string; note?: string; now?: number },
 ): Promise<Checkpoint> {
   const now = input.now ?? Date.now();
-  const cp: Checkpoint = { id: newId(now), createdAt: now, sourceHash: input.sourceHash, recipe: input.recipe, name: input.name?.trim() ?? "", note: input.note ?? "" };
-  await store.putCheckpoint(cp, input.thumbnail);
+  const cp: Checkpoint = { id: newId(now), createdAt: now, sourceHash: project.id, recipe: input.recipe, name: input.name?.trim() ?? "", note: input.note ?? "" };
+  await project.putCheckpoint(cp, input.thumbnail);
   return cp;
 }
 
 const newestFirst = (a: Checkpoint, b: Checkpoint) => b.createdAt - a.createdAt || (a.id < b.id ? 1 : -1);
 
-export async function listForSource(store: ProjectStore, sourceHash: SourceHash): Promise<Checkpoint[]> {
-  return (await store.listCheckpoints({ sourceHash })).sort(newestFirst);
+export async function listForProject(project: ProjectStore): Promise<Checkpoint[]> {
+  return (await project.listCheckpoints()).sort(newestFirst);
 }
 
 export interface CheckpointGroup {
-  sourceHash: SourceHash;
-  /** The source's file name, or a stand-in. */
-  name: string;
-  /** False when the image is no longer stored (restoring keeps the current image). */
-  available: boolean;
+  project: ProjectStore;
   checkpoints: Checkpoint[];
 }
 
-export const SAMPLE_NAME = "Sample (Mona Lisa)";
-
-/** Every checkpoint, grouped by source: the current source first, then by most recent checkpoint. */
-export async function listAllGrouped(store: ProjectStore, currentSource: SourceHash): Promise<CheckpointGroup[]> {
-  const [all, sources] = await Promise.all([store.listCheckpoints(), store.listSources()]);
-  const names = new Map(sources.map((s) => [s.hash, s.name]));
-  const groups = new Map<SourceHash, CheckpointGroup>();
-  for (const cp of all.sort(newestFirst)) {
-    let g = groups.get(cp.sourceHash);
-    if (!g) {
-      const sample = cp.sourceHash === SAMPLE_SOURCE;
-      const name = sample ? SAMPLE_NAME : names.get(cp.sourceHash);
-      g = { sourceHash: cp.sourceHash, name: name ?? "Missing image", available: sample || name !== undefined, checkpoints: [] };
-      groups.set(cp.sourceHash, g);
-    }
-    g.checkpoints.push(cp);
-  }
-  const list = [...groups.values()];
-  const i = list.findIndex((g) => g.sourceHash === currentSource);
-  if (i > 0) list.unshift(...list.splice(i, 1));
-  return list;
+/** Checkpoints across projects: the current project first, then by most recent checkpoint. */
+export async function listAllGrouped(library: Library, current: ProjectId): Promise<CheckpointGroup[]> {
+  const projects = (await Promise.all((await library.listProjects()).map((p) => library.openProject(p.id)))).filter((p): p is ProjectStore => !!p);
+  const groups = (await Promise.all(projects.map(async (project) => ({ project, checkpoints: await listForProject(project) })))).filter((g) => g.checkpoints.length);
+  const newest = (g: CheckpointGroup) => g.checkpoints[0]!.createdAt;
+  return groups.sort((a, b) => Number(b.project.id === current) - Number(a.project.id === current) || newest(b) - newest(a));
 }
 
-export async function updateCheckpoint(store: ProjectStore, id: string, patch: { name?: string; note?: string }): Promise<Checkpoint | undefined> {
-  const cp = await store.getCheckpoint(id);
+export async function updateCheckpoint(project: ProjectStore, id: string, patch: { name?: string; note?: string }): Promise<Checkpoint | undefined> {
+  const cp = await project.getCheckpoint(id);
   if (!cp) return undefined;
   const next = { ...cp, ...(patch.name !== undefined && { name: patch.name.trim() }), ...(patch.note !== undefined && { note: patch.note }) };
-  await store.putCheckpoint(next);
+  await project.putCheckpoint(next);
   return next;
 }
 
-export const deleteCheckpoint = (store: ProjectStore, id: string) => store.deleteCheckpoint(id);
+export const deleteCheckpoint = (project: ProjectStore, id: string) => project.deleteCheckpoint(id);
+
+type Parse<R> = (json: unknown) => { recipe: R; warnings: string[] };
 
 /**
  * Restoring a checkpoint is one history entry: Back returns to what was there before.
- * `parse` upgrades the stored recipe (the engine's loadRecipe, ADR 0002).
+ * `parse` upgrades the stored recipe (the engine's loadRecipe, ADR 0002) and may throw.
  */
-export function restoreCheckpoint<R>(history: History<R>, cp: Checkpoint, parse: (json: unknown) => { recipe: R; warnings: string[] }): { history: History<R>; recipe: R; warnings: string[] } {
+export function restoreCheckpoint<R>(history: History<R>, cp: Checkpoint, parse: Parse<R>): { history: History<R>; recipe: R; warnings: string[] } {
   const { recipe, warnings } = parse(cp.recipe);
   return { history: commit(history, recipe), recipe, warnings };
+}
+
+/**
+ * Restores a checkpoint that may belong to another project: that project is opened and its
+ * source returned for the caller to show. The image switch isn't itself a Back step (as
+ * when opening an image); the recipe change is.
+ */
+export async function restoreFrom<R>(
+  library: Library,
+  current: ProjectStore,
+  cp: Checkpoint,
+  history: History<R>,
+  parse: Parse<R>,
+): Promise<{ project: ProjectStore; source?: Source; history: History<R>; recipe: R; warnings: string[] }> {
+  const restored = restoreCheckpoint(history, cp, parse);
+  if (cp.sourceHash === current.id) return { project: current, ...restored };
+  const other = await library.openProject(cp.sourceHash);
+  if (!other) return { project: current, ...restored, warnings: [...restored.warnings, "That checkpoint's image isn't stored any more, so it's shown on the current image."] };
+  const source = await other.getSource();
+  await library.setLastOpened(other.id);
+  return { project: other, source, ...restored };
 }

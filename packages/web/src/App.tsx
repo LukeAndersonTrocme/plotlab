@@ -5,14 +5,15 @@ import { defaultRecipe } from "./defaults.ts";
 import { HelpPanel } from "./Help.tsx";
 import { ProjectPanel } from "./ProjectPanel.tsx";
 import { EMPTY_RUN, Runner, type RunState } from "./runner.ts";
-import { decodeFile, loadSample } from "./sample.ts";
+import { decodeFile, loadSample, sampleSource } from "./sample.ts";
 import { canRedo, canUndo, commit, createHistory, preview, redo, undo, type History } from "./history.ts";
 import type { InspectTarget } from "./protocol.ts";
 import { StageView } from "./StageView.tsx";
 import { StepList } from "./StepList.tsx";
 import { CheckpointSidebar } from "./CheckpointSidebar.tsx";
-import { createCheckpoint, restoreCheckpoint, SAMPLE_NAME, type CheckpointGroup } from "./checkpoints.ts";
-import { openStore, SAMPLE_SOURCE, sha256Hex, type Checkpoint, type ProjectStore, type StoredSource } from "./storage/index.ts";
+import { createCheckpoint, restoreFrom } from "./checkpoints.ts";
+import { openImage, SAMPLE_NAME, startSession } from "./session.ts";
+import { defaultLocalStorage, openLibrary, type Checkpoint, type Library, type ProjectStore, type Source } from "./storage/index.ts";
 import { captureThumbnail } from "./thumbnail.ts";
 
 const registry = createRegistry();
@@ -22,6 +23,10 @@ const parseRecipe = (json: unknown) => {
   const { recipe, warnings } = loadRecipe(json, registry);
   return { recipe, warnings: warnings.map((w) => w.message) };
 };
+const decodeStored = (p: ProjectStore, s: Source) => decodeFile(new File([s.bytes], p.name, { type: s.type }));
+/** The label and file stem for a project's image ("sample" keeps its special wording). */
+const nameOf = (p: ProjectStore) => (p.name === SAMPLE_NAME ? "sample" : p.name);
+const errText = (e: unknown) => (e instanceof Error ? e.message : String(e));
 
 function download(name: string, data: string | Uint8Array, type: string) {
   const a = document.createElement("a");
@@ -54,55 +59,48 @@ export function App() {
   const runner = useMemo(() => new Runner(setRun), []);
   const recipeRef = useRef(recipe);
   recipeRef.current = recipe;
-  // Storage (ADR 0014): the source by hash, the current recipe, checkpoints.
-  const [store, setStore] = useState<ProjectStore | null>(null);
+  // Storage (ADR 0014): the open project (its image, recipe and checkpoints) in a library.
+  const [library, setLibrary] = useState<Library | null>(null);
+  const [project, setProject] = useState<ProjectStore | null>(null);
   const [persistent, setPersistent] = useState(true);
-  const [sourceHash, setSourceHash] = useState(SAMPLE_SOURCE);
+  // Input waits until the last session is back, so nothing done meanwhile gets overwritten.
+  const [ready, setReady] = useState(false);
   const [sidebar, setSidebar] = useState(false);
   const [saved, setSaved] = useState(0);
 
-  /** Show a stored source, or the sample when there's none (or it can't be read). */
-  const openSource = async (src: StoredSource | undefined) => {
-    if (src) {
-      try {
-        const img = await decodeFile(new File([src.bytes], src.name, { type: src.type }));
-        runner.setSource(img, src.hash);
-        setSourceName(src.name);
-        setSourceHash(src.hash);
-        return;
-      } catch {
-        setNotice(`Couldn't read the saved image ${src.name}; showing the sample.`);
-      }
-    }
-    runner.setSource(await loadSample(), SAMPLE_SOURCE);
-    setSourceName("sample");
-    setSourceHash(SAMPLE_SOURCE);
-  };
-
-  // Start: open storage, then reopen the last recipe and its source (both survive a reload).
+  // Start: reopen the last project with its recipe (image and settings survive a reload).
   useEffect(() => {
     let alive = true;
     void (async () => {
-      const { store: s, persistent: p } = await openStore();
-      const cur = await s.getCurrent().catch(() => undefined);
-      let src: StoredSource | undefined;
-      if (cur && cur.sourceHash !== SAMPLE_SOURCE) src = await s.getSource(cur.sourceHash).catch(() => undefined);
-      if (!alive) return;
-      if (cur) {
-        try {
-          const r = parseRecipe(cur.recipe);
-          setHistory(createHistory(r.recipe));
-          recipeRef.current = r.recipe;
-          if (r.warnings.length) setNotice(r.warnings.join("\n"));
-        } catch {
-          setNotice("Couldn't read the saved recipe; starting from the default.");
-        }
+      const ls = defaultLocalStorage();
+      const sample = () => sampleSource(SAMPLE_NAME);
+      const lost = () => setNotice("Storage was upgraded in another tab. Reload this page to keep saving.");
+      let opened = await openLibrary({ localStorage: ls, onLost: lost });
+      let session;
+      try {
+        session = await startSession({ ...opened, localStorage: ls, sample, parse: parseRecipe });
+      } catch {
+        // Storage opened but failed on use: carry on in memory (ADR 0014: never block the work).
+        opened = await openLibrary({ factory: undefined, localStorage: ls });
+        session = await startSession({ ...opened, localStorage: ls, sample, parse: parseRecipe });
       }
-      await openSource(src);
+      const s = session;
+      const img = await decodeStored(s.project, s.source).catch(() => {
+        s.warnings.push("Couldn't read the saved image; showing the sample.");
+        return loadSample();
+      });
       if (!alive) return;
-      // Only now, so autosave never pairs the saved recipe with the wrong source.
-      setStore(s);
-      setPersistent(p);
+      if (s.recipe) {
+        setHistory(createHistory(s.recipe));
+        recipeRef.current = s.recipe;
+      }
+      if (s.warnings.length) setNotice(s.warnings.join("\n"));
+      runner.setSource(img, s.project.id);
+      setSourceName(nameOf(s.project));
+      setLibrary(opened.library);
+      setProject(s.project);
+      setPersistent(opened.persistent);
+      setReady(true);
       runner.request(recipeRef.current, false);
     })();
     return () => {
@@ -111,49 +109,46 @@ export function App() {
     };
   }, [runner]);
 
-  // Autosave what's committed (not every mid-drag preview).
+  // Autosave what's committed (not every mid-drag preview) into the open project.
   useEffect(() => {
-    void store?.setCurrent({ recipe: history.base, sourceHash }).catch(() => {
-      /* autosave is a convenience */
-    });
-  }, [store, history.base, sourceHash]);
+    void project?.setRecipe({ recipe: history.base, savedAt: Date.now() }).catch((e) => setNotice(`Couldn't autosave: ${errText(e)}`));
+  }, [project, history.base]);
 
   const saveCheckpoint = async () => {
-    if (!store) return;
+    if (!project) return;
     const svg = document.querySelector<SVGSVGElement>(".view svg.preview");
     const thumbnail = svg ? await captureThumbnail(svg).catch(() => undefined) : undefined;
     try {
-      await createCheckpoint(store, { recipe, sourceHash, ...(thumbnail && { thumbnail }) });
+      await createCheckpoint(project, { recipe, ...(thumbnail && { thumbnail }) });
       setSaved((n) => n + 1);
       setNotice(sidebar ? null : "Saved a checkpoint. Press S to see your checkpoints.");
     } catch (e) {
-      setNotice(`Couldn't save the checkpoint: ${e instanceof Error ? e.message : String(e)}`);
+      setNotice(`Couldn't save the checkpoint: ${errText(e)}`);
     }
   };
 
-  // Restoring is one Back step. A checkpoint of another image brings that image back too
-  // (changing the image itself isn't a Back step, as when opening one).
-  const restore = async (cp: Checkpoint, group: CheckpointGroup) => {
-    let parsed: ReturnType<typeof parseRecipe>;
+  // Restoring is one Back step. A checkpoint of another image opens that project too
+  // (the image switch itself isn't a Back step, as when opening an image).
+  const restore = async (cp: Checkpoint) => {
+    if (!library || !project) return;
     try {
-      parsed = parseRecipe(cp.recipe);
+      const r = await restoreFrom(library, project, cp, history, parseRecipe);
+      if (r.source) {
+        runner.setSource(await decodeStored(r.project, r.source), r.project.id);
+        setSourceName(nameOf(r.project));
+      }
+      setProject(r.project);
+      setHistory((h) => commit(h, r.recipe));
+      setNotice(r.warnings.length ? r.warnings.join("\n") : null);
+      if (live) runner.request(r.recipe, false);
+      else setDirty(true);
     } catch (e) {
-      setNotice(`Couldn't restore that checkpoint: ${e instanceof Error ? e.message : String(e)}`);
-      return;
+      setNotice(`Couldn't restore that checkpoint: ${errText(e)}`);
     }
-    const notes = [...parsed.warnings];
-    if (cp.sourceHash !== sourceHash) {
-      const src = cp.sourceHash === SAMPLE_SOURCE ? undefined : await store?.getSource(cp.sourceHash);
-      if (src || cp.sourceHash === SAMPLE_SOURCE) await openSource(src);
-      else notes.push(`The image “${group.name}” isn't stored any more, so this keeps the current image.`);
-    }
-    setHistory((h) => restoreCheckpoint(h, cp, () => parsed).history);
-    setNotice(notes.length ? notes.join("\n") : null);
-    if (live) runner.request(parsed.recipe, false);
-    else setDirty(true);
   };
 
   const apply = (next: Recipe, proxy: boolean, _step?: AnyStep) => {
+    if (!ready) return;
     // A drag previews; releasing commits, so one drag is one Back step.
     setHistory((h) => (proxy ? preview(h, next) : commit(h, next)));
     // On-demand steps' own settings wait for their Run button; the worker holds them back.
@@ -207,6 +202,7 @@ export function App() {
   };
 
   const loadFile = async (file: File) => {
+    if (!ready) return;
     if (file.name.endsWith(".json")) {
       try {
         const { recipe: r, warnings } = loadRecipe(JSON.parse(await file.text()), registry);
@@ -220,13 +216,27 @@ export function App() {
     try {
       const warnings: string[] = [];
       const img = await decodeFile(file, (m) => warnings.push(m));
-      // Stored once by content hash, so it survives a reload and checkpoints can find it.
-      const bytes = new Uint8Array(await file.arrayBuffer());
-      const hash = (await store?.putSource(bytes, { name: file.name, type: file.type }).catch(() => undefined))?.hash ?? (await sha256Hex(bytes));
+      // The image is a project (id: its content hash): new, or reopened with its last settings.
+      const opened = library ? await openImage(library, { bytes: new Uint8Array(await file.arrayBuffer()), name: file.name, type: file.type }).catch((e) => e as Error) : null;
+      let next = recipe;
+      if (opened instanceof Error || !opened) {
+        warnings.push(`Couldn't keep ${file.name} in browser storage (${opened ? opened.message : "storage isn't open"}). It won't survive a reload, and checkpoints are off until you reload.`);
+        setProject(null);
+      } else {
+        if (opened.saved) {
+          try {
+            next = parseRecipe(opened.saved.recipe).recipe;
+            setHistory((h) => commit(h, next));
+            warnings.push(`Reopened ${file.name} with its last settings. Back returns to the settings you had.`);
+          } catch {
+            warnings.push(`${file.name}'s last settings couldn't be read; keeping the current ones.`);
+          }
+        }
+        setProject(opened.project);
+      }
       setSourceName(file.name);
-      setSourceHash(hash);
-      runner.setSource(img, hash);
-      runner.request(recipe, false);
+      runner.setSource(img, opened && !(opened instanceof Error) ? opened.project.id : `${file.name}:${file.size}`);
+      runner.request(next, false);
       setNotice(warnings.length ? warnings.join("\n") : null);
     } catch {
       setNotice(`Couldn't read ${file.name}. Try PNG, JPEG, WebP or TIFF.`);
@@ -306,7 +316,7 @@ export function App() {
             Update
           </button>
         )}
-        <button onClick={() => void saveCheckpoint()} disabled={!store} title="Save the current settings as a checkpoint, with a small picture">
+        <button onClick={() => void saveCheckpoint()} disabled={!project} title="Save the current settings as a checkpoint, with a small picture">
           ＋ Checkpoint
         </button>
         <button className={sidebar ? "on" : ""} onClick={() => setSidebar(!sidebar)} aria-pressed={sidebar} title="Show or hide your checkpoints (S)">
@@ -457,15 +467,19 @@ export function App() {
         <CheckpointSidebar
           open={sidebar}
           onToggle={() => setSidebar((o) => !o)}
-          store={store}
+          library={library}
+          project={project}
           persistent={persistent}
-          sourceHash={sourceHash}
-          sourceName={sourceName === "sample" ? SAMPLE_NAME : sourceName}
           version={saved}
           onSave={() => void saveCheckpoint()}
-          onRestore={(cp, g) => void restore(cp, g)}
+          onRestore={(cp) => void restore(cp)}
         />
       </main>
+      {!ready && (
+        <div className="starting" role="status">
+          Opening your last session…
+        </div>
+      )}
       {help && <HelpPanel markdown={help.help} onClose={() => setHelp(null)} />}
     </div>
   );

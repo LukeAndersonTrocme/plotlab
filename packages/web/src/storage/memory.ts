@@ -1,57 +1,85 @@
 import { sha256Hex } from "./hash.ts";
-import type { Checkpoint, Current, ProjectStore, SourceMeta, StoredSource } from "./types.ts";
+import type { Checkpoint, Library, ProjectInfo, ProjectStore, SavedRecipe, Source } from "./types.ts";
 
-/** Keeps everything in memory: for tests, and when the browser blocks IndexedDB. */
-export function memoryStore(): ProjectStore {
-  const sources = new Map<string, StoredSource>();
-  const checkpoints = new Map<string, Checkpoint>();
-  const thumbnails = new Map<string, Uint8Array>();
-  let current: Current | undefined;
-  const meta = ({ bytes: _, ...m }: StoredSource): SourceMeta => ({ ...m });
+interface Project {
+  info: ProjectInfo;
+  source: Source;
+  recipe: SavedRecipe | undefined;
+  checkpoints: Map<string, Checkpoint>;
+  thumbnails: Map<string, Uint8Array>;
+}
+
+/** Everything in memory: for tests, and when the browser blocks IndexedDB. */
+export function memoryLibrary(opts: { onSetRecipe?: (saved: SavedRecipe) => void } = {}): Library {
+  const projects = new Map<string, Project>();
+  let last: string | undefined;
+
+  const store = (id: string): ProjectStore => {
+    // Look the project up on every call, so a deleted project stops answering.
+    const p = () => projects.get(id);
+    return {
+      id,
+      name: projects.get(id)!.info.name,
+      async getSource() {
+        const s = p()!.source;
+        return { type: s.type, bytes: s.bytes.slice() };
+      },
+      async getRecipe() {
+        const r = p()?.recipe;
+        return r && structuredClone(r);
+      },
+      async setRecipe(saved) {
+        const x = p();
+        if (x) x.recipe = structuredClone(saved);
+        opts.onSetRecipe?.(saved);
+      },
+      async putCheckpoint(cp, thumbnail) {
+        const x = p();
+        if (!x) return;
+        x.checkpoints.set(cp.id, structuredClone({ ...cp, sourceHash: id }));
+        if (thumbnail) x.thumbnails.set(cp.id, thumbnail.slice());
+      },
+      async getCheckpoint(cid) {
+        const c = p()?.checkpoints.get(cid);
+        return c && structuredClone(c);
+      },
+      async listCheckpoints() {
+        return [...(p()?.checkpoints.values() ?? [])].map((c) => structuredClone(c));
+      },
+      async getThumbnail(cid) {
+        return p()?.thumbnails.get(cid)?.slice();
+      },
+      async deleteCheckpoint(cid) {
+        p()?.checkpoints.delete(cid);
+        p()?.thumbnails.delete(cid);
+      },
+    };
+  };
 
   return {
     persistent: false,
-    async putSource(bytes, info) {
-      const hash = await sha256Hex(bytes);
-      const have = sources.get(hash);
-      if (have) return meta(have);
-      const s: StoredSource = { hash, name: info.name, type: info.type, size: bytes.length, addedAt: Date.now(), bytes: bytes.slice() };
-      sources.set(hash, s);
-      return meta(s);
+    async listProjects() {
+      return [...projects.values()].map((p) => ({ ...p.info }));
     },
-    async getSource(hash) {
-      const s = sources.get(hash);
-      return s && { ...s, bytes: s.bytes.slice() };
+    async createProject(src) {
+      const id = await sha256Hex(src.bytes);
+      const have = projects.get(id);
+      if (have) return { ...have.info };
+      const info = { id, name: src.name };
+      projects.set(id, { info, source: { type: src.type, bytes: src.bytes.slice() }, recipe: undefined, checkpoints: new Map(), thumbnails: new Map() });
+      return { ...info };
     },
-    async listSources() {
-      return [...sources.values()].map(meta);
+    async openProject(id) {
+      return projects.has(id) ? store(id) : undefined;
     },
-    async deleteSource(hash) {
-      sources.delete(hash);
+    async deleteProject(id) {
+      projects.delete(id);
     },
-    async getCurrent() {
-      return current && structuredClone(current);
+    async getLastOpened() {
+      return last;
     },
-    async setCurrent(c) {
-      current = structuredClone(c);
-    },
-    async putCheckpoint(cp, thumbnail) {
-      checkpoints.set(cp.id, structuredClone(cp));
-      if (thumbnail) thumbnails.set(cp.id, thumbnail.slice());
-    },
-    async getCheckpoint(id) {
-      const c = checkpoints.get(id);
-      return c && structuredClone(c);
-    },
-    async listCheckpoints(filter) {
-      return [...checkpoints.values()].filter((c) => filter?.sourceHash === undefined || c.sourceHash === filter.sourceHash).map((c) => structuredClone(c));
-    },
-    async getThumbnail(id) {
-      return thumbnails.get(id)?.slice();
-    },
-    async deleteCheckpoint(id) {
-      checkpoints.delete(id);
-      thumbnails.delete(id);
+    async setLastOpened(id) {
+      last = id;
     },
   };
 }

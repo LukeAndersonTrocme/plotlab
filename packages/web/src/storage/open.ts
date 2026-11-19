@@ -1,13 +1,15 @@
-import { indexedDbStore } from "./indexeddb.ts";
-import { memoryStore } from "./memory.ts";
-import { SAMPLE_SOURCE, type ProjectStore } from "./types.ts";
+import { indexedDbLibrary } from "./indexeddb.ts";
+import { memoryLibrary } from "./memory.ts";
+import type { Library, ProjectStore, SavedRecipe } from "./types.ts";
 
-/** Where the recipe autosave lived before storage (M0–M3a). */
+/** Where the recipe autosave lived before storage (M0–M3a), and where the fallback keeps it. */
 export const LEGACY_RECIPE_KEY = "plotlab:recipe";
+/** When the fallback wrote it (absent for pre-storage autosaves). */
+export const LEGACY_SAVED_AT_KEY = "plotlab:recipe:savedAt";
 
 export type KeyValue = Pick<Storage, "getItem" | "setItem" | "removeItem">;
 
-function defaultLocalStorage(): KeyValue | undefined {
+export function defaultLocalStorage(): KeyValue | undefined {
   try {
     return globalThis.localStorage;
   } catch {
@@ -15,74 +17,62 @@ function defaultLocalStorage(): KeyValue | undefined {
   }
 }
 
-function readLegacy(ls: KeyValue | undefined): unknown {
+function readLegacy(ls: KeyValue | undefined): SavedRecipe | undefined {
   try {
     const raw = ls?.getItem(LEGACY_RECIPE_KEY);
-    return raw ? JSON.parse(raw) : undefined;
+    if (!raw) return undefined;
+    return { recipe: JSON.parse(raw), savedAt: Number(ls?.getItem(LEGACY_SAVED_AT_KEY)) || 0 };
   } catch {
     return undefined;
   }
 }
 
-/**
- * Moves a recipe autosaved in localStorage into storage, once: it becomes the current
- * recipe (on the sample image, the only source that survived a reload before), unless
- * storage already has one. The old copy is removed either way, so this never runs twice.
- * Returns true if it moved a recipe.
- */
-export async function migrateLocalRecipe(store: ProjectStore, ls: KeyValue | undefined): Promise<boolean> {
-  const recipe = readLegacy(ls);
-  let moved = false;
-  if (recipe !== undefined && !(await store.getCurrent())) {
-    await store.setCurrent({ recipe, sourceHash: SAMPLE_SOURCE });
-    moved = true;
-  }
+function writeLegacy(ls: KeyValue | undefined, saved: SavedRecipe) {
   try {
-    ls?.removeItem(LEGACY_RECIPE_KEY);
+    ls?.setItem(LEGACY_RECIPE_KEY, JSON.stringify(saved.recipe));
+    ls?.setItem(LEGACY_SAVED_AT_KEY, String(saved.savedAt));
   } catch {
-    /* nothing to clean up */
+    /* autosave is a convenience */
   }
-  return moved;
 }
 
 /**
- * The fallback when IndexedDB is blocked: memory for everything, but the current recipe
- * also goes to localStorage as before, so a reload keeps at least the settings.
+ * Brings a recipe autosaved in localStorage (by a pre-storage build, or by the no-IndexedDB
+ * fallback) into the open project, keeping whichever is newer. An undated one counts as
+ * older than anything already stored. With `remove`, the localStorage copy is deleted once
+ * it has been imported or found older; the fallback keeps it, as it's its own autosave.
  */
-function withLocalRecipe(store: ProjectStore, ls: KeyValue | undefined): ProjectStore {
-  return {
-    ...store,
-    async getCurrent() {
-      const c = await store.getCurrent();
-      if (c) return c;
-      const recipe = readLegacy(ls);
-      return recipe === undefined ? undefined : { recipe, sourceHash: SAMPLE_SOURCE };
-    },
-    async setCurrent(c) {
-      await store.setCurrent(c);
-      try {
-        ls?.setItem(LEGACY_RECIPE_KEY, JSON.stringify(c.recipe));
-      } catch {
-        /* autosave is a convenience */
-      }
-    },
-  };
+export async function migrateLegacyRecipe(project: ProjectStore, ls: KeyValue | undefined, opts: { remove: boolean }): Promise<"none" | "imported" | "older"> {
+  const legacy = readLegacy(ls);
+  if (!legacy) return "none";
+  const saved = await project.getRecipe();
+  const result = !saved || legacy.savedAt > saved.savedAt ? "imported" : "older";
+  if (result === "imported") await project.setRecipe({ recipe: legacy.recipe, savedAt: legacy.savedAt || Date.now() });
+  if (opts.remove) {
+    try {
+      ls?.removeItem(LEGACY_RECIPE_KEY);
+      ls?.removeItem(LEGACY_SAVED_AT_KEY);
+    } catch {
+      /* nothing to clean up */
+    }
+  }
+  return result;
 }
 
 /**
  * Opens the best storage this browser has (progressive enhancement, ADR 0014): IndexedDB,
- * or memory if that's blocked. `persistent: false` means checkpoints won't survive a reload.
+ * or memory if that's missing, blocked or too slow. In memory, the recipe still autosaves
+ * to localStorage (not the image). `persistent: false` means checkpoints won't survive a reload.
  */
-export async function openStore(
-  opts: { factory?: IDBFactory | undefined; localStorage?: KeyValue | undefined } = {},
-): Promise<{ store: ProjectStore; persistent: boolean }> {
+export async function openLibrary(
+  opts: { factory?: IDBFactory | undefined; localStorage?: KeyValue | undefined; timeoutMs?: number; onLost?: () => void } = {},
+): Promise<{ library: Library; persistent: boolean }> {
   const ls = "localStorage" in opts ? opts.localStorage : defaultLocalStorage();
   try {
-    const store = await indexedDbStore("factory" in opts ? { factory: opts.factory } : {});
-    await migrateLocalRecipe(store, ls);
-    return { store, persistent: true };
+    const library = await indexedDbLibrary({ ...("factory" in opts && { factory: opts.factory }), ...(opts.timeoutMs !== undefined && { timeoutMs: opts.timeoutMs }), ...(opts.onLost && { onLost: opts.onLost }) });
+    return { library, persistent: true };
   } catch {
-    return { store: withLocalRecipe(memoryStore(), ls), persistent: false };
+    return { library: memoryLibrary({ onSetRecipe: (s) => writeLegacy(ls, s) }), persistent: false };
   }
 }
 

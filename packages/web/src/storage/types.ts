@@ -1,44 +1,41 @@
 /**
- * One storage interface for everything the app keeps (ADR 0014): sources, the current
- * recipe, and checkpoints. Adapters: IndexedDB (every browser), memory (tests, and the
- * fallback when IndexedDB is blocked), and later a connected project folder (#7, File
- * System Access API) or a desktop file system (ADR 0013).
+ * Storage (ADR 0014). The unit is a **project** (GLOSSARY): one source with its current
+ * recipe and its checkpoints, the same thing a project folder or a bundle holds.
  *
- * The shape follows the project-folder format so a folder adapter is a direct mapping:
- *   source.<ext>                  ↔ putSource / getSource (bytes + name + type)
- *   recipe.json                   ↔ setCurrent / getCurrent
- *   checkpoints/<id>.json         ↔ putCheckpoint / getCheckpoint / listCheckpoints
- *   checkpoints/<id>.png          ↔ the thumbnail, read on its own with getThumbnail
+ *   Library        all projects: list, create (from a source), open, delete
+ *   ProjectStore   one project:  source.<ext>, recipe.json, checkpoints/<id>.json + .png
  *
- * Recipes are stored as plain JSON (`unknown`): the caller upgrades them with the engine's
- * `loadRecipe` (ADR 0002), so storage knows nothing about steps.
- * No Node- or React-only code here: the module may move to its own package later.
+ * Adapters: IndexedDB (every browser) and memory (tests; the fallback when IndexedDB is
+ * blocked). A connected folder (#7) and a desktop file system (ADR 0013) come later and
+ * implement the same two interfaces; `test/storage.test.ts` says which call maps to which
+ * file. Recipes are stored as plain JSON: the caller upgrades them with the engine's
+ * `loadRecipe` (ADR 0002). No Node- or React-only code here, so this can become a package.
  */
 
-/** SHA-256 of the source's bytes, lowercase hex. */
-export type SourceHash = string;
+/** SHA-256 of a project's source bytes, lowercase hex. The same image is the same project. */
+export type ProjectId = string;
 
-/** The built-in sample image. It isn't stored; checkpoints on it point here. */
-export const SAMPLE_SOURCE = "sample";
-
-export interface SourceMeta {
-  hash: SourceHash;
-  /** File name when first added. */
+export interface ProjectInfo {
+  id: ProjectId;
+  /** The source's file name when first opened (a folder adapter: the folder's name). */
   name: string;
+}
+
+/** The source image as stored: `source.<ext>`, the type giving the extension. */
+export interface Source {
+  bytes: Uint8Array;
   /** MIME type, e.g. image/png. */
   type: string;
-  size: number;
-  addedAt: number;
 }
 
-export interface StoredSource extends SourceMeta {
-  bytes: Uint8Array;
+export interface NewSource extends Source {
+  name: string;
 }
 
-/** What's open now: the recipe and the source it runs on. */
-export interface Current {
+/** recipe.json, with when it was written (a folder: the file's modified time). */
+export interface SavedRecipe {
   recipe: unknown;
-  sourceHash: SourceHash;
+  savedAt: number;
 }
 
 /** A saved moment (GLOSSARY: Checkpoint). The thumbnail is stored beside it, not in it. */
@@ -46,31 +43,39 @@ export interface Checkpoint {
   /** Unique and stable; bundles merge checkpoints by id (ADR 0014). */
   id: string;
   createdAt: number;
-  sourceHash: SourceHash;
+  /** The project's id, so a checkpoint file on its own still says which image it's for. */
+  sourceHash: ProjectId;
   recipe: unknown;
   name: string;
   note: string;
 }
 
 export interface ProjectStore {
-  /** False when nothing survives a reload (memory adapter). The UI says so. */
-  readonly persistent: boolean;
-
-  /** Stores the bytes once, keyed by their hash. Adding the same bytes again is a no-op. */
-  putSource(bytes: Uint8Array, info: { name: string; type: string }): Promise<SourceMeta>;
-  getSource(hash: SourceHash): Promise<StoredSource | undefined>;
-  listSources(): Promise<SourceMeta[]>;
-  deleteSource(hash: SourceHash): Promise<void>;
-
-  getCurrent(): Promise<Current | undefined>;
-  setCurrent(current: Current): Promise<void>;
-
+  readonly id: ProjectId;
+  readonly name: string;
+  getSource(): Promise<Source>;
+  getRecipe(): Promise<SavedRecipe | undefined>;
+  setRecipe(saved: SavedRecipe): Promise<void>;
   /** Adds or replaces a checkpoint. Without a thumbnail, any stored one is kept. */
   putCheckpoint(checkpoint: Checkpoint, thumbnail?: Uint8Array): Promise<void>;
   getCheckpoint(id: string): Promise<Checkpoint | undefined>;
   /** In no particular order; `checkpoints.ts` sorts. */
-  listCheckpoints(filter?: { sourceHash?: SourceHash }): Promise<Checkpoint[]>;
+  listCheckpoints(): Promise<Checkpoint[]>;
   /** PNG bytes, ~160 px. */
   getThumbnail(id: string): Promise<Uint8Array | undefined>;
   deleteCheckpoint(id: string): Promise<void>;
+}
+
+export interface Library {
+  /** False when nothing survives a reload (memory). The UI says so. */
+  readonly persistent: boolean;
+  listProjects(): Promise<ProjectInfo[]>;
+  /** The project for this source: new, or the existing one if these bytes were opened before. */
+  createProject(source: NewSource): Promise<ProjectInfo>;
+  openProject(id: ProjectId): Promise<ProjectStore | undefined>;
+  /** Removes the project with its source, recipe and checkpoints. */
+  deleteProject(id: ProjectId): Promise<void>;
+  /** Which project to reopen after a reload (a browser preference, not part of the format). */
+  getLastOpened(): Promise<ProjectId | undefined>;
+  setLastOpened(id: ProjectId): Promise<void>;
 }
