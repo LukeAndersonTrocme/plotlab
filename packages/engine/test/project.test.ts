@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { budgetOnlyChange, inkFor, loadRecipe, showsTime, StepRegistry, toPlot, workingMmPerPx, type Geometry, type Ink, type Recipe } from "../src/index.ts";
+import { budgetOnlyChange, inkFor, loadRecipe, retarget, showsTime, StepRegistry, toPlot, workingMmPerPx, type Geometry, type Ink, type Recipe } from "../src/index.ts";
 
 const ink = (id: string, color: string, widthMm = 0.5): Ink => ({ id, name: id, color, mix: "multiply", widthMm });
 const recipe = (over: Partial<Recipe> = {}): Recipe =>
@@ -93,5 +93,35 @@ describe("budgetOnlyChange", () => {
     expect(budgetOnlyChange(r, r)).toBe(false);
     expect(budgetOnlyChange(r, { ...r, target: { kind: "plotter", budgetMin: 8, mirror: true } })).toBe(false);
     expect(budgetOnlyChange(r, { ...r, target: { kind: "plotter", budgetMin: 8 }, workingMmPerPx: 0.2 })).toBe(false);
+  });
+});
+
+describe("retarget", () => {
+  it("keeps mirror and registration, and keeps dpi when it has one", () => {
+    expect(retarget({ kind: "plotter", mirror: true, registration: true }, { kind: "raster" })).toEqual({ kind: "raster", dpi: 300 });
+    expect(retarget({ kind: "raster", dpi: 150 }, { kind: "raster" })).toEqual({ kind: "raster", dpi: 150 });
+    expect(retarget({ kind: "print", dpi: 1200, mode: "gray", halftone: null, negative: false, mirror: true }, { kind: "plotter" })).toEqual({ kind: "plotter", mirror: true });
+    expect(retarget({ kind: "plotter", registration: true }, { kind: "vector" })).toEqual({ kind: "vector" });
+  });
+  it("print prep is at least 600 dpi, with default print settings unless given", () => {
+    expect(retarget({ kind: "raster", dpi: 300 }, { kind: "print" })).toEqual({ kind: "print", dpi: 600, mode: "bitmap", halftone: null, negative: false });
+    expect(retarget({ kind: "raster", dpi: 1200 }, { kind: "print" })).toMatchObject({ dpi: 1200 });
+    expect(retarget({ kind: "plotter", mirror: true, registration: true }, { kind: "print", mode: "gray", negative: true })).toEqual({
+      kind: "print",
+      dpi: 600,
+      mode: "gray",
+      halftone: null,
+      negative: true,
+      mirror: true,
+      registration: true,
+    });
+  });
+  it("switching to print keeps the current print settings unless the request names them", () => {
+    const cur = { kind: "print" as const, dpi: 800, mode: "bitmap" as const, halftone: { lpi: 30, angles: {} }, negative: true, mirror: true };
+    expect(retarget(cur, { kind: "print" })).toEqual(cur);
+    expect(retarget(cur, { kind: "print", halftone: null })).toEqual({ ...cur, halftone: null });
+  });
+  it("switching to the plotter keeps a time budget", () => {
+    expect(retarget({ kind: "plotter", budgetMin: 5, mirror: true }, { kind: "plotter" })).toEqual({ kind: "plotter", budgetMin: 5, mirror: true });
   });
 });

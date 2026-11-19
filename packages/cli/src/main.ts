@@ -26,7 +26,7 @@ const fmtTime = (s: number) => {
 
 function describe(def: StepDefinition): string {
   const perLayer = def.runLayer ? `, per layer (${(def.accepts ?? ["tone", "categories"]).join(" or ")})` : "";
-  const lines = [`${def.id} (v${def.version}): ${def.title}`, `  ${def.summary}`, `  ${def.input} → ${def.output}, ${def.cost}${perLayer}`, "", "Parameters:"];
+  const lines = [`${def.id} (v${def.version}${def.experimental ? ", experimental" : ""}): ${def.title}`, `  ${def.summary}`, `  ${def.input} → ${def.output}, ${def.cost}${perLayer}`, "", "Parameters:"];
   if (def.runLayer) lines.splice(3, 0, `  In a recipe: "layers": ["id", …] picks layers; "layerParams": { "id": { … } } overrides settings per layer.`);
   for (const [k, d] of Object.entries(def.params)) {
     let range = "";
@@ -97,7 +97,7 @@ async function main(argv: string[]): Promise<number> {
   const [cmd, sub, ...rest] = argv;
   if (cmd === "run") return run(argv.slice(1));
   if (cmd === "steps" && sub === "list") {
-    for (const s of createRegistry().list()) process.stdout.write(`${s.id.padEnd(12)} ${s.input} → ${s.output}  ${s.summary}\n`);
+    for (const s of createRegistry().list()) process.stdout.write(`${s.id.padEnd(12)} ${s.input} → ${s.output}  ${s.experimental ? "[experimental] " : ""}${s.summary}\n`);
     return 0;
   }
   if (cmd === "steps" && sub === "describe" && rest[0]) {

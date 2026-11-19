@@ -25,6 +25,22 @@ describe("loadRecipe", () => {
     expect(recipe.steps[0]).toMatchObject({ step: "a", version: 2, params: { k: 3 } });
     expect(warnings[0]?.message).toMatch(/upgraded v1 → v2/);
   });
+  it("tells migrate whether it is upgrading the step's params or a per-layer override", () => {
+    const scopes: unknown[] = [];
+    const c = defineStep({
+      id: "c", version: 2, title: "C", summary: "", input: "image", output: "image", cost: "live", help: "",
+      params: { k: { type: "number", label: "k", help: "", min: 0, max: 10, default: 1 }, n: { type: "number", label: "n", help: "", min: 0, max: 10, default: 5 } },
+      run: (i) => i,
+      migrate: (p, _v, scope) => { scopes.push(scope); return { params: scope === "layer" ? p : { ...p, n: 0 }, note: "adds n" }; },
+    });
+    const { recipe } = loadRecipe(
+      { ...base, steps: [{ step: "c", version: 1, params: { k: 3 }, layerParams: { l1: { k: 2 }, l2: {} } }] },
+      new StepRegistry([c]),
+    );
+    expect(scopes).toEqual(["step", "layer", "layer"]);
+    expect(recipe.steps[0]!.params).toEqual({ k: 3, n: 0 });
+    expect(recipe.steps[0]!.layerParams).toEqual({ l1: { k: 2 }, l2: {} });
+  });
   it("rejects unknown steps, future versions and type mismatches", () => {
     const bad = { ...base, steps: [{ step: "zzz" }, { step: "a", version: 9 }, { step: "b" }, { step: "b" }] };
     try {
@@ -37,6 +53,18 @@ describe("loadRecipe", () => {
       expect(msgs).toMatch(/newer than this build/);
       expect(msgs).toMatch(/b expects image but receives layers/);
     }
+  });
+  it("loads old recipes for an experimental step with a warning that names it experimental", () => {
+    const x = defineStep({
+      id: "x", version: 3, experimental: true, title: "X", summary: "", input: "image", output: "image", cost: "live", help: "",
+      params: { k: { type: "number", label: "k", help: "", min: 0, max: 10, default: 1 } },
+      run: (i) => i,
+    });
+    const { recipe, warnings } = loadRecipe({ ...base, steps: [{ step: "x", version: 1, params: { k: 2, gone: 1 } }] }, new StepRegistry([x]));
+    expect(recipe.steps[0]).toMatchObject({ step: "x", version: 3, params: { k: 2 } });
+    const msgs = warnings.map((w) => w.message).join("\n");
+    expect(msgs).toMatch(/x is experimental/);
+    expect(msgs).toMatch(/unknown parameter "gone"/);
   });
   it("rejects recipes from a newer schema", () => {
     expect(() => loadRecipe({ ...base, schemaVersion: 99, steps: [] }, makeRegistry())).toThrow(/newer/);

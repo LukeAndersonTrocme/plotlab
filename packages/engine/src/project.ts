@@ -70,6 +70,43 @@ export function budgetOnlyChange(a: Recipe, b: Recipe): boolean {
 }
 
 export type TargetKind = Target["kind"];
+
+/** A request for an output target: a kind, plus print settings when it is print prep. Used by presets. */
+export type TargetRequest = { kind: TargetKind } & Partial<PrintOptions>;
+
+/** Print prep needs fine plates; switching to it never goes below this. */
+export const MIN_PRINT_DPI = 600;
+
+/**
+ * Switch the output target the way the Output panel does: mirror and registration marks
+ * carry over to targets that have them, dpi carries over (at least MIN_PRINT_DPI for print
+ * prep), and print settings come from the request, then the current print target, then defaults.
+ */
+export function retarget(current: Target, req: TargetRequest): Target {
+  const dpi = "dpi" in current ? current.dpi : 300;
+  const fin = finishing(current);
+  const keep = { ...(fin.mirror ? { mirror: true } : {}), ...(fin.registration ? { registration: true } : {}) };
+  switch (req.kind) {
+    case "raster":
+      return { kind: "raster", dpi };
+    case "vector":
+      return { kind: "vector" };
+    case "plotter": {
+      // A time budget only means something on the plotter; keep it while staying there.
+      const budget = current.kind === "plotter" && current.budgetMin ? { budgetMin: current.budgetMin } : {};
+      return { kind: "plotter", ...keep, ...budget };
+    }
+    case "print": {
+      const cur: PrintOptions = current.kind === "print" ? { mode: current.mode, halftone: current.halftone, negative: current.negative } : DEFAULT_PRINT;
+      const print: PrintOptions = {
+        mode: req.mode ?? cur.mode,
+        halftone: req.halftone !== undefined ? req.halftone : cur.halftone,
+        negative: req.negative ?? cur.negative,
+      };
+      return { kind: "print", dpi: Math.max(dpi, MIN_PRINT_DPI), ...print, ...keep };
+    }
+  }
+}
 export const TARGET_KINDS: TargetKind[] = ["plotter", "vector", "raster", "print"];
 
 /** Print time is a plotter concept. */
