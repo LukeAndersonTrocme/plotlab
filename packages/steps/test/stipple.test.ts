@@ -50,13 +50,57 @@ describe("stipple", () => {
   });
 
   it("relaxation keeps dot density proportional to tone (not flattened toward its square root)", async () => {
-    // Stripes of 0.2 and 0.8 tone, 8 mm wide: four times as many dots in the dark ones.
-    const stripes = toneLayers(120, 120, square, (x) => (Math.floor(x / 16) % 2 ? 0.8 : 0.2));
+    // Six stripes, 10 mm wide, alternating 0.2 and 0.8 tone: equal areas, so 4× the dots in the dark ones.
+    const stripes = toneLayers(120, 120, square, (x) => (Math.floor(x / 20) % 2 ? 0.8 : 0.2));
     const dots = (await run(stripes, { spacing: 1.2, iterations: 30 })).map(centre);
-    const dark = dots.filter(([x]) => Math.floor(x / 8) % 2).length;
+    const dark = dots.filter(([x]) => Math.floor(x / 10) % 2).length;
     const ratio = dark / (dots.length - dark);
-    expect(ratio).toBeGreaterThan(3.2);
-    expect(ratio).toBeLessThan(5);
+    expect(ratio).toBeGreaterThan(3.5);
+    expect(ratio).toBeLessThan(4.5);
+  });
+
+  it("averages tone over each grid cell, so fine lines aren't lost or aliased", async () => {
+    // 100 mm at 2000 px: 1-px black lines every 8 or 9 px, finer than the density grid.
+    for (const every of [8, 9]) {
+      const lines = toneLayers(2000, 2000, { xMm: 0, yMm: 0, widthMm: 100, heightMm: 100 }, (x) => (x % every === 0 ? 1 : 0));
+      const dots = (await run(lines, { iterations: 0 })).map(centre);
+      const expected = (100 * 100) / every / (P.spacing * P.spacing);
+      expect(dots.length / expected, `every ${every}`).toBeGreaterThan(0.95);
+      expect(dots.length / expected, `every ${every}`).toBeLessThan(1.05);
+      // No moiré: every 10 mm column gets close to its share.
+      for (let c = 0; c < 10; c++) {
+        const k = dots.filter(([x]) => x >= c * 10 && x < c * 10 + 10).length;
+        expect(k / (dots.length / 10), `every ${every}, column ${c}`).toBeGreaterThan(0.75);
+        expect(k / (dots.length / 10), `every ${every}, column ${c}`).toBeLessThan(1.25);
+      }
+    }
+  });
+
+  it("gives each layer its own scatter, so inks interleave instead of overprinting", async () => {
+    const one = toneLayers(30, 30, square, () => 0.7);
+    const two: Layers = { ...one, layers: [one.layers[0]!, { ...one.layers[0]!, id: "tone2", name: "Second" }] };
+    const geo = (await applyStep(stipple, two, { params: P }, ctx)) as Geometry;
+    const [a, b] = geo.layers.map((l) => l.features.features.flatMap(featurePaths).map((p) => JSON.stringify(p[0])));
+    expect(a!.length).toBeGreaterThan(50);
+    // Relaxed dots land on centroids of grid cells, so the odd one can coincide by chance;
+    // with one shared scatter every dot would.
+    const shared = b!.filter((p) => new Set(a).has(p)).length;
+    expect(shared / b!.length).toBeLessThan(0.02);
+    // Still deterministic per layer: the first layer matches a single-layer run.
+    expect(a).toEqual((await run(one)).map((p) => JSON.stringify(p[0])));
+  });
+
+  it("reports progress once across all layers, ending at 1, even with no relaxation", async () => {
+    const one = toneLayers(30, 30, square, () => 0.7);
+    const two: Layers = { ...one, layers: [one.layers[0]!, { ...one.layers[0]!, id: "tone2", name: "Second" }] };
+    for (const iterations of [0, 5]) {
+      const seen: number[] = [];
+      await applyStep(stipple, two, { params: { ...P, iterations } }, { ...ctx, progress: (f) => seen.push(f) });
+      expect(seen.length, `iterations ${iterations}`).toBeGreaterThan(0);
+      for (let i = 1; i < seen.length; i++) expect(seen[i]!).toBeGreaterThanOrEqual(seen[i - 1]!);
+      expect(seen[seen.length - 1]).toBe(1);
+      expect(seen.some((f) => f <= 0.5)).toBe(true);
+    }
   });
 
   it("makes about one dot per spacing² of full ink", async () => {

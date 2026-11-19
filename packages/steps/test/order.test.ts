@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { createRng, type Position } from "@plotlab/engine";
-import { applyStep, type Geometry, type Ink, type Plot, type StepContext } from "@plotlab/engine";
+import { applyStep, defaultParams, type Geometry, type Ink, type Plot, type StepContext } from "@plotlab/engine";
 import { orderPaths, singleStroke, travelLength } from "../src/order/sort.ts";
 import { order } from "../src/index.ts";
 
@@ -96,9 +96,12 @@ describe("single stroke", () => {
   it("empty layers stay empty", () => {
     expect(singleStroke([])).toEqual([]);
   });
-  it("default (nearest) mode is unchanged: same strokes as orderPaths", async () => {
-    const out = await run({ method: "nearest" });
-    expect(out.layers[1]!.paths).toEqual(orderPaths(lines, { allowReverse: true, improve: true }));
+  it("default (nearest) mode is unchanged: a pinned order on a small input", async () => {
+    const strokes: Position[][] = [[[10, 0], [20, 0]], [[1, 0], [5, 0]], [[30, 0], [25, 0]], [[0, 10], [0, 20]], [[3, 3], [4, 4]]];
+    const small: Geometry = { ...geo, layers: [{ id: "a", name: "a", features: { type: "FeatureCollection", features: strokes.map((coordinates) => ({ type: "Feature", geometry: { type: "LineString", coordinates }, properties: {} })) } }] };
+    const out = (await applyStep(order, small, { params: defaultParams(order.params) }, ctx)) as Plot;
+    // Recorded from the step before single-stroke existed; must never change without a version bump.
+    expect(out.layers[0]!.paths).toEqual([[[1, 0], [5, 0]], [[10, 0], [20, 0]], [[25, 0], [30, 0]], [[4, 4], [3, 3]], [[0, 10], [0, 20]]]);
     expect(order.params.method.default).toBe("nearest");
   });
 });

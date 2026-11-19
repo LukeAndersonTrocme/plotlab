@@ -28,49 +28,82 @@ export interface StippleOptions {
   progress?: (fraction: number) => void;
 }
 
-/** Bilinear tone at a paper position. */
-function sampler(tone: Float32Array, w: number, h: number, frame: Frame) {
-  return (xMm: number, yMm: number): number => {
-    const px = Math.min(w - 1, Math.max(0, ((xMm - frame.xMm) / frame.widthMm) * w - 0.5));
-    const py = Math.min(h - 1, Math.max(0, ((yMm - frame.yMm) / frame.heightMm) * h - 0.5));
-    const x0 = Math.floor(px), y0 = Math.floor(py), x1 = Math.min(w - 1, x0 + 1), y1 = Math.min(h - 1, y0 + 1);
-    const fx = px - x0, fy = py - y0;
-    const a = tone[y0 * w + x0]!, b = tone[y0 * w + x1]!, c = tone[y1 * w + x0]!, d = tone[y1 * w + x1]!;
-    return Math.min(1, Math.max(0, (a * (1 - fx) + b * fx) * (1 - fy) + (c * (1 - fx) + d * fx) * fy));
+/**
+ * Mean tone over a rectangle of the paper, from a summed-area table. Exact for the
+ * piecewise-constant pixels, so lines finer than a grid cell still count (no aliasing).
+ */
+function boxMean(tone: Float32Array, w: number, h: number, frame: Frame) {
+  const sat = new Float64Array((w + 1) * (h + 1));
+  for (let y = 0; y < h; y++) {
+    let row = 0;
+    for (let x = 0; x < w; x++) {
+      row += tone[y * w + x]!;
+      sat[(y + 1) * (w + 1) + x + 1] = sat[y * (w + 1) + x + 1]! + row;
+    }
+  }
+  // The SAT at a fractional pixel corner is bilinear within a pixel, so interpolate it.
+  const S = (px: number, py: number) => {
+    const x = Math.min(w, Math.max(0, px)), y = Math.min(h, Math.max(0, py));
+    const x0 = Math.min(w - 1, Math.floor(x)), y0 = Math.min(h - 1, Math.floor(y)), fx = x - x0, fy = y - y0;
+    const at = (i: number, j: number) => sat[j * (w + 1) + i]!;
+    return (at(x0, y0) * (1 - fx) + at(x0 + 1, y0) * fx) * (1 - fy) + (at(x0, y0 + 1) * (1 - fx) + at(x0 + 1, y0 + 1) * fx) * fy;
   };
+  const sx = w / frame.widthMm, sy = h / frame.heightMm;
+  return (x0Mm: number, y0Mm: number, x1Mm: number, y1Mm: number): number => {
+    const ax = (x0Mm - frame.xMm) * sx, bx = (x1Mm - frame.xMm) * sx, ay = (y0Mm - frame.yMm) * sy, by = (y1Mm - frame.yMm) * sy;
+    const area = (bx - ax) * (by - ay);
+    if (area <= 0) return 0;
+    const sum = S(bx, by) - S(ax, by) - S(bx, ay) + S(ax, ay);
+    return Math.min(1, Math.max(0, sum / area));
+  };
+}
+
+/** FNV-1a, so each layer gets its own stable scatter from the same seed. */
+export function hashId(id: string): number {
+  let h = 0x811c9dc5;
+  for (let i = 0; i < id.length; i++) h = Math.imul(h ^ id.charCodeAt(i), 0x01000193);
+  return h >>> 0;
 }
 
 /** Dot centres in paper mm, inside `frame`. */
 export function stipplePoints(tone: Float32Array, w: number, h: number, frame: Frame, o: StippleOptions): Position[] {
-  const at = sampler(tone, w, h, frame);
+  const mean = boxMean(tone, w, h, frame);
   const W = frame.widthMm, H = frame.heightMm;
   const spacing = Math.max(0.05, o.spacing);
 
-  // Density grid for counting and relaxation.
+  // Density grid for counting, scattering and relaxation: the mean tone of each cell.
   const cell = Math.max(spacing / 3, Math.sqrt((W * H) / MAX_CELLS));
   const gw = Math.max(1, Math.round(W / cell)), gh = Math.max(1, Math.round(H / cell));
   const cw = W / gw, ch = H / gh;
+  const cellTone = new Float32Array(gw * gh);
   /** Relaxation weight (tone²) per grid cell. */
   const dens = new Float32Array(gw * gh);
   let mass = 0, maxTone = 0;
   for (let j = 0; j < gh; j++) {
     for (let i = 0; i < gw; i++) {
-      const t = at(frame.xMm + (i + 0.5) * cw, frame.yMm + (j + 0.5) * ch);
+      const x = frame.xMm + i * cw, y = frame.yMm + j * ch;
+      const t = mean(x, y, x + cw, y + ch);
+      cellTone[j * gw + i] = t;
       dens[j * gw + i] = t * t;
       mass += t;
       if (t > maxTone) maxTone = t;
     }
   }
   const n = Math.min(MAX_DOTS, Math.round((mass * cw * ch) / (spacing * spacing)));
-  if (n === 0 || maxTone <= 0) return [];
+  if (n === 0 || maxTone <= 0) {
+    o.progress?.(1);
+    return [];
+  }
 
-  // Rejection sampling: keep a uniform point with probability tone / max tone.
+  // Rejection sampling: pick a cell, keep it with probability tone / max tone, and place
+  // the dot uniformly inside it.
   const rng = createRng(o.seed);
   const xs = new Float64Array(n), ys = new Float64Array(n);
   let k = 0;
   for (let tries = 0; k < n && tries < n * 2000; tries++) {
-    const x = frame.xMm + rng() * W, y = frame.yMm + rng() * H;
-    if (rng() * maxTone < at(x, y)) { xs[k] = x; ys[k] = y; k++; }
+    const u = rng() * gw, v = rng() * gh;
+    const c = Math.min(gh - 1, Math.floor(v)) * gw + Math.min(gw - 1, Math.floor(u));
+    if (rng() * maxTone < cellTone[c]!) { xs[k] = frame.xMm + u * cw; ys[k] = frame.yMm + v * ch; k++; }
   }
   const count = k;
 
@@ -122,6 +155,7 @@ export function stipplePoints(tone: Float32Array, w: number, h: number, frame: F
     for (let d = 0; d < count; d++) if (sw[d]! > 0) { xs[d] = sx[d]! / sw[d]!; ys[d] = sy[d]! / sw[d]!; }
     o.progress?.((it + 1) / o.iterations);
   }
+  if (o.iterations <= 0) o.progress?.(1);
 
   const out: Position[] = new Array(count);
   for (let d = 0; d < count; d++) out[d] = [xs[d]!, ys[d]!];
@@ -203,7 +237,7 @@ export const stipple = defineStep({
     const pts = stipplePoints(layer.values.data as Float32Array, grid.width, grid.height, grid.frame, {
       spacing: p.spacing,
       iterations: p.iterations,
-      seed: p.seed,
+      seed: (p.seed ^ hashId(layer.id)) >>> 0,
       progress: ctx.progress,
     });
     const features: LineFeature[] = pts.map((q) => ({
