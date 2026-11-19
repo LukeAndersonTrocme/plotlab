@@ -23,6 +23,9 @@ needlepoint charts, early bitmap displays and their visible pixels…).
 - **Gap:** space between neighbouring squares, so tiles don't touch.
 - **Rotate:** turns every square about its cell's centre; 45° gives diamonds. Turned
   squares shrink so they stay inside their cell.
+- **Shift grid across / down:** moves the grid's lines from the paper's corner, in
+  millimetres, to choose where the cells fall on the picture. Shifting by a whole cell gives
+  the same grid again. A **Pixelate** with the same cell size and shifts lines up exactly.
 
 The squares are outlines: the pen draws each square's edge, and a digital export keeps
 them as sharp vector squares. Solid filled squares are not available yet, and a **Fill**

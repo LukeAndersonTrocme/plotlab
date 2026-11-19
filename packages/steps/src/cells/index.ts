@@ -1,5 +1,6 @@
 import { defineStep, type GeoFeature, type GeometryLayer, type LayerValues, type Position } from "@plotlab/engine";
 import { help } from "../help.generated.ts";
+import { gridSpans, offsetParam, type GridSpan } from "./grid.ts";
 
 /**
  * Ink density of a cell from the pixels it covers, 0..1. Tone is averaged. Levels take the
@@ -26,7 +27,7 @@ function cellInk(v: LayerValues): (idx: number[]) => number {
 /**
  * Grid cells as polygons: the vector twin of Pixelate. The grid is anchored at the paper's
  * (0, 0), like Fill's lattices (ADR 0009 Fill), so every layer, and a Fill at the same
- * spacing, shares its lines. Cells cut by the picture's edge are clipped to it; cut to under
+ * spacing, shares its lines; Pixelate uses the same grid (./grid.ts), and the offsets move it. Cells cut by the picture's edge are clipped to it; cut to under
  * a quarter of a cell, they are skipped.
  */
 export const cells = defineStep({
@@ -54,6 +55,8 @@ export const cells = defineStep({
     maxSize: { type: "number", label: "Largest square", help: "Square size for full ink, as a share of the cell.", min: 0, max: 100, step: 1, default: 100, unit: "%", visibleWhen: { param: "mode", equals: ["scaled"] } },
     gap: { type: "number", label: "Gap", help: "Space left between neighbouring squares.", min: 0, max: 10, step: 0.1, default: 0, unit: "mm" },
     rotate: { type: "number", label: "Rotate", help: "Turn every square about its cell's centre (45° makes diamonds).", min: 0, max: 90, step: 1, default: 0, unit: "deg" },
+    offsetX: offsetParam("x"),
+    offsetY: offsetParam("y"),
   },
   help: help.cells ?? "",
   runLayer(layer, p, _ctx, grid): GeometryLayer {
@@ -61,13 +64,11 @@ export const cells = defineStep({
     const sx = frame.widthMm / w, sy = frame.heightMm / h;
     const c = Math.max(0.5, p.cellMm);
     const ink = cellInk(layer.values);
-    const x0 = frame.xMm, y0 = frame.yMm, x1 = x0 + frame.widthMm, y1 = y0 + frame.heightMm;
-    // Pixel columns/rows whose centres fall in [a, b) mm; a cell narrower than a pixel
-    // that holds no centre takes the pixel under its middle.
-    const span = (a: number, b: number, origin: number, s: number, n: number): [number, number] => {
-      const lo = Math.max(0, Math.ceil((a - origin) / s - 0.5)), hi = Math.min(n, Math.ceil((b - origin) / s - 0.5));
-      if (hi > lo) return [lo, hi];
-      const k = Math.min(n - 1, Math.max(0, Math.floor(((a + b) / 2 - origin) / s)));
+    // Pixels a cell reads: those whose centres it holds; a cell narrower than a pixel that
+    // holds no centre takes the pixel under its middle.
+    const pixels = (sp: GridSpan, origin: number, s: number, n: number): [number, number] => {
+      if (sp.hi > sp.lo) return [sp.lo, sp.hi];
+      const k = Math.min(n - 1, Math.max(0, Math.floor(((sp.a + sp.b) / 2 - origin) / s)));
       return [k, k + 1];
     };
     const a = (p.rotate * Math.PI) / 180, cos = Math.cos(a), sin = Math.sin(a);
@@ -76,14 +77,16 @@ export const cells = defineStep({
     const minCut = c / 4 - 1e-9;
     const idx: number[] = [];
     const features: GeoFeature[] = [];
-    for (let row = Math.floor(y0 / c); row * c < y1; row++) {
-      const top = Math.max(y0, row * c), bottom = Math.min(y1, (row + 1) * c);
+    const rows = gridSpans(frame.yMm, frame.heightMm, h, c, p.offsetY);
+    const cols = gridSpans(frame.xMm, frame.widthMm, w, c, p.offsetX);
+    for (const rs of rows) {
+      const { k: row, a: top, b: bottom } = rs;
       if (bottom - top < minCut) continue;
-      const [py0, py1] = span(top, bottom, y0, sy, h);
-      for (let col = Math.floor(x0 / c); col * c < x1; col++) {
-        const left = Math.max(x0, col * c), right = Math.min(x1, (col + 1) * c);
+      const [py0, py1] = pixels(rs, frame.yMm, sy, h);
+      for (const cs of cols) {
+        const { k: col, a: left, b: right } = cs;
         if (right - left < minCut) continue;
-        const [px0, px1] = span(left, right, x0, sx, w);
+        const [px0, px1] = pixels(cs, frame.xMm, sx, w);
         idx.length = 0;
         for (let y = py0; y < py1; y++) for (let x = px0; x < px1; x++) idx.push(y * w + x);
         const tone = ink(idx);
