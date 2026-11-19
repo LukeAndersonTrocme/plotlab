@@ -8,7 +8,7 @@
   "machine": "generic",
   "steps": [
     { "step": "threshold", "version": 2, "params": { "mode": "fixed", "level": 30 } },
-    { "step": "centerline", "version": 2, "params": { "minLength": 1.7, "smoothing": 0.28 } },
+    { "step": "centerline", "version": 3, "params": { "minLength": 1.7, "smoothing": 0.28, "spurLength": 2 } },
     { "step": "order", "version": 2, "params": { "method": "nearest" } }
   ],
   "fixture": "mona-lisa-600.jpg"

@@ -48,3 +48,6 @@ write("shapes.png", 160, 120, (x, y) => {
     ]),
   );
 }
+
+// A left-to-right ramp from white to black, for tone steps such as Dither.
+write("gradient.png", 128, 48, (x) => 1 - x / 127);

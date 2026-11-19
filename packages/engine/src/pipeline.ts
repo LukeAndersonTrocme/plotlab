@@ -1,7 +1,7 @@
 import { STAGE_WORDS } from "./chain.ts";
 import { applyStep, describeLayers, type LayerInfo } from "./layers.ts";
 import { MAX_WORKING_SIDE, placeOnPaper, resample, workingSize } from "./layout.ts";
-import { inkFor, toPlot, workingMmPerPx } from "./project.ts";
+import { inkFor, toPlot, withoutBudget, workingMmPerPx } from "./project.ts";
 import type { Recipe } from "./recipe.ts";
 import type { StepContext, StepRegistry } from "./step.ts";
 import { sourceStage, type Geometry, type GeoFeature, type Image, type Layer, type Layers, type Plot, type Position, type RawGeometry, type RawImage, type Source, type StageData } from "./types.ts";
@@ -143,7 +143,7 @@ export class Pipeline {
     };
     const placed = this.place(source, recipe, opts);
     const inkKey = JSON.stringify([recipe.inks, recipe.layerInks, recipe.passOrder]);
-    let key = `${placed.key}|${JSON.stringify(recipe.target)}`;
+    let key = `${placed.key}|${JSON.stringify(withoutBudget(recipe.target))}`;
     let data: StageData = placed.data;
     const results: StepResult[] = [];
     const stale: number[] = [];

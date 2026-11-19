@@ -7,10 +7,15 @@ import type { Geometry, Ink, Paper, Plot, Position } from "./types.ts";
  * inks (ADR 0008) and passes (ADR 0011).
  */
 export type Target =
-  | ({ kind: "plotter" } & Partial<Finishing>)
+  | ({ kind: "plotter" } & Partial<Finishing> & PlotterOptions)
   | { kind: "vector" }
   | { kind: "raster"; dpi: number }
   | ({ kind: "print"; dpi: number } & PrintOptions & Partial<Finishing>);
+
+export interface PlotterOptions {
+  /** Time budget in minutes ("under 5 min"); absent = none. Advisory: the time readout warns when over. */
+  budgetMin?: number;
+}
 
 /** Plate finishing shared by print prep and plotter output (ADR 0007). */
 export interface Finishing {
@@ -51,7 +56,57 @@ export function finishing(target: Target): Finishing {
   return { mirror: false, registration: false };
 }
 
+/** The target minus its time budget: the budget is advisory and never affects output. */
+export function withoutBudget(target: Target): Target {
+  if (target.kind !== "plotter" || !("budgetMin" in target)) return target;
+  const { budgetMin: _b, ...rest } = target;
+  return rest;
+}
+
+/** True when `b` differs from `a` only in its time budget: the readout changes, the run doesn't. */
+export function budgetOnlyChange(a: Recipe, b: Recipe): boolean {
+  if (a === b || JSON.stringify(a.target) === JSON.stringify(b.target)) return false;
+  return JSON.stringify({ ...a, target: withoutBudget(a.target) }) === JSON.stringify({ ...b, target: withoutBudget(b.target) });
+}
+
 export type TargetKind = Target["kind"];
+
+/** A request for an output target: a kind, plus print settings when it is print prep. Used by presets. */
+export type TargetRequest = { kind: TargetKind } & Partial<PrintOptions>;
+
+/** Print prep needs fine plates; switching to it never goes below this. */
+export const MIN_PRINT_DPI = 600;
+
+/**
+ * Switch the output target the way the Output panel does: mirror and registration marks
+ * carry over to targets that have them, dpi carries over (at least MIN_PRINT_DPI for print
+ * prep), and print settings come from the request, then the current print target, then defaults.
+ */
+export function retarget(current: Target, req: TargetRequest): Target {
+  const dpi = "dpi" in current ? current.dpi : 300;
+  const fin = finishing(current);
+  const keep = { ...(fin.mirror ? { mirror: true } : {}), ...(fin.registration ? { registration: true } : {}) };
+  switch (req.kind) {
+    case "raster":
+      return { kind: "raster", dpi };
+    case "vector":
+      return { kind: "vector" };
+    case "plotter": {
+      // A time budget only means something on the plotter; keep it while staying there.
+      const budget = current.kind === "plotter" && current.budgetMin ? { budgetMin: current.budgetMin } : {};
+      return { kind: "plotter", ...keep, ...budget };
+    }
+    case "print": {
+      const cur: PrintOptions = current.kind === "print" ? { mode: current.mode, halftone: current.halftone, negative: current.negative } : DEFAULT_PRINT;
+      const print: PrintOptions = {
+        mode: req.mode ?? cur.mode,
+        halftone: req.halftone !== undefined ? req.halftone : cur.halftone,
+        negative: req.negative ?? cur.negative,
+      };
+      return { kind: "print", dpi: Math.max(dpi, MIN_PRINT_DPI), ...print, ...keep };
+    }
+  }
+}
 export const TARGET_KINDS: TargetKind[] = ["plotter", "vector", "raster", "print"];
 
 /** Print time is a plotter concept. */

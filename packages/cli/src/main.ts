@@ -2,17 +2,19 @@ import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { basename, extname, join } from "node:path";
 import { parseArgs } from "node:util";
 import { describeEntry, enterAt, exportFormats, exportOutput, loadRecipe, Pipeline, RecipeError, showsTime, sourceLabel, sourceStage, StepError, type ExportFormat, type StepDefinition } from "@plotlab/engine";
-import { estimatePlot, getMachine } from "@plotlab/machines";
+import { budgetCheck, estimatePlot, getMachine } from "@plotlab/machines";
+import { resolveBudget } from "./budget.ts";
 import { createRegistry } from "@plotlab/steps";
 import { expandInput, INPUT_FORMATS, readSource } from "./io.ts";
 
 const USAGE = `plotlab: image → plotter / digital / print pipeline
 
 Usage:
-  plotlab run <recipe.json> -i <input|'frames/*.png'> -o <out-dir> [-f svg|pdf|png|tiff|plates]
+  plotlab run <recipe.json> -i <input|'frames/*.png'> -o <out-dir> [-f svg|pdf|png|tiff|plates] [--budget <min>]
 
   -f picks the file type; the default is the recipe target's main one
   (plotter: svg, vector: svg, raster: png, print: plates = one TIFF per ink + proof).
+  --budget sets a time budget in minutes for this run (plotter targets), overriding the recipe's.
 
   Inputs: ${INPUT_FORMATS}. PNG, JPEG, WebP and single-page TIFF (8/16-bit) enter as an
   image; a multi-page TIFF enters as layers (one per page, separations); SVG enters as
@@ -29,7 +31,7 @@ const fmtTime = (s: number) => {
 
 function describe(def: StepDefinition): string {
   const perLayer = def.runLayer ? `, per layer (${(def.accepts ?? ["tone", "categories"]).join(" or ")})` : "";
-  const lines = [`${def.id} (v${def.version}): ${def.title}`, `  ${def.summary}`, `  ${def.input} → ${def.output}, ${def.cost}${perLayer}`, "", "Parameters:"];
+  const lines = [`${def.id} (v${def.version}${def.experimental ? ", experimental" : ""}): ${def.title}`, `  ${def.summary}`, `  ${def.input} → ${def.output}, ${def.cost}${perLayer}`, "", "Parameters:"];
   if (def.runLayer) lines.splice(3, 0, `  In a recipe: "layers": ["id", …] picks layers; "layerParams": { "id": { … } } overrides settings per layer.`);
   for (const [k, d] of Object.entries(def.params)) {
     let range = "";
@@ -48,7 +50,7 @@ async function run(args: string[]): Promise<number> {
   const { values, positionals } = parseArgs({
     args,
     allowPositionals: true,
-    options: { input: { type: "string", short: "i" }, out: { type: "string", short: "o" }, format: { type: "string", short: "f" } },
+    options: { input: { type: "string", short: "i" }, out: { type: "string", short: "o" }, format: { type: "string", short: "f" }, budget: { type: "string" } },
   });
   const recipePath = positionals[0];
   if (!recipePath || !values.input || !values.out) {
@@ -58,6 +60,7 @@ async function run(args: string[]): Promise<number> {
   const registry = createRegistry();
   const { recipe, warnings } = loadRecipe(JSON.parse(readFileSync(recipePath, "utf8")), registry);
   for (const w of warnings) process.stderr.write(`warning: ${w.index >= 0 ? `step ${w.index}: ` : ""}${w.message}\n`);
+  const budgetMin = resolveBudget(values.budget, recipe.target, (m) => process.stderr.write(`warning: ${m}\n`));
   const formats: ExportFormat[] = ["svg", "pdf", "png", "tiff", "plates"];
   const format = (values.format ?? exportFormats(recipe.target)[0]) as ExportFormat;
   if (!formats.includes(format)) throw new Error(`unknown format "${values.format}"; use one of ${formats.join(", ")}`);
@@ -90,6 +93,10 @@ async function run(args: string[]): Promise<number> {
       if (showsTime(ran.target)) {
         const e = estimatePlot(plot, getMachine(ran.machine));
         line += `  ~${fmtTime(e.totalS)}${plot.ordered ? "" : " (traced order)"}`;
+        if (budgetMin !== undefined) {
+          const b = budgetCheck(e, budgetMin);
+          line += `  ${b.over ? "OVER BUDGET: " : ""}${b.message}`;
+        }
       }
     }
     process.stdout.write(line + "\n");
@@ -104,7 +111,7 @@ async function main(argv: string[]): Promise<number> {
   const [cmd, sub, ...rest] = argv;
   if (cmd === "run") return run(argv.slice(1));
   if (cmd === "steps" && sub === "list") {
-    for (const s of createRegistry().list()) process.stdout.write(`${s.id.padEnd(12)} ${s.input} → ${s.output}  ${s.summary}\n`);
+    for (const s of createRegistry().list()) process.stdout.write(`${s.id.padEnd(12)} ${s.input} → ${s.output}  ${s.experimental ? "[experimental] " : ""}${s.summary}\n`);
     return 0;
   }
   if (cmd === "steps" && sub === "describe" && rest[0]) {
