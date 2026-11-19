@@ -8,13 +8,26 @@ function est(parts: { drawS?: number; travelS?: number; penS?: number }, penChan
   return { passes: [pass], penChanges, penChangeS: penChanges * changeS, totalS: pass.timeS + penChanges * changeS };
 }
 
-describe("estimateLayer time split", () => {
-  it("draw + travel + pen lifts add up to the layer time", () => {
-    const e = estimateLayer([[[10, 0], [20, 0], [20, 10]], [[50, 50], [60, 60]]], getMachine("generic"));
-    expect(e.drawS).toBeGreaterThan(0);
-    expect(e.travelS).toBeGreaterThan(0);
-    expect(e.penS).toBeCloseTo(2 * (0.15 + 0.15));
-    expect(e.drawS + e.travelS + e.penS).toBeCloseTo(e.timeS, 9);
+describe("estimatePlot time split", () => {
+  it("matches the estimate from before the split, and the parts add up to it", async () => {
+    const { estimatePlot, timeBreakdown } = await import("../src/index.ts");
+    const m = getMachine("generic");
+    const ink = (id: string, color: string) => ({ id, name: id, color, mix: "multiply" as const, widthMm: 0.5 });
+    const plot = {
+      kind: "plot" as const,
+      paper: { widthMm: 200, heightMm: 150 },
+      ordered: true,
+      layers: [
+        { id: "a", name: "a", ink: ink("a", "#c33"), paths: [[[10, 10], [60, 10], [60, 40]], [[100, 20], [101, 21]]] as [number, number][][] },
+        { id: "b", name: "b", ink: ink("b", "#000"), paths: [[[150, 100], [20, 130], [40, 140], [45, 141]]] as [number, number][][] },
+      ],
+    };
+    const e = estimatePlot(plot, m);
+    // Computed with main's estimatePlot (before the time split) for this plot.
+    expect(e.passes.map((p) => p.timeS)).toEqual(EXPECTED_PASS_S.map((x) => expect.closeTo(x, 9)));
+    expect(e.totalS).toBeCloseTo(EXPECTED_TOTAL_S, 9);
+    const parts = timeBreakdown(e);
+    expect(parts.draw + parts.travel + parts.pen + parts.penChanges).toBeCloseTo(EXPECTED_TOTAL_S, 9);
   });
 });
 
@@ -30,6 +43,14 @@ describe("estimatePlot", () => {
 });
 
 describe("budgetCheck", () => {
+  it("shows the budget as entered", () => {
+    expect(budgetCheck(est({ drawS: 1e6 }), 1234).message).toMatch(/the 1234 min budget/);
+    expect(budgetCheck(est({ drawS: 1e6 }), 12.25).message).toMatch(/the 12.25 min budget/);
+    expect(budgetCheck(est({ drawS: 1 }), 0.5).message).toMatch(/the 0.5 min budget/);
+  });
+  it("never says 0% of the budget", () => {
+    expect(budgetCheck(est({ drawS: 1 }), 600).message).toMatch(/\(<1%\)/);
+  });
   it("under budget: not over, ratio below 1", () => {
     const c = budgetCheck(est({ drawS: 120 }), 5);
     expect(c.over).toBe(false);
@@ -79,3 +100,7 @@ describe("budgetCheck", () => {
     expect(c.message).not.toMatch(/try|add/i);
   });
 });
+
+// main's estimatePlot (before the time split), generic machine, the plot in "estimatePlot time split".
+const EXPECTED_PASS_S = [4.404335095321299, 7.35641116804408];
+const EXPECTED_TOTAL_S = 71.76074626336538;

@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { exportFormats, FORMAT_LABEL, loadRecipe, type AnyStep, type ExportFormat, type Recipe } from "@plotlab/engine";
+import { budgetOnlyChange, exportFormats, FORMAT_LABEL, loadRecipe, type AnyStep, type ExportFormat, type Recipe } from "@plotlab/engine";
 import { budgetCheck } from "@plotlab/machines";
 import { createRegistry } from "@plotlab/steps";
 import { defaultRecipe } from "./defaults.ts";
@@ -73,6 +73,8 @@ export function App() {
 
   const apply = (next: Recipe, proxy: boolean, step?: AnyStep) => {
     setRecipe(next);
+    // The time budget only changes the readout, which is computed from the last estimate.
+    if (budgetOnlyChange(recipe, next)) return;
     // On-demand steps' own settings wait for their Run button; the worker holds them back.
     if (!live) {
       setDirty(true);

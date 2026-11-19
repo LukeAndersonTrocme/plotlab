@@ -55,7 +55,7 @@ async function run(args: string[]): Promise<number> {
   const registry = createRegistry();
   const { recipe, warnings } = loadRecipe(JSON.parse(readFileSync(recipePath, "utf8")), registry);
   for (const w of warnings) process.stderr.write(`warning: ${w.index >= 0 ? `step ${w.index}: ` : ""}${w.message}\n`);
-  const budgetMin = resolveBudget(values.budget, recipe.target);
+  const budgetMin = resolveBudget(values.budget, recipe.target, (m) => process.stderr.write(`warning: ${m}\n`));
   const formats: ExportFormat[] = ["svg", "pdf", "png", "tiff", "plates"];
   const format = (values.format ?? exportFormats(recipe.target)[0]) as ExportFormat;
   if (!formats.includes(format)) throw new Error(`unknown format "${values.format}"; use one of ${formats.join(", ")}`);

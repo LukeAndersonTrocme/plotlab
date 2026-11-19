@@ -95,4 +95,20 @@ describe("Pipeline", () => {
     expect(again.stale).toEqual([]);
     expect(again.results[0]!.cached).toBe(true);
   });
+  it("a time-budget change keeps every step cached, including on-demand results", async () => {
+    const spy = vi.fn();
+    const slow = defineStep({
+      id: "slow", version: 1, title: "Slow", summary: "", input: "image", output: "image", cost: "on-demand", help: "", params: {},
+      run: (i) => { spy("slow"); return i; },
+    });
+    const reg = new StepRegistry([...makeRegistry(spy).list(), slow]);
+    const p = new Pipeline(reg);
+    const load = (target: object) => loadRecipe({ ...base, target, steps: [{ step: "a" }, { step: "slow" }] }, reg).recipe;
+    await p.run(img, load({ kind: "plotter" })); // the person presses Run
+    spy.mockClear();
+    const after = await p.run(img, load({ kind: "plotter", budgetMin: 5 }), { runOnDemand: false });
+    expect(spy).not.toHaveBeenCalled();
+    expect(after.stale).toEqual([]);
+    expect(after.results.map((r) => r.cached)).toEqual([true, true]);
+  });
 });

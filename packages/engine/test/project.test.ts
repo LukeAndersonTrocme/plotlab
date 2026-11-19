@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { inkFor, loadRecipe, showsTime, StepRegistry, toPlot, workingMmPerPx, type Geometry, type Ink, type Recipe } from "../src/index.ts";
+import { budgetOnlyChange, inkFor, loadRecipe, showsTime, StepRegistry, toPlot, workingMmPerPx, type Geometry, type Ink, type Recipe } from "../src/index.ts";
 
 const ink = (id: string, color: string, widthMm = 0.5): Ink => ({ id, name: id, color, mix: "multiply", widthMm });
 const recipe = (over: Partial<Recipe> = {}): Recipe =>
@@ -80,5 +80,18 @@ describe("time budget (plotter targets)", () => {
   it("ignores a budget on non-plotter targets", () => {
     expect("budgetMin" in load({ kind: "vector", budgetMin: 5 }).recipe.target).toBe(false);
     expect("budgetMin" in load({ kind: "raster", dpi: 300, budgetMin: 5 }).recipe.target).toBe(false);
+  });
+});
+
+describe("budgetOnlyChange", () => {
+  const r = recipe({ target: { kind: "plotter", budgetMin: 5 } });
+  it("true when only the budget differs (set, changed or cleared)", () => {
+    expect(budgetOnlyChange(r, { ...r, target: { kind: "plotter", budgetMin: 8 } })).toBe(true);
+    expect(budgetOnlyChange(r, { ...r, target: { kind: "plotter" } })).toBe(true);
+  });
+  it("false for any other change, or no change", () => {
+    expect(budgetOnlyChange(r, r)).toBe(false);
+    expect(budgetOnlyChange(r, { ...r, target: { kind: "plotter", budgetMin: 8, mirror: true } })).toBe(false);
+    expect(budgetOnlyChange(r, { ...r, target: { kind: "plotter", budgetMin: 8 }, workingMmPerPx: 0.2 })).toBe(false);
   });
 });

@@ -21,7 +21,8 @@ const SUGGEST: Record<TimeComponent, string> = {
   penChanges: "most time is pen changes — try fewer inks",
 };
 
-const fmtMin = (m: number) => `${Number(m.toPrecision(3))} min`;
+/** The budget as entered: `String` drops trailing zeros and never rounds. */
+const fmtMin = (m: number) => `${String(m)} min`;
 
 /** Time split of an estimate, summed over passes. */
 export function timeBreakdown(e: PlotEstimate): Record<TimeComponent, number> {
@@ -40,7 +41,7 @@ export function budgetCheck(e: PlotEstimate, budgetMin: number): BudgetCheck {
   const over = ratio > 1;
   const budget = `${fmtMin(budgetMin)} budget`;
   let message: string;
-  if (!over) message = `within the ${budget} (${Math.round(ratio * 100)}%)`;
+  if (!over) message = `within the ${budget} (${ratio < 0.005 ? "<1" : Math.round(ratio * 100)}%)`;
   else {
     const by = ratio >= 2 ? `about ${Number(ratio.toFixed(1))}× the ${budget}` : `about ${Math.max(1, Math.round((ratio - 1) * 100))}% over the ${budget}`;
     message = `${by}; ${SUGGEST[dominant]}`;

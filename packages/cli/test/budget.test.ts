@@ -2,7 +2,7 @@ import { spawnSync } from "node:child_process";
 import { mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { resolveBudget } from "../src/budget.ts";
 
 describe("resolveBudget", () => {
@@ -18,8 +18,13 @@ describe("resolveBudget", () => {
     expect(() => resolveBudget("0", { kind: "plotter" })).toThrow(/--budget/);
     expect(() => resolveBudget("five", { kind: "plotter" })).toThrow(/--budget/);
   });
-  it("is ignored for targets without a time readout", () => {
-    expect(resolveBudget("5", { kind: "vector" })).toBeUndefined();
+  it("is ignored for targets without a time readout, with a warning for the flag", () => {
+    const warn = vi.fn();
+    expect(resolveBudget("5", { kind: "vector" }, warn)).toBeUndefined();
+    expect(warn).toHaveBeenCalledWith(expect.stringMatching(/--budget.*plotter/));
+    warn.mockClear();
+    expect(resolveBudget("5", { kind: "plotter" }, warn)).toBe(5);
+    expect(warn).not.toHaveBeenCalled();
   });
 });
 

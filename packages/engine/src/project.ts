@@ -56,6 +56,19 @@ export function finishing(target: Target): Finishing {
   return { mirror: false, registration: false };
 }
 
+/** The target minus its time budget: the budget is advisory and never affects output. */
+export function withoutBudget(target: Target): Target {
+  if (target.kind !== "plotter" || !("budgetMin" in target)) return target;
+  const { budgetMin: _b, ...rest } = target;
+  return rest;
+}
+
+/** True when `b` differs from `a` only in its time budget: the readout changes, the run doesn't. */
+export function budgetOnlyChange(a: Recipe, b: Recipe): boolean {
+  if (a === b || JSON.stringify(a.target) === JSON.stringify(b.target)) return false;
+  return JSON.stringify({ ...a, target: withoutBudget(a.target) }) === JSON.stringify({ ...b, target: withoutBudget(b.target) });
+}
+
 export type TargetKind = Target["kind"];
 export const TARGET_KINDS: TargetKind[] = ["plotter", "vector", "raster", "print"];
 
