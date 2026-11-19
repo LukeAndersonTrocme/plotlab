@@ -1,4 +1,4 @@
-import type { ExportFormat, Frame, LayerInfo, Plot, RawImage, Recipe, StageKind } from "@plotlab/engine";
+import type { ExportFormat, Frame, LayerInfo, Plot, Recipe, Source, StageKind } from "@plotlab/engine";
 import type { PlotEstimate } from "@plotlab/machines";
 
 /** What to show in the view: a step's output (by index), the placed source, or the end result. */
@@ -32,7 +32,7 @@ export interface StepInfo {
 }
 
 export type ToWorker =
-  | { type: "source"; image: RawImage; key: string }
+  | { type: "source"; source: Source; key: string }
   | { type: "run"; id: number; recipe: Recipe; proxy: boolean; inspect: InspectTarget; runOnDemand: boolean; proof: boolean }
   /** Full-resolution run (on-demand steps included) → files for the target. */
   | { type: "export"; id: number; recipe: Recipe; format: ExportFormat; stem: string };
@@ -45,8 +45,8 @@ export type FromWorker =
       plot: Plot | null;
       estimate: PlotEstimate | null;
       warnings: string[];
-      /** The working raster: what step 1 sees (full-resolution runs only). */
-      working: { width: number; height: number; mmPerPx: number };
+      /** The working raster: what step 1 sees (full-resolution runs only; null for SVG lines). */
+      working: { width: number; height: number; mmPerPx: number } | null;
       steps: StepInfo[];
       /** On-demand steps that need a Run (their output would be stale). */
       stale: number[];

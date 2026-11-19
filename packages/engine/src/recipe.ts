@@ -13,6 +13,13 @@ export interface RecipeStep {
   params: Record<string, unknown>;
   /** Disabled steps are skipped but kept in the recipe. */
   enabled?: boolean;
+  /**
+   * Set (with enabled: false) when the step was switched off automatically because the
+   * source enters after it (an SVG skips the image steps). Only such steps are switched
+   * back on when a source enters earlier again; steps switched off by hand stay off.
+   * Optional and ignored by older builds, so no schema bump (ADR 0002).
+   */
+  offForEntry?: boolean;
   /** Layer-acting steps: which layers to transform ("all" when absent). */
   layers?: "all" | string[];
   /** Layer-acting steps: per-layer overrides of `params`, by layer id. */
@@ -25,7 +32,10 @@ export interface RecipeStep {
  */
 export interface Recipe {
   schemaVersion: number;
-  /** Which stage the source enters at. Only "image" is supported so far. */
+  /**
+   * Which stage the source enters at: "image" (photos, scans), "layers" (multi-page TIFF
+   * separations) or "geometry" (SVG). Set from the source when it is opened.
+   */
   input: StageKind;
   target: Target;
   paper: Paper;
@@ -40,6 +50,9 @@ export interface Recipe {
   machine: string;
   steps: RecipeStep[];
 }
+
+/** Stages a source can enter the chain at. */
+export const ENTRY_STAGES: StageKind[] = ["image", "layers", "geometry"];
 
 export interface RecipeWarning {
   /** Step index, or -1 for the recipe envelope. */
@@ -85,7 +98,7 @@ const UPGRADERS: Record<number, (r: Raw) => Raw> = {
   },
 };
 
-function readTarget(v: unknown, errors: RecipeWarning[]): Target {
+function readTarget(v: unknown, errors: RecipeWarning[], warnings: RecipeWarning[]): Target {
   if (v === undefined) return { kind: "plotter" };
   const t = obj(v);
   if (!TARGET_KINDS.includes(t.kind as never)) {
@@ -102,7 +115,13 @@ function readTarget(v: unknown, errors: RecipeWarning[]): Target {
     const halftone = t.halftone ? { lpi: typeof h.lpi === "number" && h.lpi > 0 ? h.lpi : 45, angles } : null;
     return { kind: "print", dpi, mode: t.mode === "gray" ? "gray" : "bitmap", halftone, negative: t.negative === true, ...fin };
   }
-  if (t.kind === "plotter") return { kind: "plotter", ...fin };
+  if (t.kind === "plotter") {
+    // Optional and advisory, so no schema bump: older builds just ignore it (ADR 0002).
+    const b = t.budgetMin;
+    const ok = typeof b === "number" && Number.isFinite(b) && b > 0;
+    if (b !== undefined && !ok) warnings.push({ index: -1, message: `target.budgetMin must be a positive number of minutes; ignoring ${JSON.stringify(b)}` });
+    return { kind: "plotter", ...fin, ...(ok ? { budgetMin: b } : {}) };
+  }
   return { kind: "vector" };
 }
 
@@ -168,7 +187,7 @@ export function loadRecipe(raw: unknown, registry: StepRegistry): { recipe: Reci
   if (!paper || typeof paper.widthMm !== "number" || typeof paper.heightMm !== "number") {
     errors.push({ index: -1, message: "paper must be { widthMm, heightMm }" });
   }
-  const target = readTarget(r.target, errors);
+  const target = readTarget(r.target, errors, warnings);
   const layout = readLayout(r.layout, warnings);
   const inks = readInks(r.inks, errors);
   const layerInks: Record<string, string> = {};
@@ -180,6 +199,7 @@ export function loadRecipe(raw: unknown, registry: StepRegistry): { recipe: Reci
     Array.isArray(r.passOrder) && r.passOrder.every((x) => typeof x === "string") ? (r.passOrder as string[]) : "light-to-dark";
   const workingMmPerPx = typeof r.workingMmPerPx === "number" && r.workingMmPerPx > 0 ? r.workingMmPerPx : null;
   const input = (r.input ?? "image") as StageKind;
+  if (!ENTRY_STAGES.includes(input)) errors.push({ index: -1, message: `input must be one of ${ENTRY_STAGES.join(", ")}` });
   const rawSteps = Array.isArray(r.steps) ? (r.steps as unknown[]) : [];
 
   const steps: RecipeStep[] = [];
@@ -200,16 +220,18 @@ export function loadRecipe(raw: unknown, registry: StepRegistry): { recipe: Reci
     let layerParams = s.layerParams;
     if (version < def.version) {
       if (def.migrate) {
-        const m = def.migrate(params, version);
+        const m = def.migrate(params, version, "step");
         params = m.params;
         if (layerParams) {
-          layerParams = Object.fromEntries(Object.entries(layerParams).map(([k, lp]) => [k, def.migrate!(lp, version).params]));
+          layerParams = Object.fromEntries(Object.entries(layerParams).map(([k, lp]) => [k, def.migrate!(lp, version, "layer").params]));
         }
         warnings.push({ index, message: `${def.id}: upgraded v${version} → v${def.version}. ${m.note}` });
       } else {
         warnings.push({
           index,
-          message: `${def.id}: recipe was written for v${version}, running v${def.version}; output may differ`,
+          message: def.experimental
+            ? `${def.id} is experimental: recipe was written for v${version}, running v${def.version}; settings and output may differ`
+            : `${def.id}: recipe was written for v${version}, running v${def.version}; output may differ`,
         });
       }
       version = def.version;
@@ -224,6 +246,7 @@ export function loadRecipe(raw: unknown, registry: StepRegistry): { recipe: Reci
       current = def.output;
     }
     const out: RecipeStep = { step: def.id, version, params: values, enabled };
+    if (!enabled && s.offForEntry === true) out.offForEntry = true;
     if (Array.isArray(s.layers) && s.layers.every((x) => typeof x === "string")) out.layers = s.layers;
     if (layerParams && typeof layerParams === "object") {
       out.layerParams = {};

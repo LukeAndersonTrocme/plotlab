@@ -17,3 +17,4 @@ export * from "./chain.ts";
 export * from "./render.ts";
 export * from "./features.ts";
 export * from "./defaults.ts";
+export * from "./svg.ts";

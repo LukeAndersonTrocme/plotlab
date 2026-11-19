@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { exportFormats, FORMAT_LABEL, loadRecipe, type AnyStep, type ExportFormat, type Recipe } from "@plotlab/engine";
+import { budgetOnlyChange, describeEntry, enterAt, exportFormats, FORMAT_LABEL, loadRecipe, sourceLabel, sourceStage, type AnyStep, type ExportFormat, type Recipe, type Source, type StageKind } from "@plotlab/engine";
+import { budgetCheck } from "@plotlab/machines";
 import { createRegistry } from "@plotlab/steps";
 import { defaultRecipe } from "./defaults.ts";
 import { HelpPanel } from "./Help.tsx";
@@ -55,12 +56,26 @@ export function App() {
   const runner = useMemo(() => new Runner(setRun), []);
   const recipeRef = useRef(recipe);
   recipeRef.current = recipe;
+  // Where the current source enters the chain (an SVG enters as lines, separations as layers).
+  const entry = useRef<{ stage: StageKind; label: string }>({ stage: "image", label: "the sample" });
+  /** Fit a recipe to the current source's entry stage; returns it and what to tell the person. */
+  const enter = (r: Recipe): { recipe: Recipe; note: string | null } => {
+    const e = enterAt(r, entry.current.stage, registry);
+    return { recipe: e.recipe, note: describeEntry(entry.current.label, entry.current.stage, e) };
+  };
+  const openSource = (src: Source, name: string, key: string, warnings: string[]) => {
+    entry.current = { stage: sourceStage(src), label: sourceLabel(name, src) };
+    runner.setSource(src, key);
+    const { recipe: r, note } = enter(recipeRef.current);
+    // Steps the new source can't use are switched off as one Back step (none if nothing changed).
+    setHistory((h) => commit(h, r));
+    runner.request(r, false);
+    const lines = [...warnings, ...(note ? [note] : [])];
+    setNotice(lines.length ? lines.join("\n") : null);
+  };
 
   useEffect(() => {
-    void loadSample().then((img) => {
-      runner.setSource(img, "sample");
-      runner.request(recipeRef.current, false);
-    });
+    void loadSample().then((src) => openSource(src, "the sample", "sample", []));
     return () => runner.dispose();
   }, [runner]);
 
@@ -75,6 +90,8 @@ export function App() {
   const apply = (next: Recipe, proxy: boolean, _step?: AnyStep) => {
     // A drag previews; releasing commits, so one drag is one Back step.
     setHistory((h) => (proxy ? preview(h, next) : commit(h, next)));
+    // The time budget only changes the readout, which is computed from the last estimate.
+    if (budgetOnlyChange(recipe, next)) return;
     // On-demand steps' own settings wait for their Run button; the worker holds them back.
     if (!live) {
       setDirty(true);
@@ -95,7 +112,7 @@ export function App() {
   const forward = () => travel(redo);
   const startOver = () => {
     setDirty(false);
-    apply(defaultRecipe(), false);
+    apply(enter(defaultRecipe()).recipe, false);
     setNotice("Reset to the default recipe (your image stays). Back undoes this.");
   };
 
@@ -128,8 +145,10 @@ export function App() {
   const loadFile = async (file: File) => {
     if (file.name.endsWith(".json")) {
       try {
-        const { recipe: r, warnings } = loadRecipe(JSON.parse(await file.text()), registry);
-        setNotice(warnings.length ? warnings.map((w) => w.message).join("\n") : `Loaded recipe ${file.name}`);
+        const { recipe: loaded, warnings } = loadRecipe(JSON.parse(await file.text()), registry);
+        const { recipe: r, note } = enter(loaded);
+        const lines = [...warnings.map((w) => w.message), ...(note ? [note] : [])];
+        setNotice(lines.length ? lines.join("\n") : `Loaded recipe ${file.name}`);
         apply(r, false);
       } catch (e) {
         setNotice(e instanceof Error ? e.message : String(e));
@@ -138,13 +157,11 @@ export function App() {
     }
     try {
       const warnings: string[] = [];
-      const img = await decodeFile(file, (m) => warnings.push(m));
+      const src = await decodeFile(file, (m) => warnings.push(m));
       setSourceName(file.name);
-      runner.setSource(img, `${file.name}:${file.size}:${file.lastModified}`);
-      runner.request(recipe, false);
-      setNotice(warnings.length ? warnings.join("\n") : null);
-    } catch {
-      setNotice(`Couldn't read ${file.name}. Try PNG, JPEG, WebP or TIFF.`);
+      openSource(src, file.name, `${file.name}:${file.size}:${file.lastModified}`, warnings);
+    } catch (e) {
+      setNotice(`Couldn't read ${file.name}${e instanceof Error && e.message ? `: ${e.message}` : ""}. Try PNG, JPEG, WebP, TIFF or SVG.`);
     }
   };
 
@@ -230,8 +247,8 @@ export function App() {
         <section className="panel">
           <div className="card">
             <label className="file">
-              <input type="file" accept="image/*,.json" onChange={(e) => e.target.files?.[0] && loadFile(e.target.files[0])} />
-              <span>{sourceName === "sample" ? "Open image or recipe…" : sourceName}</span>
+              <input type="file" accept="image/*,.png,.jpg,.jpeg,.webp,.tif,.tiff,.svg,.json" onChange={(e) => e.target.files?.[0] && loadFile(e.target.files[0])} />
+              <span>{sourceName === "sample" ? "Open image, SVG or recipe…" : sourceName}</span>
             </label>
           </div>
           <ProjectPanel
@@ -262,11 +279,17 @@ export function App() {
 
         <section className="view">
           <div className="stats">
-            {run.estimate && (
-              <span className="big" title="Estimated from the machine profile; includes pen changes.">
-                ~{fmtTime(run.estimate.totalS)}
-              </span>
-            )}
+            {run.estimate && (() => {
+              const b = recipe.target.kind === "plotter" && recipe.target.budgetMin ? budgetCheck(run.estimate, recipe.target.budgetMin) : null;
+              return (
+                <>
+                  <span className={`big${b?.over ? " over-budget" : ""}`} title="Estimated from the machine profile; includes pen changes.">
+                    ~{fmtTime(run.estimate.totalS)}
+                  </span>
+                  {b && <span className={b.over ? "budget over-budget" : "budget"} role={b.over ? "alert" : undefined}>{b.over ? `⚠ Over budget: ${b.message}` : b.message}</span>}
+                </>
+              );
+            })()}
             {run.estimate && plot && !plot.ordered && <span className="caveat">traced order: add Stroke order for a better estimate</span>}
             {plot && <span>{strokes} strokes</span>}
             {run.estimate && run.estimate.penChanges > 0 && <span>{run.estimate.penChanges} pen changes</span>}

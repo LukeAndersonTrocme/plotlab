@@ -16,9 +16,10 @@ import {
   type StageKind,
   type StepRegistry,
 } from "@plotlab/engine";
-import { presets, presetSteps } from "@plotlab/steps";
+import { applyPreset, presets } from "@plotlab/steps";
 import { LayerScope } from "./LayerScope.tsx";
 import { ParamControl } from "./ParamControl.tsx";
+import { TARGETS } from "./ProjectPanel.tsx";
 import type { InspectTarget, StepInfo } from "./protocol.ts";
 
 export const STAGE_NAMES: Record<StageKind, string> = { image: "Image", layers: "Layers", geometry: "Lines", plot: "Plot" };
@@ -64,7 +65,7 @@ export function StepList(props: {
   let kind: StageKind = recipe.input;
   const items: JSX.Element[] = [
     <div key="src" className={`divider${props.inspect === "source" ? " on" : ""}`} onClick={() => props.onInspect("source")}>
-      Source
+      Source{recipe.input !== "image" ? ` · enters as ${STAGE_NAMES[recipe.input].toLowerCase()}` : ""}
     </div>,
   ];
   recipe.steps.forEach((rs, index) => {
@@ -121,6 +122,11 @@ export function StepList(props: {
           <button className="title link" title="Show this step's output" onClick={() => props.onInspect(index)}>
             {def.title}
           </button>
+          {def.experimental && (
+            <span className="badge experimental" title="Experimental: settings may change in a later version. Old recipes still load, with a warning.">
+              experimental
+            </span>
+          )}
           <span className="card-tools">
             <button className="icon" aria-label={`Move ${def.title} up`} disabled={index === 0} onClick={() => commit(moveStep(recipe, index, index - 1, registry))}>
               ↑
@@ -138,7 +144,7 @@ export function StepList(props: {
               title={enabled ? "On (untick to skip this step)" : "Skipped"}
               checked={enabled}
               onChange={(e) => {
-                const steps = recipe.steps.map((s, i) => (i === index ? { ...s, enabled: e.target.checked } : s));
+                const steps = recipe.steps.map((s, i) => (i === index ? { ...s, enabled: e.target.checked, offForEntry: undefined } : s));
                 const issue = checkChain(recipe.input, steps, registry)[0];
                 if (issue) props.onNotice(`${e.target.checked ? "Turning on" : "Skipping"} ${def.title} would break the chain: ${issue.reason}`);
                 else props.onChange({ ...recipe, steps }, false);
@@ -208,9 +214,16 @@ export function StepList(props: {
         title="Replace the steps with a ready-made chain. You can change everything afterwards."
         onChange={(e) => {
           const p = presets.find((x) => x.id === e.target.value);
-          if (p && (recipe.steps.length === 0 || window.confirm(`Replace your steps with "${p.title}"?`))) {
-            props.onChange({ ...recipe, steps: presetSteps(p.id) }, false);
-          }
+          if (!p) return;
+          const next = applyPreset(recipe, p.id);
+          const label = TARGETS.find((t) => t.kind === next.target.kind)?.label ?? next.target.kind;
+          const also =
+            JSON.stringify(next.target) === JSON.stringify(recipe.target)
+              ? ""
+              : next.target.kind !== recipe.target.kind
+                ? ` and switch the output to ${label}`
+                : ` and change the ${label} settings`;
+          if (recipe.steps.length === 0 || window.confirm(`Replace your steps with "${p.title}"${also}?`)) props.onChange(next, false);
         }}
       >
         <option value="">Start from a preset…</option>
@@ -242,7 +255,7 @@ function AddStep(props: { recipe: Recipe; registry: StepRegistry; onAdd: (r: Rec
       <option value="">+ Add step…</option>
       {options.map(({ def, res }) => (
         <option key={def.id} value={def.id} title={"reason" in res ? res.reason : def.summary}>
-          {def.title} ({STAGE_NAMES[def.input as StageKind]} → {STAGE_NAMES[def.output as StageKind]}){"reason" in res ? " · doesn't fit yet" : ""}
+          {def.title} ({STAGE_NAMES[def.input as StageKind]} → {STAGE_NAMES[def.output as StageKind]}){def.experimental ? " · experimental" : ""}{"reason" in res ? " · doesn't fit yet" : ""}
         </option>
       ))}
     </select>
