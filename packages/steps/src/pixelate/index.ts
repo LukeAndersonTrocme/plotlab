@@ -1,9 +1,15 @@
 import { defineStep, type Layer } from "@plotlab/engine";
 import { help } from "../help.generated.ts";
+import { gridSpans, offsetParam } from "../cells/grid.ts";
 
+/**
+ * Big square cells over each layer. v2: the grid is the one Grid cells uses (../cells/grid.ts),
+ * anchored at the paper's (0, 0) and moved by the offsets, with cells in exact mm; v1 laid
+ * whole-pixel cells from the picture's top-left corner.
+ */
 export const pixelate = defineStep({
   id: "pixelate",
-  version: 1,
+  version: 2,
   title: "Pixelate",
   summary: "Turn each layer into big square cells: tone is averaged per cell, levels take the most common one.",
   input: "layers",
@@ -22,18 +28,24 @@ export const pixelate = defineStep({
     },
     cellMm: { type: "number", label: "Cell size", help: "Width of each square cell.", min: 0.5, max: 50, step: 0.5, default: 5, unit: "mm", visibleWhen: { param: "sizing", equals: ["mm"] } },
     across: { type: "number", label: "Cells across", help: "How many cells fit across the picture.", min: 4, max: 400, step: 1, default: 40, visibleWhen: { param: "sizing", equals: ["across"] } },
+    offsetX: offsetParam("x"),
+    offsetY: offsetParam("y"),
   },
   help: help.pixelate ?? "",
   runLayer(layer, p, _ctx, grid): Layer {
-    const { width: w, height: h } = grid;
-    const mmPerPx = grid.frame.widthMm / w;
-    const cell = Math.max(1, Math.round(p.sizing === "mm" ? p.cellMm / mmPerPx : w / p.across));
+    const { width: w, height: h, frame } = grid;
+    const cell = p.sizing === "mm" ? Math.max(0.5, p.cellMm) : frame.widthMm / p.across;
+    // Every pixel lies in exactly one cell: the one holding its centre. Cells narrower than a
+    // pixel hold no centre and are skipped.
+    const rows = gridSpans(frame.yMm, frame.heightMm, h, cell, p.offsetY).filter((s) => s.hi > s.lo);
+    const cols = gridSpans(frame.xMm, frame.widthMm, w, cell, p.offsetX).filter((s) => s.hi > s.lo);
     const v = layer.values;
+    const idx: number[] = [];
     const forEachCell = (fn: (idx: number[]) => void) => {
-      for (let cy = 0; cy < h; cy += cell) {
-        for (let cx = 0; cx < w; cx += cell) {
-          const idx: number[] = [];
-          for (let y = cy; y < Math.min(h, cy + cell); y++) for (let x = cx; x < Math.min(w, cx + cell); x++) idx.push(y * w + x);
+      for (const r of rows) {
+        for (const c of cols) {
+          idx.length = 0;
+          for (let y = r.lo; y < r.hi; y++) for (let x = c.lo; x < c.hi; x++) idx.push(y * w + x);
           fn(idx);
         }
       }
