@@ -1,21 +1,33 @@
 import { defineStep, type GeoFeature, type GeometryLayer, type LayerValues, type Position } from "@plotlab/engine";
 import { help } from "../help.generated.ts";
 
-/** Ink density of each pixel, 0..1: tone as-is; a level is its band's middle tone (0 = no ink). */
-function darkness(v: LayerValues): (i: number) => number {
-  if (v.kind === "tone") return (i) => v.data[i]!;
+/**
+ * Ink density of a cell from the pixels it covers, 0..1. Tone is averaged. Levels take the
+ * cell's most common band (as Pixelate does), read as that band's middle tone (0 = no ink),
+ * so squares come in one size per band.
+ */
+function cellInk(v: LayerValues): (idx: number[]) => number {
+  if (v.kind === "tone") return (idx) => idx.reduce((s, i) => s + v.data[i]!, 0) / idx.length;
   const mid = Array.from({ length: v.count + 1 }, (_, l) => {
     if (l === 0) return 0;
     const b = v.bands?.[l - 1];
     return b ? (b.lo + b.hi) / 2 : l / v.count;
   });
-  return (i) => mid[v.data[i]!] ?? 0;
+  const counts = new Uint32Array(v.count + 1);
+  return (idx) => {
+    counts.fill(0);
+    for (const i of idx) counts[v.data[i]!]!++;
+    let best = 0;
+    for (let k = 1; k < counts.length; k++) if (counts[k]! > counts[best]!) best = k;
+    return mid[best] ?? 0;
+  };
 }
 
 /**
  * Grid cells as polygons: the vector twin of Pixelate. The grid is anchored at the paper's
  * (0, 0), like Fill's lattices (ADR 0009 Fill), so every layer, and a Fill at the same
- * spacing, shares its lines. Cells cut by the picture's edge are clipped to it.
+ * spacing, shares its lines. Cells cut by the picture's edge are clipped to it; cut to under
+ * a quarter of a cell, they are skipped.
  */
 export const cells = defineStep({
   id: "cells",
@@ -48,29 +60,45 @@ export const cells = defineStep({
     const { width: w, height: h, frame } = grid;
     const sx = frame.widthMm / w, sy = frame.heightMm / h;
     const c = Math.max(0.5, p.cellMm);
-    const ink = darkness(layer.values);
+    const ink = cellInk(layer.values);
     const x0 = frame.xMm, y0 = frame.yMm, x1 = x0 + frame.widthMm, y1 = y0 + frame.heightMm;
-    // Pixel columns/rows whose centres fall in [a, b) mm.
-    const span = (a: number, b: number, origin: number, s: number, n: number) => [Math.max(0, Math.ceil((a - origin) / s - 0.5)), Math.min(n, Math.ceil((b - origin) / s - 0.5))] as const;
+    // Pixel columns/rows whose centres fall in [a, b) mm; a cell narrower than a pixel
+    // that holds no centre takes the pixel under its middle.
+    const span = (a: number, b: number, origin: number, s: number, n: number): [number, number] => {
+      const lo = Math.max(0, Math.ceil((a - origin) / s - 0.5)), hi = Math.min(n, Math.ceil((b - origin) / s - 0.5));
+      if (hi > lo) return [lo, hi];
+      const k = Math.min(n - 1, Math.max(0, Math.floor(((a + b) / 2 - origin) / s)));
+      return [k, k + 1];
+    };
     const a = (p.rotate * Math.PI) / 180, cos = Math.cos(a), sin = Math.sin(a);
+    const ac = Math.abs(cos), as = Math.abs(sin);
+    // Cells cut by the picture's edge to under this are slivers, not drawn.
+    const minCut = c / 4 - 1e-9;
+    const idx: number[] = [];
     const features: GeoFeature[] = [];
     for (let row = Math.floor(y0 / c); row * c < y1; row++) {
       const top = Math.max(y0, row * c), bottom = Math.min(y1, (row + 1) * c);
+      if (bottom - top < minCut) continue;
       const [py0, py1] = span(top, bottom, y0, sy, h);
       for (let col = Math.floor(x0 / c); col * c < x1; col++) {
         const left = Math.max(x0, col * c), right = Math.min(x1, (col + 1) * c);
+        if (right - left < minCut) continue;
         const [px0, px1] = span(left, right, x0, sx, w);
-        if (px1 <= px0 || py1 <= py0) continue;
-        let sum = 0;
-        for (let y = py0; y < py1; y++) for (let x = px0; x < px1; x++) sum += ink(y * w + x);
-        const tone = sum / ((px1 - px0) * (py1 - py0));
+        idx.length = 0;
+        for (let y = py0; y < py1; y++) for (let x = px0; x < px1; x++) idx.push(y * w + x);
+        const tone = ink(idx);
         if (!(tone > p.threshold / 100)) continue;
         const f = p.mode === "scaled" ? (p.minSize + ((p.maxSize - p.minSize) * tone)) / 100 : 1;
-        // Outlines trace the (possibly clipped) cell; sized squares stay square, fitting a clipped cell.
-        let cw = right - left, ch = bottom - top;
+        // Room for the shape: the (possibly clipped) cell minus the gap. Outlines fill it;
+        // sized squares stay square.
+        let cw = Math.max(0, right - left - p.gap), ch = Math.max(0, bottom - top - p.gap);
         if (p.mode === "scaled") cw = ch = Math.min(cw, ch);
-        const hw = (Math.max(0, cw - p.gap) * f) / 2, hh = (Math.max(0, ch - p.gap) * f) / 2;
+        let hw = (cw * f) / 2, hh = (ch * f) / 2;
         if (hw <= 0 || hh <= 0) continue;
+        // A turned shape is shrunk until its footprint fits the room again.
+        const k = Math.min(1, cw / 2 / (hw * ac + hh * as), ch / 2 / (hw * as + hh * ac));
+        hw *= k;
+        hh *= k;
         const cx = (left + right) / 2, cy = (top + bottom) / 2;
         const ring: Position[] = [[-hw, -hh], [hw, -hh], [hw, hh], [-hw, hh]].map(([dx, dy]) => [cx + dx! * cos - dy! * sin, cy + dx! * sin + dy! * cos]);
         features.push({ type: "Feature", geometry: { type: "Polygon", coordinates: [[...ring, ring[0]!]] }, properties: { tone, col, row } });

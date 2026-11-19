@@ -63,13 +63,13 @@ describe("cells", () => {
   });
 
   it("scaled: a cell cut by the picture's edge still gets a square, centred in what's left", async () => {
-    // Frame from y = 4 to 9 with 5 mm cells: the top row is cut to y 4..5.
-    const ps = paths(await run(toneLayers({ xMm: 0, yMm: 4, widthMm: 5, heightMm: 5 }, () => 1), { mode: "scaled", cellMm: 5, threshold: 0, minSize: 0, maxSize: 100 }));
+    // Frame from y = 3 to 8 with 5 mm cells: the top row is cut to y 3..5.
+    const ps = paths(await run(toneLayers({ xMm: 0, yMm: 3, widthMm: 5, heightMm: 5 }, () => 1), { mode: "scaled", cellMm: 5, threshold: 0, minSize: 0, maxSize: 100 }));
     const sliver = ps.find((p) => centre(p)[1] < 5)!;
     const xs = corners(sliver).map((q) => q[0]), ys = corners(sliver).map((q) => q[1]);
-    expect(Math.max(...xs) - Math.min(...xs)).toBeCloseTo(1, 9);
-    expect(Math.max(...ys) - Math.min(...ys)).toBeCloseTo(1, 9);
-    expect(centre(sliver)).toEqual([2.5, 4.5]);
+    expect(Math.max(...xs) - Math.min(...xs)).toBeCloseTo(2, 9);
+    expect(Math.max(...ys) - Math.min(...ys)).toBeCloseTo(2, 9);
+    expect(centre(sliver)).toEqual([2.5, 4]);
   });
 
   it("white cells emit nothing, in either mode", async () => {
@@ -118,8 +118,56 @@ describe("cells", () => {
     const [r] = paths(await run(one, { cellMm: 5, rotate: 45 }));
     expect(centre(r!)[0]).toBeCloseTo(2.5, 9);
     expect(centre(r!)[1]).toBeCloseTo(2.5, 9);
-    expect(side(r!)).toBeCloseTo(5, 9);
+    expect(side(r!)).toBeCloseTo(5 / Math.SQRT2, 9); // shrunk so the diamond fits the cell
     expect(r![0]![0]).toBeCloseTo(2.5, 9); // a corner points straight up
+  });
+
+  it("rotate: every square stays inside its own cell (minus the gap) and inside the frame", async () => {
+    const frame = { xMm: 0, yMm: 0, widthMm: 10, heightMm: 10 };
+    for (const [mode, rotate, gap] of [["outline", 45, 0], ["outline", 30, 1], ["scaled", 20, 0.5], ["outline", 90, 0]] as const) {
+      const ps = paths(await run(toneLayers(frame, () => 1), { mode, cellMm: 5, rotate, gap, threshold: 0, minSize: 100, maxSize: 100 }));
+      expect(ps, `${mode} ${rotate}`).toHaveLength(4);
+      for (const p of ps) {
+        const [cx, cy] = centre(p);
+        const l = Math.floor(cx / 5) * 5, t = Math.floor(cy / 5) * 5;
+        for (const [x, y] of p) {
+          expect(x).toBeGreaterThanOrEqual(l + gap / 2 - 1e-9);
+          expect(x).toBeLessThanOrEqual(l + 5 - gap / 2 + 1e-9);
+          expect(y).toBeGreaterThanOrEqual(t + gap / 2 - 1e-9);
+          expect(y).toBeLessThanOrEqual(t + 5 - gap / 2 + 1e-9);
+          expect(x >= -1e-9 && x <= 10 + 1e-9 && y >= -1e-9 && y <= 10 + 1e-9, `${x}, ${y}`).toBe(true);
+        }
+      }
+    }
+  });
+
+  it("cells smaller than a working pixel still sample the pixel under them", async () => {
+    // 10 mm picture at 5×5 px (2 mm pixels), 0.5 mm cells: 20 × 20 cells, all inked.
+    const data = new Float32Array(25).fill(1);
+    const input: Layers = { kind: "layers", width: 5, height: 5, frame: { xMm: 0, yMm: 0, widthMm: 10, heightMm: 10 }, layers: [{ id: "l", name: "l", values: { kind: "tone", data } }] };
+    expect(paths(await run(input, { cellMm: 0.5 }))).toHaveLength(400);
+    // A dark left column of pixels lights only the cells over it.
+    const half = Float32Array.from({ length: 25 }, (_, i) => (i % 5 === 0 ? 1 : 0));
+    const ps = paths(await run({ ...input, layers: [{ id: "l", name: "l", values: { kind: "tone", data: half } }] }, { cellMm: 0.5 }));
+    expect(ps).toHaveLength(4 * 20);
+    for (const p of ps) expect(centre(p)[0]).toBeLessThan(2);
+  });
+
+  it("levels: each cell takes its most common band, so square sizes come in steps", async () => {
+    // One 5 mm cell: 15 pixels of band 2, 10 of band 1. The square is band 2's size, not a blend.
+    const data = Uint16Array.from({ length: 25 }, (_, i) => (i < 15 ? 2 : 1));
+    const input: Layers = {
+      kind: "layers", width: 5, height: 5, frame: { xMm: 0, yMm: 0, widthMm: 5, heightMm: 5 },
+      layers: [{ id: "l", name: "l", values: { kind: "categories", data, count: 2, bands: [{ lo: 0, hi: 0.4 }, { lo: 0.4, hi: 1 }] } }],
+    };
+    const [sq] = paths(await run(input, { mode: "scaled", cellMm: 5, threshold: 0, minSize: 0, maxSize: 100 }));
+    expect(side(sq!)).toBeCloseTo(5 * 0.7, 6);
+  });
+
+  it("skips slivers: a cell cut to under a quarter of its size by the picture's edge", async () => {
+    // Frame from x = 4 to 14 with 5 mm cells: columns 4..5 (1 mm, skipped), 5..10, 10..14 (kept).
+    const ps = paths(await run(toneLayers({ xMm: 4, yMm: 0, widthMm: 10, heightMm: 5 }, () => 1), { cellMm: 5 }));
+    expect(ps.map((p) => centre(p)[0]).sort((a, b) => a - b)).toEqual([7.5, 12]);
   });
 
   it("exports as crisp vector squares: one closed path each, no embedded image", async () => {

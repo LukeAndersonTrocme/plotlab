@@ -4,7 +4,9 @@
 pen lines. It is the vector twin of **Pixelate**: Pixelate keeps the cells as pixels, Grid
 cells turns them into shapes a plotter can draw or an SVG keeps sharp at any size. The grid
 starts at the paper's top-left corner, like **Fill**'s lines, so every layer gets the same
-cells.
+cells. On a **Levels** layer each cell takes its most common band, so the squares come in
+one size per band. Cells cut by the picture's edge are clipped to it, and left out when
+less than a quarter of the cell is left.
 
 **Analog history:** *To be written with Nick* (mosaic tesserae, cross-stitch and
 needlepoint charts, early bitmap displays and their visible pixels…).
@@ -19,7 +21,9 @@ needlepoint charts, early bitmap displays and their visible pixels…).
 - **Smallest / largest square:** the square's size for the lightest and the darkest ink, as
   a share of the cell.
 - **Gap:** space between neighbouring squares, so tiles don't touch.
-- **Rotate:** turns every square about its cell's centre; 45° gives diamonds.
+- **Rotate:** turns every square about its cell's centre; 45° gives diamonds. Turned
+  squares shrink so they stay inside their cell.
 
 The squares are outlines: the pen draws each square's edge, and a digital export keeps
-them as sharp vector squares. Solid filled squares are not available yet.
+them as sharp vector squares. Solid filled squares are not available yet, and a **Fill**
+after Grid cells doesn't hatch the squares by darkness yet.
