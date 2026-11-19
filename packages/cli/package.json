@@ -3,13 +3,20 @@
   "version": "0.0.0",
   "private": true,
   "type": "module",
-  "bin": { "plotlab": "./bin/plotlab.js" },
-  "dependencies": {
+  "bin": { "plotlab": "./dist/plotlab.mjs" },
+  "files": ["dist"],
+  "engines": { "node": ">=20" },
+  "scripts": {
+    "build": "node scripts/build.mjs",
+    "prepack": "node scripts/build.mjs"
+  },
+  "devDependencies": {
     "@plotlab/engine": "workspace:*",
     "@plotlab/machines": "workspace:*",
     "@plotlab/steps": "workspace:*",
+    "@types/pngjs": "^6.0.5",
+    "esbuild": "0.28.2",
     "jpeg-js": "^0.4.4",
     "pngjs": "^7.0.0"
-  },
-  "devDependencies": { "@types/pngjs": "^6.0.5" }
+  }
 }

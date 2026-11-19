@@ -110,7 +110,7 @@ async function main(argv: string[]): Promise<number> {
     return 0;
   }
   process.stdout.write(USAGE);
-  return cmd ? 2 : 0;
+  return !cmd || cmd === "--help" || cmd === "-h" || cmd === "help" ? 0 : 2;
 }
 
 main(process.argv.slice(2)).then(

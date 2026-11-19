@@ -46,7 +46,7 @@ importers:
         version: 2.1.9(@types/node@20.19.43)
 
   packages/cli:
-    dependencies:
+    devDependencies:
       '@plotlab/engine':
         specifier: workspace:*
         version: link:../engine
@@ -56,16 +56,18 @@ importers:
       '@plotlab/steps':
         specifier: workspace:*
         version: link:../steps
+      '@types/pngjs':
+        specifier: ^6.0.5
+        version: 6.0.5
+      esbuild:
+        specifier: 0.28.2
+        version: 0.28.2
       jpeg-js:
         specifier: ^0.4.4
         version: 0.4.4
       pngjs:
         specifier: ^7.0.0
         version: 7.0.0
-    devDependencies:
-      '@types/pngjs':
-        specifier: ^6.0.5
-        version: 6.0.5
 
   packages/engine:
     dependencies:
