@@ -3,7 +3,7 @@ import { applyStep, describeLayers, type LayerInfo } from "./layers.ts";
 import { MAX_WORKING_SIDE, placeOnPaper, resample, workingSize } from "./layout.ts";
 import { inkFor, toPlot, withoutBudget, workingMmPerPx } from "./project.ts";
 import type { Recipe } from "./recipe.ts";
-import type { StepContext, StepRegistry } from "./step.ts";
+import type { StepContext, StepRegistry, StepWarning } from "./step.ts";
 import { sourceStage, type Geometry, type GeoFeature, type Image, type Layer, type Layers, type Plot, type Position, type RawGeometry, type RawImage, type Source, type StageData } from "./types.ts";
 
 /** A source as placed on the paper: what step 1 receives. */
@@ -19,6 +19,8 @@ export interface StepResult {
   cached: boolean;
   /** The layers in this step's output (for selectors and ink assignment). */
   layers: LayerInfo[];
+  /** What the step reported while it ran (kept with the cached output, so a cache hit still shows them). */
+  warnings: StepWarning[];
 }
 
 export interface RunOptions {
@@ -40,7 +42,7 @@ export interface RunOutput<P extends Placed = Placed> {
   placed: P;
   /** The plot to preview/export: the output if it is a plot, traced-order lines if it ends at lines, else null. */
   plot: Plot | null;
-  /** Project-level warnings (e.g. working resolution capped). */
+  /** Project-level warnings (e.g. working resolution capped). Step warnings are on each result. */
   warnings: string[];
   /** Indices of on-demand steps held back because they need re-running (empty or one entry). */
   stale: number[];
@@ -63,7 +65,7 @@ export class StepError extends Error {
  * A Pipeline is tied to one source; make a new one (or call `reset`) for a new source.
  */
 export class Pipeline {
-  private cache = new Map<number, { key: string; output: StageData }>();
+  private cache = new Map<number, { key: string; output: StageData; warnings: StepWarning[] }>();
   private placed: { key: string; data: Placed } | null = null;
 
   constructor(private registry: StepRegistry) {}
@@ -161,20 +163,22 @@ export class Pipeline {
       }
       const t0 = performance.now();
       let cached = false;
+      let warnings: StepWarning[] = [];
       if (hit && hit.key === key) {
         data = hit.output;
+        warnings = hit.warnings;
         cached = true;
       } else {
         try {
           // Params were validated by loadRecipe; the registry erases their static type.
-          data = await applyStep(def, data, rs, ctx);
+          data = await applyStep(def, data, rs, ctx, warnings);
         } catch (e) {
           if (e instanceof StepError) throw e;
           throw new StepError(index, e instanceof Error ? e.message : String(e));
         }
-        this.cache.set(index, { key, output: data });
+        this.cache.set(index, { key, output: data, warnings });
       }
-      const r: StepResult = { index, step: def.id, output: data, ms: performance.now() - t0, cached, layers: describeLayers(data) };
+      const r: StepResult = { index, step: def.id, output: data, ms: performance.now() - t0, cached, layers: describeLayers(data), warnings };
       results.push(r);
       opts.onStep?.(r);
     }

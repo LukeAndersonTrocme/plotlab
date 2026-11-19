@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { applyStep, checkChain, defaultParams, type Image, type Ink, type StepContext } from "@plotlab/engine";
+import { applyStep, checkChain, defaultParams, type Image, type Ink, type StepContext, type StepWarning } from "@plotlab/engine";
 import { createRegistry, presetSteps, reaction } from "../src/index.ts";
 import { MAX_CELL_STEPS, simGrid } from "../src/reaction/index.ts";
 
@@ -113,5 +113,21 @@ describe("reaction (Gray–Scott)", () => {
     expect(steps[0]!.step).toBe("reaction");
     expect(checkChain("image", steps, createRegistry())).toEqual([]);
     expect(createRegistry().get(steps.at(-1)!.step)!.output).toBe("plot");
+  });
+
+  it("warns when the paper is too big for the feature size, so features come out larger", async () => {
+    // 200 × 200 mm at 2 mm features would need a million cells; the cap is 400,000.
+    const img = gray(40, 40, 5, () => 0.5);
+    const warnings: StepWarning[] = [];
+    await applyStep(reaction, img, { params: { ...defaultParams(reaction.params), scale: 2, iterations: 100 } }, ctx, warnings);
+    expect(warnings).toHaveLength(1);
+    expect(warnings[0]!.message).toMatch(/about 3\.2 mm/);
+    expect(warnings[0]!.message).toMatch(/Feature size/);
+  });
+
+  it("does not warn when the grid fits", async () => {
+    const warnings: StepWarning[] = [];
+    await applyStep(reaction, gray(40, 40, 1, () => 0.5), { params: { ...defaultParams(reaction.params), scale: 4, iterations: 100 } }, ctx, warnings);
+    expect(warnings).toEqual([]);
   });
 });

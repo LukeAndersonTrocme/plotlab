@@ -62,6 +62,8 @@ export function StepList(props: {
     else patchStep(index, { layerParams: { ...rs.layerParams, [layer]: { ...rs.layerParams?.[layer], [name]: value } } }, proxy);
   };
   /** Layers arriving at step `index`: the output of the last step before it that ran. */
+  const warningsFor = (index: number) => props.steps.find((s) => s.index === index)?.warnings ?? [];
+  const layersFor = (index: number) => props.steps.find((s) => s.index === index)?.layers ?? [];
   const inputLayers = (index: number): LayerInfo[] => [...props.steps].reverse().find((s) => s.index < index)?.layers ?? [];
 
   let kind: StageKind = recipe.input;
@@ -203,6 +205,12 @@ export function StepList(props: {
             <span className="hint">Takes a moment on big drawings, so it runs when you ask.</span>
           </div>
         )}
+        {enabled && !stale && warningsFor(index).map((w, k) => (
+          <div key={`w${k}`} className="warning" role="status">
+            {w.layer !== undefined && layersFor(index).length > 1 ? `${layersFor(index).find((l) => l.id === w.layer)?.name ?? w.layer}: ` : ""}
+            {w.message}
+          </div>
+        ))}
         {props.error?.index === index && <div className="error">{props.error.message}</div>}
       </div>,
     );

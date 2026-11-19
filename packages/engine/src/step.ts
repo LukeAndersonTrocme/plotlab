@@ -21,6 +21,18 @@ export interface StepContext {
   passOrder: PassOrder;
   /** Report progress 0..1 for slow steps. */
   progress?: (fraction: number) => void;
+  /**
+   * Tell the person something went sideways without failing (e.g. a cap was hit), in plain
+   * words: what happened and what to change. Shown on the step's card and printed by the CLI.
+   * The pipeline always provides it; it is optional so steps can be called without one.
+   */
+  warn?: (message: string) => void;
+}
+
+/** A warning a step raised while it ran. `layer` is set for per-layer runs (ADR 0009). */
+export interface StepWarning {
+  message: string;
+  layer?: string;
 }
 
 /** The pixel grid all layers of a Layers value share. */

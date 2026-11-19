@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { applyStep, defaultParams, featurePaths, type Frame, type Geometry, type Ink, type Layers, type Position, type StepContext } from "@plotlab/engine";
+import { applyStep, defaultParams, featurePaths, type Frame, type Geometry, type Ink, type Layers, type Position, type StepContext, type StepWarning } from "@plotlab/engine";
 import { stipple } from "../src/index.ts";
 
 const ink: Ink = { id: "k", name: "k", color: "#000", mix: "multiply", widthMm: 0.3 };
@@ -155,5 +155,24 @@ describe("stipple", () => {
   it("refuses category layers with a plain reason", async () => {
     const layers: Layers = { ...gradient, layers: [{ id: "b", name: "Bands", values: { kind: "categories", data: new Uint16Array(3600), count: 3 } }] };
     await expect(async () => applyStep(stipple, layers, { params: P }, ctx)).rejects.toThrow(/holds categories/);
+  });
+
+  it("warns when it stops at the dot cap, and says what to change", async () => {
+    // Full tone over 100 × 100 mm at 0.3 mm spacing asks for about 111,000 dots.
+    const big = toneLayers(50, 50, { xMm: 0, yMm: 0, widthMm: 100, heightMm: 100 }, () => 1);
+    const warnings: StepWarning[] = [];
+    const out = (await applyStep(stipple, big, { params: { ...P, spacing: 0.3, iterations: 0 } }, ctx, warnings)) as Geometry;
+    expect(out.layers[0]!.features.features).toHaveLength(60000);
+    expect(warnings).toHaveLength(1);
+    expect(warnings[0]!.layer).toBe("tone");
+    expect(warnings[0]!.message).toMatch(/60,000 dots/);
+    expect(warnings[0]!.message).toMatch(/111,111/);
+    expect(warnings[0]!.message).toMatch(/Darkest spacing/);
+  });
+
+  it("does not warn at normal settings", async () => {
+    const warnings: StepWarning[] = [];
+    await applyStep(stipple, gradient, { params: P }, ctx, warnings);
+    expect(warnings).toEqual([]);
   });
 });
