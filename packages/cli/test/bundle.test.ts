@@ -1,5 +1,5 @@
 import { spawnSync } from "node:child_process";
-import { copyFileSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { copyFileSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { basename, dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -47,6 +47,22 @@ describe("bundled CLI", () => {
     const r = cli("run", join(golden, "cases", "shapes-centerline.recipe.json"), "-i", join(golden, "fixtures", fixture), "-o", join(dir, "out", fixture));
     expect(r.status, r.stderr).toBe(0);
     expect(readFileSync(join(dir, "out", fixture, "plot.svg"), "utf8")).toContain("<path");
+  });
+
+  it("prints step warnings to stderr with the step's title", () => {
+    const golden = join(pkgDir, "..", "..", "golden");
+    const recipe = {
+      schemaVersion: 2,
+      input: "image",
+      target: { kind: "plotter" },
+      paper: { widthMm: 300, heightMm: 300 },
+      inks: [{ id: "black", name: "Black", color: "#111111", widthMm: 0.3 }],
+      steps: [{ step: "tone" }, { step: "stipple", params: { spacing: 0.3, iterations: 0 } }],
+    };
+    writeFileSync(join(dir, "dense.recipe.json"), JSON.stringify(recipe));
+    const r = cli("run", join(dir, "dense.recipe.json"), "-i", join(golden, "fixtures", "gradient.png"), "-o", join(dir, "out", "dense"));
+    expect(r.status, r.stderr).toBe(0);
+    expect(r.stderr).toMatch(/^warning: Stipple: Stopped at 60,000 dots .*Darkest spacing/m);
   });
 
   it("--help exits 0 and prints usage", () => {

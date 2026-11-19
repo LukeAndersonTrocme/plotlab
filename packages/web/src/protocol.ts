@@ -1,4 +1,4 @@
-import type { ExportFormat, Frame, LayerInfo, Plot, Recipe, Source, StageKind } from "@plotlab/engine";
+import type { ExportFormat, Frame, LayerInfo, Plot, Recipe, Source, StageKind, StepWarning } from "@plotlab/engine";
 import type { PlotEstimate } from "@plotlab/machines";
 
 /** What to show in the view: a step's output (by index), the placed source, or the end result. */
@@ -29,6 +29,8 @@ export interface StepInfo {
   ms: number;
   cached: boolean;
   layers: LayerInfo[];
+  /** What the step reported while it ran (shown on its card). */
+  warnings: StepWarning[];
 }
 
 export type ToWorker =

@@ -123,7 +123,7 @@ async function handle(msg: ToWorker): Promise<void> {
       warnings,
       working: placed.kind === "geometry" ? null : { width: placed.width, height: placed.height, mmPerPx: placed.frame.widthMm / placed.width },
       stale,
-      steps: results.map((r) => ({ index: r.index, step: r.step, ms: r.ms, cached: r.cached, layers: r.layers })),
+      steps: results.map((r) => ({ index: r.index, step: r.step, ms: r.ms, cached: r.cached, layers: r.layers, warnings: r.warnings })),
       rasterLayers: await resultRasters(output, msg.recipe),
       inspected,
       underlay: placed.kind === "image" ? await imageView(placed, "source", "Source") : null,

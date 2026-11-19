@@ -219,6 +219,12 @@ export const reaction = defineStep({
     // The simulation grid is set by the feature size in mm, not by the working pixels, so a
     // proxy and the full-resolution run grow the same pattern (ADR 0005).
     const { width: sw, height: sh } = simGrid(img.frame, p.scale);
+    // Past the cell cap the grid gets coarser, so features grow (it depends only on the frame
+    // in mm, so a proxy run warns exactly when the full run does).
+    const actual = (img.frame.widthMm / sw) * PX_PER_FEATURE;
+    if (actual > p.scale * 1.05) {
+      ctx.warn?.(`The picture is too big on the paper for ${p.scale} mm features, so they came out about ${actual.toFixed(1)} mm. Set Feature size to ${actual.toFixed(1)} mm or more to get what you see, or make the picture smaller on the paper.`);
+    }
     const light = resampleGrid(luminance(img), img.width, img.height, sw, sh);
     const v = grayScott({ light, width: sw, height: sh, lightPattern: p.light, darkPattern: p.dark, iterations: p.iterations, seed: p.seed, progress: ctx.progress });
     let lo = Infinity, hi = -Infinity;
