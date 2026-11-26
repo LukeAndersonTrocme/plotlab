@@ -519,6 +519,94 @@ try {
     await page.close();
   }
 
+  // Compare stages (#75): turn it on, strips for the step and the one before; shift-click
+  // adds a strip, a plain click only changes the sidebar; every strip changes while a slider
+  // moves; dividers drag and can't cross; the comparison comes back after a reload.
+  {
+    const page = await open(1280);
+    const bands = () => page.$$eval(".compare-canvas .strip-band", (els) => els.map((e) => e.dataset.band));
+    const pics = () => page.$$eval(".compare-canvas .strip-band", (els) => els.map((e) => e.innerHTML));
+    const drawn = (n) => page.waitForFunction((n) => {
+      const els = [...document.querySelectorAll(".compare-canvas .strip-band")];
+      return els.length === n && els.every((e) => e.querySelector("image, path"));
+    }, n, { timeout: 30_000 });
+    await page.click('.strip .box[data-key="threshold"] .pic');
+    await page.waitForSelector('aside.side .card.step.focus[data-step="threshold"]', { timeout: 10_000 });
+    await page.click(".view-bar button:has-text('Compare stages')");
+    await drawn(2);
+    check((await bands()).join(",") === "source,threshold", `compare: turning it on shows the first step against the source (${(await bands()).join(", ")})`);
+
+    await page.click('.strip .box[data-key="order"] .pic', { modifiers: ["Shift"] });
+    await drawn(3);
+    check((await bands()).join(",") === "source,threshold,order", `compare: shift-click adds that step as a strip (${(await bands()).join(", ")})`);
+    check(!!(await page.$('aside.side .card.step.focus[data-step="threshold"]')), "compare: shift-click leaves the sidebar alone");
+    check(await page.$eval("header.top button[aria-label=Back]", (b) => b.disabled), "compare: turning it on and adding strips is not a Back step");
+    await page.click('.strip .box[data-key="centerline"] .pic');
+    await page.waitForSelector('aside.side .card.step.focus[data-step="centerline"]', { timeout: 10_000 });
+    check((await bands()).join(",") === "source,threshold,order", "compare: a plain click changes only the sidebar, not the strips");
+
+    // Drag Threshold's first slider and see every step strip change before letting go.
+    await page.click('.strip .box[data-key="threshold"] .pic');
+    await page.waitForSelector('aside.side .card.step.focus[data-step="threshold"]', { timeout: 10_000 });
+    const before = await pics();
+    const range = await (await page.$('aside.side .card.step.focus[data-step="threshold"] input[type=range]')).boundingBox();
+    const y = range.y + range.height / 2;
+    await page.mouse.move(range.x + range.width * 0.5, y);
+    await page.mouse.down();
+    await page.mouse.move(range.x + range.width * 0.15, y, { steps: 6 });
+    const live = await page.waitForFunction((b) => {
+      const now = [...document.querySelectorAll(".compare-canvas .strip-band")].map((e) => e.innerHTML);
+      return now.length === b.length && now[1] !== b[1] && now[2] !== b[2] && now[1].includes("<image") && /<path|<image/.test(now[2]);
+    }, before, { timeout: 30_000 }).then(() => true, () => false);
+    await page.mouse.up();
+    check(live, "compare: moving a slider changes every step's strip while the slider moves");
+    if (process.env.SHOTS) await page.screenshot({ path: `${process.env.SHOTS}/compare-cols.png` });
+    check(!(await page.$eval("header.top button[aria-label=Back]", (b) => b.disabled)), "compare: the slider move is a Back step");
+
+    // Dividers: drag the first one far past the second; it stops short.
+    const val = () => page.$$eval(".compare-canvas .cmp-divider", (els) => els.map((e) => Number(e.getAttribute("aria-valuenow"))));
+    const v0 = await val();
+    const knob = await (await page.$(".compare-canvas .cmp-divider circle")).boundingBox();
+    const svg = await (await page.$(".compare-canvas")).boundingBox();
+    await page.mouse.move(knob.x + knob.width / 2, knob.y + knob.height / 2);
+    await page.mouse.down();
+    await page.mouse.move(svg.x + svg.width - 5, knob.y + knob.height / 2, { steps: 8 });
+    await page.mouse.up();
+    const v1 = await val();
+    check(v0.length === 2 && v1[0] > v0[0] && v1[0] < v1[1], `compare: a divider drags but can't cross the next one (${v0.join(",")} → ${v1.join(",")})`);
+
+    // Top to bottom, then a reload: the comparison comes back as it was.
+    await page.click(".compare-bar button:has-text('Top to bottom')");
+    await page.waitForSelector(".compare-canvas.rows");
+    await page.waitForTimeout(300);
+    if (process.env.SHOTS) await page.screenshot({ path: `${process.env.SHOTS}/compare-rows.png` });
+    await page.reload();
+    await page.waitForSelector(".stats .big", { timeout: 60_000 });
+    await page.waitForSelector(".compare-canvas.rows", { timeout: 10_000 }).catch(() => {});
+    await drawn(3).catch(() => {});
+    check((await bands()).join(",") === "source,threshold,order" && !!(await page.$(".compare-canvas.rows")), `compare: the comparison comes back after a reload (${(await bands()).join(", ")})`);
+    check((await val())[0] === v1[0], `compare: so do the dividers (${(await val()).join(",")})`);
+
+    // Removing a compared step drops its strip; the same step added again doesn't come back as a strip.
+    await page.click('.strip .gap[data-gap="1"] .plus');
+    await page.click('.add-menu [role=menuitem][data-step="pixelate"]');
+    await page.waitForSelector('aside.side .card.step.focus[data-step="pixelate"]', { timeout: 10_000 });
+    await page.click('.strip .box[data-key="pixelate"] .pic', { modifiers: ["Shift"] });
+    await drawn(4);
+    await page.click('aside.side .card.focus .step-actions button:has-text("Remove")');
+    await drawn(3);
+    await page.click('.strip .gap[data-gap="1"] .plus');
+    await page.click('.add-menu [role=menuitem][data-step="pixelate"]');
+    await page.waitForSelector('.strip .box[data-key="pixelate"]', { timeout: 10_000 });
+    await page.waitForTimeout(200);
+    check((await bands()).join(",") === "source,threshold,order", `compare: removing a step drops its strip, and a new one with its id isn't compared (${(await bands()).join(", ")})`);
+
+    await page.click(".view-bar button:has-text('Compare stages')");
+    await page.waitForSelector(".compare-canvas", { state: "detached" });
+    check(!!(await page.$(".view svg.preview")), "compare: turning it off shows the single canvas again");
+    await page.close();
+  }
+
   // Dark mode: the chrome goes dark, the paper stays paper-coloured.
   {
     const page = await open(1280, "dark");

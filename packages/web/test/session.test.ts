@@ -3,6 +3,7 @@ import { IDBFactory } from "fake-indexeddb";
 import { indexedDbLibrary, LEGACY_RECIPE_KEY, LEGACY_SAVED_AT_KEY, memoryLibrary, migrateLegacyRecipe, openLibrary, sha256Hex, storageWarning, type Library } from "../src/storage/index.ts";
 import { openImage, readView, saveView, startSession } from "../src/session.ts";
 import { fromViewBlock, initialView, pin } from "../src/view.ts";
+import { dragSplit, makeCompare, setLayout } from "../src/compare.ts";
 import { listForProject } from "../src/checkpoints.ts";
 
 function fakeLocalStorage(init: Record<string, string> = {}) {
@@ -200,6 +201,22 @@ describe("the view block: pinned steps come back when the project is reopened", 
     // Saving the view wrote no recipe and made no checkpoint.
     expect(await s2.project.getRecipe()).toBeUndefined();
     expect(await listForProject(s2.project)).toEqual([]);
+  });
+
+  it.each(libraries)("%s library: the comparison comes back too, strips, layout and dividers", async (_name, make) => {
+    const { first, again } = make();
+    const s1 = await start(await first());
+    const compare = dragSplit(setLayout(makeCompare(["source", "threshold", "order"]), "rows"), 1, 0.9);
+    await saveView(s1.project, { ...initialView, compare }, await readView(s1.project));
+
+    const s2 = await start(await again());
+    expect(fromViewBlock(initialView, await readView(s2.project), chain).compare).toEqual(compare);
+    expect(await s2.project.getRecipe()).toBeUndefined();
+    expect(await listForProject(s2.project)).toEqual([]);
+    // Turning it off is saved as well.
+    await saveView(s2.project, initialView, await readView(s2.project));
+    const s3 = await start(await again());
+    expect(fromViewBlock({ ...initialView, compare }, await readView(s3.project), chain).compare).toBeNull();
   });
 
   it("each image keeps its own pins", async () => {
