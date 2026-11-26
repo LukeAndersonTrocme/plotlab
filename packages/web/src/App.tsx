@@ -20,6 +20,7 @@ import type { InspectTarget } from "./protocol.ts";
 import { StageView } from "./StageView.tsx";
 import { StepList, type SidebarCards } from "./StepList.tsx";
 import { CheckpointSidebar } from "./CheckpointSidebar.tsx";
+import { PhoneViewer, usePhoneWidth } from "./PhoneViewer.tsx";
 import { attachThumbnail, checkpointLabel, createCheckpoint, restoreSafely } from "./checkpoints.ts";
 import { galleryItems, pickPreset, type GalleryItem } from "./gallery.ts";
 import { focusOf, shortcut } from "./keys.ts";
@@ -51,7 +52,15 @@ function download(name: string, data: string | Uint8Array, type: string) {
   setTimeout(() => URL.revokeObjectURL(a.href), 1000);
 }
 
+/**
+ * Phone-sized screens get the viewer only (#74); the editor doesn't even mount there, so
+ * none of its work starts. Turning the phone or resizing the window switches between them.
+ */
 export function App() {
+  return usePhoneWidth() ? <PhoneViewer /> : <Editor />;
+}
+
+function Editor() {
   const [history, setHistory] = useState<History<Recipe>>(() => createHistory(defaultRecipe()));
   const recipe = history.present;
   const [run, setRun] = useState<RunState>(EMPTY_RUN);
