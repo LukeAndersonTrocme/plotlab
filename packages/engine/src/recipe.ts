@@ -109,6 +109,12 @@ export function withStepIds<S extends { step: string; id?: unknown }>(steps: S[]
   });
 }
 
+/**
+ * Upgrades (by the version they start from) that lose and change nothing the person made,
+ * so there is nothing to tell them: v2 → v3 only adds step ids.
+ */
+const SILENT_UPGRADES = new Set([2]);
+
 const UPGRADERS: Record<number, (r: Raw) => Raw> = {
   // v1 → v2: pens become inks; the plot step's margin moves to the project layout and
   // the step itself becomes Stroke order (ADR 0005, 0008, 0011).
@@ -218,7 +224,7 @@ export function loadRecipe(raw: unknown, registry: StepRegistry): { recipe: Reci
     const up = UPGRADERS[v];
     if (!up) throw new RecipeError(`no upgrade path from recipe schemaVersion ${v}`);
     r = up(r);
-    warnings.push({ index: -1, message: `upgraded recipe from schemaVersion ${v} to ${v + 1}` });
+    if (!SILENT_UPGRADES.has(v)) warnings.push({ index: -1, message: `upgraded recipe from schemaVersion ${v} to ${v + 1}` });
     v += 1;
   }
 

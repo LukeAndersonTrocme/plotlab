@@ -37,13 +37,13 @@ describe("schema v2 → v3: stable step ids", () => {
     inks: [{ id: "black", color: "#111111" }],
     steps: [{ step: "tone" }, { step: "levels" }, { step: "bands" }, { step: "fill" }, { step: "fill", enabled: false }, { step: "order" }],
   };
-  it("gives every step an id, unique within the recipe, with a warning", () => {
+  it("gives every step an id, unique within the recipe, without a warning (nothing is lost, nothing to act on)", () => {
     const { recipe, warnings } = loadRecipe(v2, createRegistry());
     expect(recipe.schemaVersion).toBe(3);
     const ids = recipe.steps.map((s) => s.id);
     expect(ids.every((id) => typeof id === "string" && id.length > 0)).toBe(true);
     expect(new Set(ids).size).toBe(ids.length);
-    expect(warnings.filter((w) => /schemaVersion 2 to 3/.test(w.message))).toHaveLength(1);
+    expect(warnings).toEqual([]);
   });
   it("is deterministic: the same recipe gets the same ids", () => {
     const a = loadRecipe(v2, createRegistry()).recipe.steps.map((s) => s.id);
@@ -54,6 +54,8 @@ describe("schema v2 → v3: stable step ids", () => {
   it("a v1 recipe goes all the way up and gets ids too", () => {
     const { recipe } = loadRecipe(v1, createRegistry());
     expect(recipe.steps.map((s) => s.id)).toEqual(["threshold", "centerline", "order"]);
+    // The v1 → v2 upgrade still warns; v2 → v3 doesn't.
+    expect(loadRecipe(v1, createRegistry()).warnings.filter((w) => /schemaVersion/.test(w.message)).map((w) => w.message)).toEqual(["upgraded recipe from schemaVersion 1 to 2"]);
   });
 });
 
