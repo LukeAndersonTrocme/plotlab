@@ -40,6 +40,21 @@ describe("insertStep", () => {
     expect("recipe" in res && res.index).toBe(2);
     expect("recipe" in res && res.recipe.steps[2]!.params.method).toBe("nearest");
   });
+  it("adds the step's default inks and points its layers at them", () => {
+    const res = insertStep(recipe([]), "cmyk", reg);
+    if (!("recipe" in res)) throw new Error(res.reason);
+    expect(res.recipe.inks.map((i) => i.id)).toEqual(["k", "cyan", "magenta", "yellow", "black"]);
+    expect(res.recipe.layerInks).toEqual({ C: "cyan", M: "magenta", Y: "yellow", K: "black" });
+  });
+  it("keeps inks and layer assignments the recipe already has", () => {
+    const r = { ...recipe([]), layerInks: { K: "k" } };
+    r.inks = [...r.inks, { id: "cyan", name: "My cyan", color: "#0af", mix: "multiply", widthMm: 0.5 }];
+    const res = insertStep(r, "cmyk", reg);
+    if (!("recipe" in res)) throw new Error(res.reason);
+    expect(res.recipe.inks.find((i) => i.id === "cyan")!.name).toBe("My cyan");
+    expect(res.recipe.inks.filter((i) => i.id === "cyan")).toHaveLength(1);
+    expect(res.recipe.layerInks).toEqual({ K: "k", C: "cyan", M: "magenta", Y: "yellow" });
+  });
   it("explains when there is nowhere it fits", () => {
     const res = insertStep(recipe([]), "centerline", reg);
     expect("reason" in res && res.reason).toMatch(/Centerline needs layers/);
