@@ -1,13 +1,9 @@
 import { useEffect, useState } from "react";
-import { finishing, MARK_INSET_MM, retarget, screenAngle, type Ink, type LayerInfo, type Recipe, type Target, type TargetKind } from "@plotlab/engine";
+import { MARK_INSET_MM, retarget, screenAngle, type Ink, type LayerInfo, type Recipe, type Target, type TargetKind } from "@plotlab/engine";
+import { builtinMachines } from "@plotlab/machines";
 import { PAPERS } from "./defaults.ts";
+import { paperName as namedPaper, TARGETS } from "./setup.ts";
 
-export const TARGETS: Array<{ kind: TargetKind; label: string; hint: string }> = [
-  { kind: "plotter", label: "Plotter", hint: "Pens on paper. Shows plot time and pen changes." },
-  { kind: "raster", label: "Digital image", hint: "A PNG or TIFF at the resolution below; inks mix like ink on paper." },
-  { kind: "vector", label: "Digital vector", hint: "An SVG or PDF with strokes at their ink width; layers that aren't lines are embedded as images." },
-  { kind: "print", label: "Print prep", hint: "One 1-bit or gray TIFF per ink (riso, screen print, relief, film), plus a proof." },
-];
 
 type PrintTarget = Extract<Target, { kind: "print" }>;
 type PlotterTarget = Extract<Target, { kind: "plotter" }>;
@@ -71,10 +67,10 @@ const newInkId = (inks: Ink[]) => {
 };
 
 /**
- * Project settings (ADR 0005, 0007, 0008, 0011): output target, paper and placement,
- * working detail, inks, which layer uses which ink, and pass order.
+ * Page mode (ADR 0005, 0007, 0008, 0011): paper and placement, inks (pens on a plotter)
+ * and which layer uses which, the machine or output target, and print prep folded.
  */
-export function ProjectPanel(props: {
+export function PagePanel(props: {
   recipe: Recipe;
   onChange: (r: Recipe, proxy?: boolean) => void;
   /** Layers at the end of the chain (from the last run). */
@@ -88,9 +84,11 @@ export function ProjectPanel(props: {
   const setInk = (i: number, patch: Partial<Ink>, proxy = false) =>
     set({ inks: r.inks.map((ink, j) => (j === i ? { ...ink, ...patch } : ink)) }, proxy);
   const setTarget = (kind: TargetKind) => set({ target: retarget(r.target, { kind }) });
-  const paperName =
-    Object.entries(PAPERS).find(([, p]) => Math.min(p.widthMm, p.heightMm) === Math.min(r.paper.widthMm, r.paper.heightMm))?.[0] ?? "";
+  const paperName = namedPaper(r.paper) ?? "";
   const landscape = r.paper.widthMm > r.paper.heightMm;
+  const orient = (wantLandscape: boolean) =>
+    wantLandscape !== landscape && set({ paper: { widthMm: r.paper.heightMm, heightMm: r.paper.widthMm } });
+  const plotter = r.target.kind === "plotter";
   const movePass = (i: number, d: -1 | 1) => {
     const ids = props.passes.map((p) => p.id);
     const j = i + d;
@@ -100,99 +98,12 @@ export function ProjectPanel(props: {
   };
 
   return (
-    <div className="project">
-      <details open>
-        <summary>Output</summary>
-        <div className="target-grid" role="radiogroup" aria-label="Output target">
-          {TARGETS.map((t) => (
-            <button key={t.kind} role="radio" aria-checked={r.target.kind === t.kind} className={r.target.kind === t.kind ? "on" : ""} title={t.hint} onClick={() => setTarget(t.kind)}>
-              {t.label}
-            </button>
-          ))}
-        </div>
-        <p className="hint">{TARGETS.find((t) => t.kind === r.target.kind)?.hint}</p>
-        {"dpi" in r.target && (
-          <div className="param">
-            <label>Resolution</label>
-            <div className="param-row">
-              <input
-                className="num"
-                type="number"
-                min={30}
-                max={2400}
-                step={10}
-                value={r.target.dpi}
-                onChange={(e) => Number(e.target.value) > 0 && set({ target: { ...r.target, dpi: Number(e.target.value) } as Target })}
-              />
-              <span className="unit">dpi</span>
-            </div>
-          </div>
-        )}
-        {r.target.kind === "print" && (
-          <>
-            <div className="param">
-              <label title="1-bit: each pixel is ink or no ink, which is what riso, screen and film need. Gray keeps density for processes that take it.">Plates</label>
-              <div className="param-row">
-                <select value={r.target.mode} onChange={(e) => set({ target: { ...r.target, mode: e.target.value as "bitmap" | "gray" } as Target })}>
-                  <option value="bitmap">1-bit (ink or no ink)</option>
-                  <option value="gray">Gray (density)</option>
-                </select>
-              </div>
-            </div>
-            {r.target.mode === "bitmap" && (
-              <div className="param">
-                <label title="A grid of dots whose size follows the tone. Without it, tone is cut at 50%. Coarser screens (fewer lines per inch) are easier to print.">
-                  <input
-                    type="checkbox"
-                    checked={r.target.halftone !== null}
-                    onChange={(e) => set({ target: { ...r.target, halftone: e.target.checked ? { lpi: 45, angles: {} } : null } as Target })}
-                  />{" "}
-                  Halftone screen
-                </label>
-                {r.target.halftone && (
-                  <div className="param-row">
-                    <input
-                      className="num"
-                      type="number"
-                      min={5}
-                      max={200}
-                      step={5}
-                      value={r.target.halftone.lpi}
-                      onChange={(e) => Number(e.target.value) > 0 && set({ target: { ...r.target, halftone: { ...(r.target as PrintTarget).halftone!, lpi: Number(e.target.value) } } as Target })}
-                    />
-                    <span className="unit">lines per inch; angle per ink below</span>
-                  </div>
-                )}
-              </div>
-            )}
-            <label className="toggle" title="Ink areas clear and the rest black, for processes that expose through a negative.">
-              <input type="checkbox" checked={r.target.negative} onChange={(e) => set({ target: { ...r.target, negative: e.target.checked } as Target })} /> Film negative
-            </label>
-          </>
-        )}
-        {r.target.kind === "plotter" && <BudgetField budgetMin={r.target.budgetMin} onChange={(budgetMin) => {
-          const { budgetMin: _old, ...rest } = r.target as PlotterTarget;
-          set({ target: budgetMin === undefined ? rest : { ...rest, budgetMin } });
-        }} />}
-        {(r.target.kind === "plotter" || r.target.kind === "print") && (
-          <>
-            <label className="toggle" title="Flip left-right: for screens and plates printed face down, or transfers.">
-              <input type="checkbox" checked={!!r.target.mirror} onChange={(e) => set({ target: { ...r.target, mirror: e.target.checked } as Target })} /> Mirror
-            </label>
-            <label className="toggle" title="Circle-and-cross marks at the middle of each edge, on every plate or pass, so the inks line up.">
-              <input type="checkbox" checked={!!r.target.registration} onChange={(e) => set({ target: { ...r.target, registration: e.target.checked } as Target })} /> Registration marks
-            </label>
-            {r.target.registration && r.layout.marginMm < MARK_INSET_MM * 2 && (
-              <p className="hint">The marks sit {MARK_INSET_MM} mm from the paper edge; with a margin under {MARK_INSET_MM * 2} mm they may touch the art.</p>
-            )}
-          </>
-        )}
-      </details>
-
-      <details open>
-        <summary>Paper</summary>
+    <div className="project page-panel">
+      <section className="panel-sec">
+        <h3>Paper</h3>
         <div className="param-row">
           <select
+            aria-label="Paper size"
             value={paperName}
             onChange={(e) => {
               const p = PAPERS[e.target.value]!;
@@ -204,10 +115,34 @@ export function ProjectPanel(props: {
               <option key={k}>{k}</option>
             ))}
           </select>
-          <button onClick={() => set({ paper: { widthMm: r.paper.heightMm, heightMm: r.paper.widthMm } })}>{landscape ? "Landscape" : "Portrait"} ⟲</button>
-          <span className="unit">
-            {r.paper.widthMm} × {r.paper.heightMm} mm
+          <span className="seg" role="group" aria-label="Orientation">
+            <button aria-pressed={!landscape} onClick={() => orient(false)}>
+              Portrait
+            </button>
+            <button aria-pressed={landscape} onClick={() => orient(true)}>
+              Landscape
+            </button>
           </span>
+        </div>
+        <p className="hint">
+          {r.paper.widthMm} × {r.paper.heightMm} mm
+        </p>
+        <div className="param">
+          <label>Margin</label>
+          <div className="param-row">
+            <input
+              type="range"
+              aria-label="Margin"
+              min={0}
+              max={Math.floor(Math.min(r.paper.widthMm, r.paper.heightMm) / 2) - 1}
+              step={1}
+              value={r.layout.marginMm}
+              onChange={(e) => set({ layout: { ...r.layout, marginMm: Number(e.target.value) } }, true)}
+              onPointerUp={() => set({})}
+            />
+            <input className="num" type="number" min={0} aria-label="Margin in mm" value={r.layout.marginMm} onChange={(e) => set({ layout: { ...r.layout, marginMm: Math.max(0, Number(e.target.value)) } })} />
+            <span className="unit">mm</span>
+          </div>
         </div>
         <div className="param">
           <label title="Fit shows the whole image; Fill covers the area inside the margins and crops the rest.">Placement</label>
@@ -226,22 +161,6 @@ export function ProjectPanel(props: {
                 />
               ))}
             </div>
-          </div>
-        </div>
-        <div className="param">
-          <label>Margin</label>
-          <div className="param-row">
-            <input
-              type="range"
-              min={0}
-              max={Math.floor(Math.min(r.paper.widthMm, r.paper.heightMm) / 2) - 1}
-              step={1}
-              value={r.layout.marginMm}
-              onChange={(e) => set({ layout: { ...r.layout, marginMm: Number(e.target.value) } }, true)}
-              onPointerUp={() => set({})}
-            />
-            <input className="num" type="number" min={0} value={r.layout.marginMm} onChange={(e) => set({ layout: { ...r.layout, marginMm: Math.max(0, Number(e.target.value)) } })} />
-            <span className="unit">mm</span>
           </div>
         </div>
         <div className="param">
@@ -268,10 +187,10 @@ export function ProjectPanel(props: {
             </p>
           )}
         </div>
-      </details>
+      </section>
 
-      <details open>
-        <summary>Inks</summary>
+      <section className="panel-sec">
+        <h3>{plotter ? "Pens" : "Inks"}</h3>
         {r.inks.map((ink, i) => (
           <div key={ink.id} className="ink-row">
             <input type="color" value={ink.color} aria-label={`${ink.name} colour`} onChange={(e) => setInk(i, { color: e.target.value }, true)} onBlur={() => set({})} />
@@ -283,7 +202,8 @@ export function ProjectPanel(props: {
               max={10}
               step={0.05}
               value={ink.widthMm}
-              title={r.target.kind === "plotter" ? "Pen width" : "Line width"}
+              title={plotter ? "Pen width" : "Line width"}
+              aria-label={plotter ? `${ink.name} pen width` : `${ink.name} line width`}
               onChange={(e) => Number(e.target.value) > 0 && setInk(i, { widthMm: Number(e.target.value) })}
             />
             <span className="unit">mm</span>
@@ -326,7 +246,7 @@ export function ProjectPanel(props: {
           </div>
         ))}
         <button onClick={() => set({ inks: [...r.inks, { id: newInkId(r.inks), name: `Ink ${r.inks.length + 1}`, color: "#2f5d8a", mix: "multiply", widthMm: r.inks[0]?.widthMm ?? 0.5 }] })}>
-          + Add ink
+          {plotter ? "+ Add pen" : "+ Add ink"}
         </button>
         {props.layers.length > 0 && (
           <div className="param">
@@ -336,6 +256,7 @@ export function ProjectPanel(props: {
                 <span className="layer-name">{l.name}</span>
                 <select
                   value={r.layerInks[l.id] ?? r.inks[0]!.id}
+                  aria-label={`Ink for ${l.name}`}
                   onChange={(e) => set({ layerInks: { ...r.layerInks, [l.id]: e.target.value } })}
                 >
                   {r.inks.map((ink) => (
@@ -348,30 +269,147 @@ export function ProjectPanel(props: {
             ))}
           </div>
         )}
-      </details>
+        {plotter && props.passes.length > 1 && (
+          <div className="param">
+            <label>Pass order</label>
+            <p className="hint">Each ink is one pass, with a pen change between passes. Light inks usually go first.</p>
+            {props.passes.map((p, i) => (
+              <div key={p.id} className="param-row pass">
+                <span className="swatch" style={{ background: r.inks.find((k) => k.id === (r.layerInks[p.id] ?? r.inks[0]!.id))?.color }} />
+                <span className="layer-name">
+                  {i + 1}. {p.name}
+                </span>
+                <button className="icon" disabled={i === 0} aria-label={`Move ${p.name} earlier`} onClick={() => movePass(i, -1)}>
+                  ↑
+                </button>
+                <button className="icon" disabled={i === props.passes.length - 1} aria-label={`Move ${p.name} later`} onClick={() => movePass(i, 1)}>
+                  ↓
+                </button>
+              </div>
+            ))}
+            {Array.isArray(r.passOrder) && <button onClick={() => set({ passOrder: "light-to-dark" })}>Light → dark</button>}
+          </div>
+        )}
+      </section>
 
-      {r.target.kind === "plotter" && props.passes.length > 1 && (
-        <details open>
-          <summary>Pass order</summary>
-          <p className="hint">Each ink is one pass, with a pen change between passes. Light inks usually go first.</p>
-          {props.passes.map((p, i) => (
-            <div key={p.id} className="param-row pass">
-              <span className="swatch" style={{ background: r.inks.find((k) => k.id === (r.layerInks[p.id] ?? r.inks[0]!.id))?.color }} />
-              <span className="layer-name">
-                {i + 1}. {p.name}
-              </span>
-              <button className="icon" disabled={i === 0} aria-label={`Move ${p.name} earlier`} onClick={() => movePass(i, -1)}>
-                ↑
-              </button>
-              <button className="icon" disabled={i === props.passes.length - 1} aria-label={`Move ${p.name} later`} onClick={() => movePass(i, 1)}>
-                ↓
-              </button>
-            </div>
+      <section className="panel-sec">
+        <h3>Machine</h3>
+        <div className="target-grid" role="radiogroup" aria-label="Output target">
+          {TARGETS.map((t) => (
+            <button key={t.kind} role="radio" aria-checked={r.target.kind === t.kind} className={r.target.kind === t.kind ? "on" : ""} title={t.hint} onClick={() => setTarget(t.kind)}>
+              {t.label}
+            </button>
           ))}
-          {Array.isArray(r.passOrder) && <button onClick={() => set({ passOrder: "light-to-dark" })}>Light → dark</button>}
+        </div>
+        <p className="hint">{TARGETS.find((t) => t.kind === r.target.kind)?.hint}</p>
+        {plotter && (
+          <div className="param">
+            <label htmlFor="machine-profile" title="Bed size and speeds, used for the time estimate.">
+              Plotter
+            </label>
+            <div className="param-row">
+              <select id="machine-profile" value={r.machine} onChange={(e) => set({ machine: e.target.value })}>
+                {!(r.machine in builtinMachines) && <option value={r.machine}>{r.machine}</option>}
+                {Object.values(builtinMachines).map((m) => (
+                  <option key={m.id} value={m.id}>
+                    {m.name}
+                  </option>
+                ))}
+              </select>
+            </div>
+          </div>
+        )}
+        {"dpi" in r.target && (
+          <div className="param">
+            <label>Resolution</label>
+            <div className="param-row">
+              <input
+                className="num"
+                type="number"
+                min={30}
+                max={2400}
+                step={10}
+                aria-label="Resolution in dpi"
+                value={r.target.dpi}
+                onChange={(e) => Number(e.target.value) > 0 && set({ target: { ...r.target, dpi: Number(e.target.value) } as Target })}
+              />
+              <span className="unit">dpi</span>
+            </div>
+          </div>
+        )}
+        {plotter && (
+          <BudgetField
+            budgetMin={(r.target as PlotterTarget).budgetMin}
+            onChange={(budgetMin) => {
+              const { budgetMin: _old, ...rest } = r.target as PlotterTarget;
+              set({ target: budgetMin === undefined ? rest : { ...rest, budgetMin } });
+            }}
+          />
+        )}
+      </section>
+
+      {(plotter || r.target.kind === "print") && (
+        <details className="more panel-sec">
+          <summary>Print prep</summary>
+          {r.target.kind === "print" && (
+            <>
+              <div className="param">
+                <label title="1-bit: each pixel is ink or no ink, which is what riso, screen and film need. Gray keeps density for processes that take it.">Plates</label>
+                <div className="param-row">
+                  <select value={r.target.mode} onChange={(e) => set({ target: { ...r.target, mode: e.target.value as "bitmap" | "gray" } as Target })}>
+                    <option value="bitmap">1-bit (ink or no ink)</option>
+                    <option value="gray">Gray (density)</option>
+                  </select>
+                </div>
+              </div>
+              {r.target.mode === "bitmap" && (
+                <div className="param">
+                  <label title="A grid of dots whose size follows the tone. Without it, tone is cut at 50%. Coarser screens (fewer lines per inch) are easier to print.">
+                    <input
+                      type="checkbox"
+                      checked={r.target.halftone !== null}
+                      onChange={(e) => set({ target: { ...r.target, halftone: e.target.checked ? { lpi: 45, angles: {} } : null } as Target })}
+                    />{" "}
+                    Halftone screen
+                  </label>
+                  {r.target.halftone && (
+                    <div className="param-row">
+                      <input
+                        className="num"
+                        type="number"
+                        min={5}
+                        max={200}
+                        step={5}
+                        aria-label="Halftone lines per inch"
+                        value={r.target.halftone.lpi}
+                        onChange={(e) => Number(e.target.value) > 0 && set({ target: { ...r.target, halftone: { ...(r.target as PrintTarget).halftone!, lpi: Number(e.target.value) } } as Target })}
+                      />
+                      <span className="unit">lines per inch; angle per ink under Inks</span>
+                    </div>
+                  )}
+                </div>
+              )}
+              <label className="toggle" title="Ink areas clear and the rest black, for processes that expose through a negative.">
+                <input type="checkbox" checked={r.target.negative} onChange={(e) => set({ target: { ...r.target, negative: e.target.checked } as Target })} /> Film negative
+              </label>
+            </>
+          )}
+          <label className="toggle" title="Flip left-right: for screens and plates printed face down, or transfers.">
+            <input type="checkbox" checked={!!(r.target as PlotterTarget | PrintTarget).mirror} onChange={(e) => set({ target: { ...r.target, mirror: e.target.checked } as Target })} /> Mirror
+          </label>
+          <label className="toggle" title="Circle-and-cross marks at the middle of each edge, on every plate or pass, so the inks line up.">
+            <input
+              type="checkbox"
+              checked={!!(r.target as PlotterTarget | PrintTarget).registration}
+              onChange={(e) => set({ target: { ...r.target, registration: e.target.checked } as Target })}
+            />{" "}
+            Registration marks
+          </label>
+          {(r.target as PlotterTarget | PrintTarget).registration && r.layout.marginMm < MARK_INSET_MM * 2 && (
+            <p className="hint">The marks sit {MARK_INSET_MM} mm from the paper edge; with a margin under {MARK_INSET_MM * 2} mm they may touch the art.</p>
+          )}
         </details>
       )}
     </div>
   );
 }
-

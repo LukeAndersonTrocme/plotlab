@@ -6,7 +6,8 @@
   "scripts": {
     "dev": "vite",
     "build": "vite build",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "smoke": "BASE=/plotlab/ vite build && node smoke/layout.smoke.mjs"
   },
   "dependencies": {
     "@plotlab/engine": "workspace:*",
@@ -20,6 +21,7 @@
     "@types/react-dom": "^18.3.1",
     "@vitejs/plugin-react": "^4.3.4",
     "fake-indexeddb": "6.0.0",
+    "playwright": "1.62.1",
     "vite": "^5.4.11"
   }
 }

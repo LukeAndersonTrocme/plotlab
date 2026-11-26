@@ -19,7 +19,8 @@ import {
 import { applyPreset, presets } from "@plotlab/steps";
 import { LayerScope } from "./LayerScope.tsx";
 import { ParamControl } from "./ParamControl.tsx";
-import { TARGETS } from "./ProjectPanel.tsx";
+import { splitSettings } from "./settings.ts";
+import { TARGETS } from "./setup.ts";
 import type { InspectTarget, StepInfo } from "./protocol.ts";
 
 export const STAGE_NAMES: Record<StageKind, string> = { image: "Image", layers: "Layers", geometry: "Lines", plot: "Plot" };
@@ -180,21 +181,37 @@ export function StepList(props: {
             onChange={(patch) => patchStep(index, patch, false)}
           />
         )}
-        {enabled &&
-          Object.entries(def.params).map(([name, decl]) =>
+        {enabled && (() => {
+          const control = (name: string) =>
             isVisible(def.params, name, values) ? (
               <ParamControl
                 key={name}
                 name={name}
-                decl={decl as ParamDecl}
+                decl={def.params[name] as ParamDecl}
                 value={values[name]}
                 onDrag={(v) => setParam(index, name, v, true)}
                 onCommit={(v) => setParam(index, name, v, false)}
-                changed={changedHere(name, decl as ParamDecl)}
+                changed={changedHere(name, def.params[name] as ParamDecl)}
                 onReset={() => props.onChange(resetParam(recipe, index, name, registry, layer ?? undefined), false)}
               />
-            ) : null,
-          )}
+            ) : null;
+          const { main, more } = splitSettings(def.params);
+          const shownMore = more.filter((n) => isVisible(def.params, n, values));
+          return (
+            <>
+              {main.map(control)}
+              {shownMore.length > 0 && (
+                <details className="more">
+                  <summary>
+                    More settings ({shownMore.length})
+                    {shownMore.some((n) => changedHere(n, def.params[n] as ParamDecl)) && <span className="changed-dot more-changed" title="Some of these are changed" />}
+                  </summary>
+                  {shownMore.map(control)}
+                </details>
+              )}
+            </>
+          );
+        })()}
         {enabled && def.cost === "on-demand" && (stale || !ran) && (
           <div className="run-row">
             <button className="primary" onClick={props.onRun}>
