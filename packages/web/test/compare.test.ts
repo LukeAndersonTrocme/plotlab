@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { nextBand, addBand, compareTargets, dragSplit, everyStep, evenSplits, makeCompare, MAX_STRIPS, MIN_GAP, pruneCompare, readCompare, removeBand, setBand, setLayout, thisVsBefore, type Compare } from "../src/compare.ts";
+import { applySplits, bandInUse, stripView, nextBand, addBand, compareTargets, dragSplit, everyStep, evenSplits, makeCompare, MAX_STRIPS, MIN_GAP, pruneCompare, readCompare, removeBand, setBand, setLayout, thisVsBefore, type Compare } from "../src/compare.ts";
 
 /** Only the step ids (and whether a step is on) matter to the comparison. */
 const chain = (...ids: string[]) => ({ steps: ids.map((id) => ({ id, enabled: !id.endsWith("-off") })) });
@@ -84,6 +84,15 @@ describe("compare: adding and removing strips", () => {
     expect(setBand(c, 1, "order").bands).toEqual(["source", "order"]);
     expect(setBand(c, 1, "tone")).toBe(c);
     expect(setBand(c, 5, "order")).toBe(c);
+  });
+
+  it("a chip can't pick a step that another strip already shows (the same rule as shift-click)", () => {
+    const c = makeCompare(["source", "tone", "order"]);
+    expect(setBand(c, 1, "source")).toBe(c);
+    expect(setBand(c, 1, "order")).toBe(c);
+    expect(bandInUse(c, 1, "source")).toBe(true);
+    expect(bandInUse(c, 1, "tone")).toBe(false); // its own step stays pickable
+    expect(bandInUse(c, 1, "threshold")).toBe(false);
   });
 
   it("switching between side by side and top to bottom keeps the strips and dividers", () => {
@@ -185,5 +194,52 @@ describe("compare: reading a saved comparison", () => {
   it("more than six strips: the first six", () => {
     const c = readCompare({ layout: "cols", bands: ["source", "tone", "threshold", "centerline", "order", "source", "tone"] }, r)!;
     expect(c.bands).toHaveLength(MAX_STRIPS);
+  });
+});
+
+describe("compare: which worker reply a strip draws", () => {
+  const view = (step: string, index: number) => ({ step, index });
+
+  it("a reply for the strip's step at its place in the chain is drawn", () => {
+    expect(stripView([view("source", -1), view("order", 3)], ["source", "order"], ["source", 3], 1)).toEqual(view("order", 3));
+  });
+
+  it("an older reply whose index now belongs to another step isn't drawn under this strip's label", () => {
+    // Strip shows "order" (was at 3). Remove an earlier step: "order" is now at 2, and the
+    // older reply drew "centerline" at 2. Index matches, the step doesn't.
+    expect(stripView([view("source", -1), view("centerline", 2)], ["source", "order"], ["source", 2], 1)).toBeNull();
+  });
+
+  it("an older reply for the strip's step at its old place isn't drawn either (a newer run is coming)", () => {
+    expect(stripView([view("order", 3)], ["order"], [2], 0)).toBeNull();
+  });
+
+  it("no reply, or a strip the reply doesn't cover, draws nothing", () => {
+    expect(stripView(null, ["source"], ["source"], 0)).toBeNull();
+    expect(stripView([null], ["source"], ["source"], 0)).toBeNull();
+    expect(stripView([view("source", -1)], ["source", "tone"], ["source", 0], 1)).toBeNull();
+  });
+});
+
+describe("compare: releasing a divider drag", () => {
+  it("puts the dragged dividers on the comparison as it is now", () => {
+    const now = setBand(makeCompare(["source", "tone", "order"]), 1, "threshold");
+    const dragged = dragSplit(makeCompare(["source", "tone", "order"]), 0, 0.2);
+    const out = applySplits(now, dragged.splits);
+    expect(out.bands).toEqual(["source", "threshold", "order"]);
+    expect(out.splits[0]).toBe(0.2);
+  });
+
+  it("a strip removed during the drag stays removed: the drag's dividers no longer fit and are dropped", () => {
+    const dragged = dragSplit(makeCompare(["source", "tone", "order"]), 0, 0.2);
+    const pruned = pruneCompare(makeCompare(["source", "tone", "order"]), chain("order"))!;
+    expect(applySplits(pruned, dragged.splits)).toBe(pruned);
+  });
+
+  it("dividers that would cross aren't applied", () => {
+    const c = makeCompare(["source", "tone"]);
+    expect(applySplits(c, [0.9, 0.1].slice(0, 1))).toEqual({ ...c, splits: [0.9] });
+    const three = makeCompare(["source", "tone", "order"]);
+    expect(applySplits(three, [0.7, 0.2])).toBe(three);
   });
 });
