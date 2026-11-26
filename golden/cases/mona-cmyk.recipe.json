@@ -1,0 +1,18 @@
+{
+  "schemaVersion": 2,
+  "input": "image",
+  "target": { "kind": "raster", "dpi": 50 },
+  "paper": { "widthMm": 148, "heightMm": 210 },
+  "layout": { "fit": "fit", "marginMm": 12, "position": [0.5, 0.5] },
+  "inks": [
+    { "id": "cyan", "name": "Cyan", "color": "#00a0d6", "mix": "multiply", "widthMm": 0.3 },
+    { "id": "magenta", "name": "Magenta", "color": "#d6127a", "mix": "multiply", "widthMm": 0.3 },
+    { "id": "yellow", "name": "Yellow", "color": "#f0c400", "mix": "multiply", "widthMm": 0.3 },
+    { "id": "black", "name": "Black", "color": "#1d1d1b", "mix": "multiply", "widthMm": 0.3 }
+  ],
+  "layerInks": { "C": "cyan", "M": "magenta", "Y": "yellow", "K": "black" },
+  "machine": "generic",
+  "steps": [{ "step": "cmyk", "version": 1, "params": { "blackGeneration": 0.5 } }],
+  "export": "png",
+  "fixture": "mona-lisa-600.jpg"
+}

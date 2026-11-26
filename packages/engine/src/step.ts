@@ -64,6 +64,12 @@ export interface StepDefinition<
    * (ADR 0009).
    */
   runLayer?(layer: Layer, params: ParamValues<D>, ctx: StepContext, grid: Grid): LayerOutOf<O> | Promise<LayerOutOf<O>>;
+  /**
+   * Default inks for the layers this step makes, by layer id (e.g. Separate CMYK's cyan,
+   * magenta, yellow and black). Adding the step to a recipe adds any of these inks the
+   * recipe lacks (matched by ink id) and points layers that have no ink yet at them.
+   */
+  layerInks?: Record<string, Ink>;
   /** Layer value kinds `runLayer` can handle (default: both). */
   accepts?: LayerValueKind[];
   /**
