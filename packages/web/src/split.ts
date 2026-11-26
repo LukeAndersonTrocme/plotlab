@@ -78,11 +78,30 @@ async function preSplitCheckpoint(project: ProjectStore, parse: Parse, registry:
 }
 
 /**
+ * What a split replaced, recorded the moment it's committed (sidebar, "+" or preset): where the
+ * recipe from before lands in Back's history, that recipe, and the checkpoint saved for it.
+ * Restoring or loading clears it (null), so Undo the split then goes by checkpoints.
+ */
+export interface SplitMark {
+  /** Its index in `history.past` once the split is committed. */
+  at: number;
+  before: Recipe;
+  checkpoint?: string;
+}
+
+/** The mark for a split about to be committed onto `history` (commit pushes `history.base`). */
+export function markSplit(history: History<Recipe>, checkpoint?: string): SplitMark {
+  return { at: history.past.length, before: history.base, ...(checkpoint ? { checkpoint } : {}) };
+}
+
+const sameJson = (a: unknown, b: unknown) => a === b || JSON.stringify(a) === JSON.stringify(b);
+
+/**
  * "Undo the split": back to the recipe from before the split, as one Back step. That is the
- * newest recipe in Back's history from before the split when it's still there (exactly what
- * the split replaced); else (after a reload) the checkpoint saved at the split. The split
- * recipe, with any edits since, is saved as a checkpoint first. `remembered`: the checkpoint
- * saved at the latest split in this session.
+ * entry of Back's history the mark points at, when it is still there unchanged and the chain
+ * has stayed split since (exactly what this split replaced); else the checkpoint saved at the split (the mark's, else the newest
+ * one saved just before a split). The split recipe, with any edits since, is saved as a
+ * checkpoint first.
  */
 export async function undoSplit(
   library: Library | null,
@@ -90,17 +109,20 @@ export async function undoSplit(
   history: History<Recipe>,
   parse: Parse,
   registry: StepRegistry,
-  remembered?: string,
+  mark: SplitMark | null,
   now?: number,
 ): Promise<{ recipe: Recipe; history: History<Recipe>; saved: Saved | null; message: string } | { reason: string }> {
   if (!isSplit(history.present, registry)) return { reason: "The picture isn't split, so there's no split to undo." };
-  const before = [...history.past].reverse().find((r) => !isSplit(r, registry));
-  if (before) {
+  const entry = mark ? history.past[mark.at] : undefined;
+  // Trusted only while it still describes this split: the entry is unchanged, and every recipe
+  // since it has stayed split (a stale mark from an earlier split, undone since, fails this).
+  const staysSplit = !!mark && history.past.slice(mark.at + 1).every((r) => isSplit(r, registry));
+  if (staysSplit && entry && sameJson(entry, mark!.before) && !isSplit(entry, registry)) {
     const saved = project ? await autoCheckpoint(project, { recipe: history.present, name: BEFORE_UNDO, now }) : null;
     const where = !saved ? "Back returns to the split." : saved.created ? "The split version is saved as a checkpoint." : "The split version was already a checkpoint.";
-    return { recipe: before, history: commit(history, before), saved, message: `Undid the split: back to the settings from before it. ${where}` };
+    return { recipe: entry, history: commit(history, entry), saved, message: `Undid the split: back to the settings from before it. ${where}` };
   }
-  const cp = library && project ? await preSplitCheckpoint(project, parse, registry, remembered) : null;
+  const cp = library && project ? await preSplitCheckpoint(project, parse, registry, staysSplit ? mark?.checkpoint : undefined) : null;
   if (library && project && cp) {
     const r = await restoreSafely(library, project, cp, history, parse, { name: BEFORE_UNDO, now });
     const where = r.saved.created ? "The split version is saved as a checkpoint." : "The split version was already a checkpoint.";

@@ -13,7 +13,7 @@ import { canvasTarget, clickBox, lookingBand, compareTargetsOf, fitView, fromVie
 import { Strip } from "./Strip.tsx";
 import { addAt, moveToGap } from "./gaps.ts";
 import { STACK_KEY, STEP_DRAG, stripBoxes, stripLanes, thumbRenderSide, toggleBypass, type StripBox } from "./strip.ts";
-import { canSplit, isSplit, splitIntoCmyk, undoSplit } from "./split.ts";
+import { isSplit, markSplit, splitIntoCmyk, undoSplit, type SplitMark } from "./split.ts";
 import { bandView, shiftRefusal, shownBands } from "./compare.ts";
 import { EMPTY_RUN, Runner, type RunState } from "./runner.ts";
 import { decodeFile, loadSample, sampleSource } from "./sample.ts";
@@ -250,13 +250,20 @@ function Editor(props: { hidden: boolean }) {
   // image opens that project too (the image switch itself isn't a Back step, as when
   // opening an image).
   /**
-   * The checkpoint saved at the latest split this session (Undo the split's fallback when Back's
-   * history no longer has the recipe from before it). Every split sets it; restores and loads clear it.
+   * What the latest split this session replaced (`SplitMark`: its place in Back's history and its
+   * checkpoint), for Undo the split. Every split sets it (sidebar, "+", preset); restores and
+   * loads clear it, so Undo the split then goes by checkpoints.
    */
-  const preSplit = useRef<string | undefined>();
+  const preSplit = useRef<SplitMark | null>(null);
+  /** Record what a split about to be committed replaces (`markSplit` on the history it lands on). */
+  const markNextSplit = (checkpoint?: string) =>
+    setHistory((h) => {
+      preSplit.current = markSplit(h, checkpoint);
+      return h;
+    });
   const restore = async (cp: Checkpoint) => {
     if (!library || !project || !ready) return;
-    preSplit.current = undefined;
+    preSplit.current = null;
     const before = history.present;
     const label = checkpointLabel(cp);
     try {
@@ -302,7 +309,8 @@ function Editor(props: { hidden: boolean }) {
     closeGallery();
     try {
       const r = await pickPreset(project, before, id, enter);
-      preSplit.current = r.saved && isSplit(r.recipe, registry) ? r.saved.checkpoint.id : undefined;
+      if (isSplit(r.recipe, registry)) markNextSplit(r.saved?.checkpoint.id);
+      else preSplit.current = null;
       if (r.saved) {
         if (r.saved.created && project) addPicture(project, r.saved.checkpoint, before);
         setSaved((n) => n + 1);
@@ -321,7 +329,7 @@ function Editor(props: { hidden: boolean }) {
     try {
       const r = await splitIntoCmyk(project, before, registry, gap);
       if ("reason" in r) return setNotice(r.reason);
-      preSplit.current = r.saved?.checkpoint.id;
+      markNextSplit(r.saved?.checkpoint.id);
       if (r.saved) {
         if (r.saved.created && project) addPicture(project, r.saved.checkpoint, before);
         setSaved((n) => n + 1);
@@ -464,7 +472,7 @@ function Editor(props: { hidden: boolean }) {
 
   const loadFile = async (file: File) => {
     if (!ready) return;
-    preSplit.current = undefined;
+    preSplit.current = null;
     if (file.name.endsWith(".json")) {
       try {
         const { recipe: loaded, warnings } = loadRecipe(JSON.parse(await file.text()), registry);
@@ -825,7 +833,7 @@ function Editor(props: { hidden: boolean }) {
                 </div>
               )}
               {view.selection.kind === "source" && <p className="hint side-note">The source, as placed on the paper. Pick a step in the strip below to change its settings.</p>}
-              {view.selection.kind === "source" && canSplit(recipe, registry) && (
+              {view.selection.kind === "source" && recipe.input === "image" && !isSplit(recipe, registry) && (
                 <div className="card split-card">
                   <button onClick={() => void split()} title="Split the picture into cyan, magenta, yellow and black inks. The steps after it apply to every ink (Linked).">
                     Split into CMYK

@@ -5,7 +5,7 @@ import { createHistory, commit, type History } from "../src/history.ts";
 import { addAt } from "../src/gaps.ts";
 import { pickPreset } from "../src/gallery.ts";
 import { listForProject, createCheckpoint } from "../src/checkpoints.ts";
-import { canSplit, PRE_SPLIT, splitIntoCmyk, undoSplit } from "../src/split.ts";
+import { canSplit, markSplit, PRE_SPLIT, splitIntoCmyk, undoSplit } from "../src/split.ts";
 import { memoryLibrary, type Library, type ProjectStore } from "../src/storage/index.ts";
 
 const reg = createRegistry();
@@ -70,15 +70,19 @@ describe("splitting into CMYK", () => {
 
 describe("undo the split", () => {
   const before = recipe(["tone", "levels", "bands", "fill", "order"]);
+  const other = recipe(["threshold", "centerline", "order"]);
+  /** A split as the app commits it: the mark first (what the split replaces), then the commit. */
+  const commitSplit = (h: History<Recipe>, split: Recipe, checkpoint?: string) => ({ mark: markSplit(h, checkpoint), history: commit(h, split) });
 
-  it("restores the pre-split checkpoint as one Back step, saving the split work first", async () => {
+  it("restores the recipe the split replaced as one Back step, saving the split work first", async () => {
     const { library, project } = await open();
     const res = await splitIntoCmyk(project, before, reg);
     if ("reason" in res) throw new Error(res.reason);
+    const s = commitSplit(createHistory(before), res.recipe, res.saved?.checkpoint.id);
     // A linked edit after the split.
-    const edited = { ...res.recipe, steps: res.recipe.steps.map((s) => (s.step === "fill" ? { ...s, params: { ...s.params, minSpacing: 1.5 } } : s)) };
-    let h: History<Recipe> = commit(commit(createHistory(before), res.recipe), edited);
-    const undone = await undoSplit(library, project, h, parse, reg, res.saved?.checkpoint.id);
+    const edited = { ...res.recipe, steps: res.recipe.steps.map((x) => (x.step === "fill" ? { ...x, params: { ...x.params, minSpacing: 1.5 } } : x)) };
+    let h: History<Recipe> = commit(s.history, edited);
+    const undone = await undoSplit(library, project, h, parse, reg, s.mark);
     if ("reason" in undone) throw new Error(undone.reason);
     expect(undone.recipe).toEqual(before);
     h = undone.history;
@@ -89,47 +93,88 @@ describe("undo the split", () => {
     expect(names).toContain("Before undoing the split");
   });
 
-  it("finds the pre-split checkpoint after a reload (by content, not the remembered id)", async () => {
+  it("after a reload (no mark), finds the pre-split checkpoint by content", async () => {
     const { library, project } = await open();
-    await createCheckpoint(project, { recipe: recipe(["threshold", "centerline", "order"]), name: "older", now: 1 });
+    await createCheckpoint(project, { recipe: other, name: "older", now: 1 });
     const res = await splitIntoCmyk(project, before, reg, undefined, 5);
     if ("reason" in res) throw new Error(res.reason);
-    const undone = await undoSplit(library, project, createHistory(res.recipe), parse, reg);
+    const undone = await undoSplit(library, project, createHistory(res.recipe), parse, reg, null);
     if ("reason" in undone) throw new Error(undone.reason);
     expect(undone.recipe).toEqual(before);
+  });
+
+  it("a split recipe restored or loaded (mark cleared): Undo uses the pre-split checkpoint, not the previous recipe in Back's history", async () => {
+    const { library, project } = await open();
+    const res = await splitIntoCmyk(project, before, reg, undefined, 1);
+    if ("reason" in res) throw new Error(res.reason);
+    // Later, with another recipe open, the split one comes back by restore or load.
+    const h = commit(createHistory(other), res.recipe);
+    const undone = await undoSplit(library, project, h, parse, reg, null, 2);
+    if ("reason" in undone) throw new Error(undone.reason);
+    expect(undone.recipe).toEqual(before);
+  });
+
+  it("a mark that no longer matches Back's history (the entry moved or changed) isn't trusted", async () => {
+    const { library, project } = await open();
+    const res = await splitIntoCmyk(project, before, reg, undefined, 1);
+    if ("reason" in res) throw new Error(res.reason);
+    const stale = { ...markSplit(createHistory(other)), at: 0 };
+    const undone = await undoSplit(library, project, commit(createHistory(other), res.recipe), parse, reg, { ...stale, before: before }, 2);
+    if ("reason" in undone) throw new Error(undone.reason);
+    expect(undone.recipe).toEqual(before);
+  });
+
+  it("split, undo the split, split again, then undo: back to the recipe from just before the second split", async () => {
+    const { library, project } = await open();
+    const first = await splitIntoCmyk(project, before, reg, undefined, 1);
+    if ("reason" in first) throw new Error(first.reason);
+    let s = commitSplit(createHistory(before), first.recipe, first.saved?.checkpoint.id);
+    const u1 = await undoSplit(library, project, s.history, parse, reg, s.mark, 2);
+    if ("reason" in u1) throw new Error(u1.reason);
+    let h = commit(u1.history, other);
+    const second = await splitIntoCmyk(project, other, reg, undefined, 3);
+    if ("reason" in second) throw new Error(second.reason);
+    s = commitSplit(h, second.recipe, second.saved?.checkpoint.id);
+    h = commit(s.history, { ...second.recipe, screenAngles: false });
+    const u2 = await undoSplit(library, project, h, parse, reg, s.mark, 4);
+    if ("reason" in u2) throw new Error(u2.reason);
+    expect(u2.recipe).toEqual(other);
   });
 
   it("after splitting, undoing, editing and picking the CMYK print preset, undo goes back to before the preset, not the first split", async () => {
     const { library, project } = await open();
     const first = await splitIntoCmyk(project, before, reg, undefined, 1);
     if ("reason" in first) throw new Error(first.reason);
-    let h: History<Recipe> = commit(createHistory(before), first.recipe);
-    const u1 = await undoSplit(library, project, h, parse, reg, first.saved?.checkpoint.id, 2);
+    const s1 = commitSplit(createHistory(before), first.recipe, first.saved?.checkpoint.id);
+    const u1 = await undoSplit(library, project, s1.history, parse, reg, s1.mark, 2);
     if ("reason" in u1) throw new Error(u1.reason);
-    const edited = recipe(["threshold", "centerline", "order"]);
-    h = commit(u1.history, edited);
+    const edited = other;
+    let h = commit(u1.history, edited);
     const preset = await pickPreset(project, edited, "cmyk-print", (r) => ({ recipe: r, note: null }), 3);
-    h = commit(h, preset.recipe);
-    // The id remembered from the first split is stale now.
-    const u2 = await undoSplit(library, project, h, parse, reg, first.saved?.checkpoint.id, 4);
-    if ("reason" in u2) throw new Error(u2.reason);
-    expect(u2.recipe).toEqual(edited);
+    const s2 = commitSplit(h, preset.recipe, preset.saved?.checkpoint.id);
+    // The first split's mark is stale now; with it, the checkpoint fallback still finds the preset's.
+    for (const mark of [s2.mark, s1.mark]) {
+      const u2 = await undoSplit(library, project, s2.history, parse, reg, mark, 4);
+      if ("reason" in u2) throw new Error(u2.reason);
+      expect(u2.recipe).toEqual(edited);
+    }
   });
 
   it("after a reload, prefers the checkpoint saved just before a split over a newer unrelated one", async () => {
     const { library, project } = await open();
-    const edited = recipe(["threshold", "centerline", "order"]);
+    const edited = other;
     const preset = await pickPreset(project, edited, "cmyk-print", (r) => ({ recipe: r, note: null }), 5);
     await createCheckpoint(project, { recipe: recipe(["tone", "stipple", "order"]), name: "mine", now: 9 });
-    const undone = await undoSplit(library, project, createHistory(preset.recipe), parse, reg);
+    const undone = await undoSplit(library, project, createHistory(preset.recipe), parse, reg, null);
     if ("reason" in undone) throw new Error(undone.reason);
     expect(undone.recipe).toEqual(edited);
   });
 
-  it("without storage, Back's history gives the pre-split recipe", async () => {
+  it("without storage, the mark into Back's history gives the pre-split recipe", async () => {
     const res = await splitIntoCmyk(null, before, reg);
     if ("reason" in res) throw new Error(res.reason);
-    const undone = await undoSplit(null, null, commit(createHistory(before), res.recipe), parse, reg);
+    const s = commitSplit(createHistory(before), res.recipe);
+    const undone = await undoSplit(null, null, s.history, parse, reg, s.mark);
     if ("reason" in undone) throw new Error(undone.reason);
     expect(undone.recipe).toEqual(before);
     expect(undone.history.present).toEqual(before);
@@ -138,7 +183,8 @@ describe("undo the split", () => {
   it("says so when there's nothing to go back to", async () => {
     const split = addAt(before, reg, 0, "cmyk");
     if ("reason" in split) throw new Error(split.reason);
-    expect(await undoSplit(null, null, createHistory(split.recipe), parse, reg)).toEqual({ reason: expect.stringMatching(/Couldn't find the recipe from before the split/) });
-    expect(await undoSplit(null, null, createHistory(before), parse, reg)).toEqual({ reason: expect.stringMatching(/isn't split/) });
+    // A loaded split recipe, no storage: Back's previous recipe isn't what the split replaced.
+    expect(await undoSplit(null, null, commit(createHistory(other), split.recipe), parse, reg, null)).toEqual({ reason: expect.stringMatching(/Couldn't find the recipe from before the split/) });
+    expect(await undoSplit(null, null, createHistory(before), parse, reg, null)).toEqual({ reason: expect.stringMatching(/isn't split/) });
   });
 });
