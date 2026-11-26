@@ -737,7 +737,7 @@ try {
     await page.click("aside.side .split-card button:has-text('Split into CMYK')");
     await page.waitForSelector(".strip .box.lane.split", { timeout: 30_000 });
     const after = await keys();
-    check(after === "source,cmyk,centerline,stack,order", `Split into CMYK: the split and the lane steps, then a Stack box (${after})`);
+    check(after === "source,cmyk,centerline,@stack,order", `Split into CMYK: the split and the lane steps, then a Stack box (${after})`);
     const bar = await page.textContent(".strip-head .lanes-bar");
     check(/C M Y K/.test(bar) && /Linked/.test(bar) && (await page.isChecked(".lanes-bar input[type=checkbox]")), `the strip says the four inks are linked, screen angles on ("${bar}")`);
     // The split's thumbnail is a 2×2: cyan top left, magenta top right, yellow bottom left, black bottom right.
@@ -775,9 +775,9 @@ try {
     const lane = await quadsOf("centerline", 2);
     const laneOk = !!lane[0] && lane[0][2] > lane[0][0] + 40 && !!lane[1] && lane[1][0] > lane[1][1] + 40 && (await page.$('.strip .box[data-key="centerline"] .pic.quad')) !== null;
     check(laneOk, `a lane step's thumbnail is 2×2 too (${JSON.stringify(lane)})`);
-    await page.waitForFunction(() => document.querySelector('.strip .box[data-key="stack"] .pic img')?.naturalWidth > 0, null, { timeout: 30_000 });
-    await page.click('.strip .box[data-key="stack"] .pic');
-    await page.waitForSelector('.strip .box[data-key="stack"].sel', { timeout: 10_000 });
+    await page.waitForFunction(() => document.querySelector('.strip .box[data-key="@stack"] .pic img')?.naturalWidth > 0, null, { timeout: 30_000 });
+    await page.click('.strip .box[data-key="@stack"] .pic');
+    await page.waitForSelector('.strip .box[data-key="@stack"].sel', { timeout: 10_000 });
     check((await page.textContent(".view-bar")).includes("Result"), "the Stack box has a thumbnail and shows all the inks together (the result)");
 
     await page.click(".lanes-bar button:has-text('Undo the split')");
@@ -787,7 +787,7 @@ try {
     await page.click('.strip .gap[data-gap="0"] .plus');
     await page.click('.add-menu [role=menuitem][data-step="cmyk"]');
     await page.waitForSelector(".strip .box.stack", { timeout: 30_000 });
-    check((await keys()) === "source,cmyk,centerline,stack,order", `Separate CMYK from the "+" after the source splits the same way (${await keys()})`);
+    check((await keys()) === "source,cmyk,centerline,@stack,order", `Separate CMYK from the "+" after the source splits the same way (${await keys()})`);
     await page.close();
   }
 

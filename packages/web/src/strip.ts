@@ -61,8 +61,11 @@ export interface StripBox {
   lane: "split" | "lane" | null;
 }
 
-/** The Stack box's key (thumbnail and selection): all the inks together, where the lanes merge. */
-export const STACK_KEY = "stack";
+/**
+ * The Stack box's key (thumbnail and selection): all the inks together, where the lanes merge.
+ * "@" can't start a step id (ids are made from step names), so it never clashes with one.
+ */
+export const STACK_KEY = "@stack";
 
 /** The lane row of a split chain: which inks, whether they're linked, and where the Stack box goes. */
 export interface StripLanes {
