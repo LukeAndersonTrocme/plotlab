@@ -1,6 +1,6 @@
 import { useEffect, useId, useRef, useState, type KeyboardEvent, type PointerEvent, type ReactNode } from "react";
 import type { Paper } from "@plotlab/engine";
-import { addBox, applyBox, applyLens, bandView, boxRect, fitLens, moveBox, moveLens, removeBox, resizeBox, resizeLens, type Band, type Box, type Compare, type Rect } from "./compare.ts";
+import { addBox, applyBox, applyLens, bandView, boxRect, fitLens, MAX_BOXES, moveBox, moveLens, removeBox, resizeBox, resizeLens, type Band, type Box, type Compare, type Rect } from "./compare.ts";
 import type { InspectTarget, InspectView } from "./protocol.ts";
 import { StageLayers } from "./StageView.tsx";
 
@@ -92,7 +92,8 @@ export function LensBoxesCanvas(props: OverlayProps) {
       const b = now.boxes[k];
       if (b && p.x >= b.x + b.w - cx && p.y >= b.y + b.h - cy) d = { t: "resize", k, before: b, dx: b.x + b.w - p.x, dy: b.y + b.h - p.y, c: now };
       else if (b) d = { t: "move", k, before: b, dx: p.x - b.x, dy: p.y - b.y, c: now };
-      else if (p.x >= 0 && p.x <= 1 && p.y >= 0 && p.y <= 1) d = { t: "new", x0: p.x, y0: p.y, rect: boxRect(p.x, p.y, p.x, p.y) };
+      // No new box past six (the bar says so).
+      else if (now.boxes.length < MAX_BOXES && p.x >= 0 && p.x <= 1 && p.y >= 0 && p.y <= 1) d = { t: "new", x0: p.x, y0: p.y, rect: boxRect(p.x, p.y, p.x, p.y) };
     }
     if (!d) return;
     e.preventDefault();
