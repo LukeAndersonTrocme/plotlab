@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { addBand, compareTargets, dragSplit, everyStep, evenSplits, makeCompare, MAX_STRIPS, MIN_GAP, pruneCompare, readCompare, removeBand, setBand, setLayout, thisVsBefore, type Compare } from "../src/compare.ts";
+import { nextBand, addBand, compareTargets, dragSplit, everyStep, evenSplits, makeCompare, MAX_STRIPS, MIN_GAP, pruneCompare, readCompare, removeBand, setBand, setLayout, thisVsBefore, type Compare } from "../src/compare.ts";
 
 /** Only the step ids (and whether a step is on) matter to the comparison. */
 const chain = (...ids: string[]) => ({ steps: ids.map((id) => ({ id, enabled: !id.endsWith("-off") })) });
@@ -51,6 +51,13 @@ describe("compare: adding and removing strips", () => {
     const c = addBand(makeCompare(["source", "tone"]), "order");
     expect(c.bands).toEqual(["source", "tone", "order"]);
     expect(c.splits).toEqual(evenSplits(3));
+  });
+
+  it("+ Strip offers the step after the last strip's step (the first step after the source; the last step stays the last)", () => {
+    expect(nextBand(makeCompare(["source", "tone"]), r)).toBe("threshold");
+    expect(nextBand(makeCompare(["tone", "source"]), r)).toBe("tone");
+    expect(nextBand(makeCompare(["source", "order"]), r)).toBe("order");
+    expect(nextBand(makeCompare(["source"]), chain())).toBe("source");
   });
 
   it("six strips is the most: a seventh changes nothing", () => {

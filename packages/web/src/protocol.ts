@@ -41,6 +41,8 @@ export type ToWorker =
       recipe: Recipe;
       proxy: boolean;
       inspect: InspectTarget;
+      /** Compare stages: also send each of these stages from this same run (one per strip); null = not comparing. */
+      compare: InspectTarget[] | null;
       runOnDemand: boolean;
       proof: boolean;
       /** Also send strip thumbnails, this many pixels on the paper's long side; null = none. */
@@ -74,6 +76,8 @@ export type FromWorker =
       /** The image or layers wherever the chain stopped short of lines, to composite under the plot. */
       rasterLayers: RasterView[];
       inspected: InspectView | null;
+      /** Compare stages: one view per asked-for strip (null for a step that isn't there); null when not asked. */
+      compared: Array<InspectView | null> | null;
       underlay: RasterView | null;
       /** The page as it will export (when asked for). */
       proof: RasterView | null;

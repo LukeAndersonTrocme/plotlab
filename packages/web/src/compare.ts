@@ -61,6 +61,14 @@ export function addBand(c: Compare, band: Band): Compare {
   return { ...c, bands, splits: evenSplits(bands.length) };
 }
 
+/** What “+ Strip” shows: the step after the last strip's step (the first step after the source). */
+export function nextBand(c: Compare, chain: Chain): Band {
+  const ids = chain.steps.map((s) => s.id);
+  if (!ids.length) return "source";
+  const last = ids.indexOf(c.bands.at(-1) ?? "source");
+  return ids[Math.min(ids.length - 1, last + 1)]!;
+}
+
 /**
  * Remove strip `k`: its room goes to the strip before it (the first strip's to the one after),
  * and the other dividers stay where they were. The last strip stays.

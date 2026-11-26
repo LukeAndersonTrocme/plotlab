@@ -192,15 +192,18 @@ async function handle(msg: Exclude<ToWorker, { type: "gallery" | "thumbnail" }>)
       runOnDemand: msg.runOnDemand && !msg.proxy,
     });
     const estimate = plot && msg.recipe.target.kind === "plotter" ? estimatePlot(plot, getMachine(msg.recipe.machine)) : null;
-    const target: InspectTarget = msg.inspect;
-    let inspected: InspectView | null = null;
-    if (target === "source") inspected = await view(placed, -1, msg.recipe);
-    else if (typeof target === "number") {
+    const ran = results.map((r) => r.index);
+    const inspectAt = async (target: InspectTarget): Promise<InspectView | null> => {
+      if (target === "source") return view(placed, -1, msg.recipe);
+      if (typeof target !== "number" || target < 0 || target >= msg.recipe.steps.length) return null;
       // A switched-off step shows what passes through it; an on-demand step that hasn't run, traced order.
-      const at = shownAt(target, results.map((r) => r.index));
-      const r = results.find((x) => x.index === at);
-      inspected = await view(r ? r.output : placed, target, msg.recipe);
-    }
+      const r = results.find((x) => x.index === shownAt(target, ran));
+      return view(r ? r.output : placed, target, msg.recipe);
+    };
+    const inspected = await inspectAt(msg.inspect);
+    // Compare stages: every strip from this one run (stage outputs are already in hand, and
+    // their PNGs are cached by pixel buffer), so the strips keep pace with the canvas.
+    const compared = msg.compare ? await Promise.all(msg.compare.map(inspectAt)) : null;
     post({
       type: "result",
       id: msg.id,
@@ -213,6 +216,7 @@ async function handle(msg: Exclude<ToWorker, { type: "gallery" | "thumbnail" }>)
       steps: results.map((r) => ({ index: r.index, id: msg.recipe.steps[r.index]!.id, step: r.step, ms: r.ms, cached: r.cached, layers: r.layers })),
       rasterLayers: await resultRasters(output, msg.recipe),
       inspected,
+      compared,
       underlay: placed.kind === "image" ? await imageView(placed, "source", "Source") : null,
       proof: msg.proof ? await proofView(output, plot, msg.recipe, msg.proxy) : null,
     });
