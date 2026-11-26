@@ -1,7 +1,6 @@
 import { useState } from "react";
 import {
   checkChain,
-  insertStep,
   isChanged,
   isVisible,
   moveStep,
@@ -24,7 +23,8 @@ import { STAGE_NAMES } from "./strip.ts";
 
 /**
  * The chain as one ordered list (ADR 0009): stage dividers where the data type changes,
- * drag (or ↑/↓) to reorder within the type rules, add from the catalog, remove, disable.
+ * drag (or ↑/↓) to reorder within the type rules, remove, disable. Steps are added with the
+ * strip's "+" (Strip.tsx), which offers only the steps that fit at that point.
  * With `only`, just that step's card: the step picked in the strip.
  */
 export function StepList(props: {
@@ -231,30 +231,7 @@ export function StepList(props: {
   return (
     <div className="steps">
       {items}
-      <AddStep recipe={recipe} registry={registry} onAdd={(r) => props.onChange(r, false)} onNotice={props.onNotice} />
+      <p className="hint add-hint">To add a step, use a + between the boxes in the recipe strip below.</p>
     </div>
-  );
-}
-
-function AddStep(props: { recipe: Recipe; registry: StepRegistry; onAdd: (r: Recipe) => void; onNotice: (m: string) => void }) {
-  const options = props.registry.list().map((def) => ({ def, res: insertStep(props.recipe, def.id, props.registry) }));
-  return (
-    <select
-      className="add-step"
-      value=""
-      onChange={(e) => {
-        const o = options.find((x) => x.def.id === e.target.value);
-        if (!o) return;
-        if ("reason" in o.res) props.onNotice(o.res.reason);
-        else props.onAdd(o.res.recipe);
-      }}
-    >
-      <option value="">+ Add step…</option>
-      {options.map(({ def, res }) => (
-        <option key={def.id} value={def.id} title={"reason" in res ? res.reason : def.summary}>
-          {def.title} ({STAGE_NAMES[def.input as StageKind]} → {STAGE_NAMES[def.output as StageKind]}){def.experimental ? " · experimental" : ""}{"reason" in res ? " · doesn't fit yet" : ""}
-        </option>
-      ))}
-    </select>
   );
 }
