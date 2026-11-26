@@ -34,7 +34,7 @@ describe("pictures (checkpoint and gallery)", () => {
 describe("which worker messages the screen waits on", () => {
   const r = defaultRecipe();
   it("runs, exports and a new source are foreground: they go first and cut strip pictures short", () => {
-    const run: ToWorker = { type: "run", id: 1, recipe: r, proxy: false, inspect: null, runOnDemand: false, proof: false, thumbs: null };
+    const run: ToWorker = { type: "run", id: 1, recipe: r, proxy: false, inspect: null, runOnDemand: false, proof: false, thumbs: null, passes: 96 };
     expect(laneOf(run)).toEqual({ lane: "foreground" });
     expect(laneOf({ type: "export", id: 2, recipe: r, format: "svg", stem: "x" })).toEqual({ lane: "foreground" });
     expect(laneOf({ type: "source", source: gradient().source, key: "k" })).toEqual({ lane: "foreground" });
