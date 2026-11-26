@@ -1,11 +1,18 @@
 /// <reference lib="webworker" />
-import { exportOutput, exportProof, imageToRGBA, inkFor, layerToRGBA, leftoverRasters, Pipeline, StepError, toPlot, zipFiles, type Image, type Layers, type Plot, type Recipe, type Source, type StageData } from "@plotlab/engine";
+import { exportOutput, exportProof, imageToRGBA, inkFor, layerToRGBA, leftoverRasters, Pipeline, StepError, toPlot, zipFiles, type Image, type Layers, type Plot, type Recipe, type Source, type StageData, type StepResult } from "@plotlab/engine";
 import { estimatePlot, getMachine } from "@plotlab/machines";
 import { createRegistry } from "@plotlab/steps";
 import type { FromWorker, InspectTarget, InspectView, RasterView, ToWorker } from "./protocol.ts";
+import { shownAt } from "./strip.ts";
+import { ThumbnailRenderer } from "./thumbs.ts";
 
 /** Longest side of the low-res proxy used while dragging. */
 const PROXY_SIDE = 400;
+/**
+ * Once a newer request is waiting, thumbnails get at most this long before the worker moves
+ * on to it: the canvas comes first, and the strip catches up when the slider rests.
+ */
+const THUMB_BUDGET_MS = 25;
 
 const registry = createRegistry();
 const full = new Pipeline(registry);
@@ -13,6 +20,7 @@ const proxy = new Pipeline(registry);
 let src: { source: Source; key: string } | null = null;
 /** Encoded PNGs keyed by the pixel buffer they came from (outputs are cached by the pipeline, so identity is stable). */
 let pngCache = new WeakMap<object, Map<string, Promise<Blob>>>();
+const thumbnails = new ThumbnailRenderer();
 
 const post = (m: FromWorker) => (self as unknown as DedicatedWorkerGlobalScope).postMessage(m);
 
@@ -75,16 +83,43 @@ async function proofView(output: StageData, plot: Plot | null, recipe: Recipe, p
 
 // One message at a time: an export must not interleave with a run on the same pipeline cache.
 let queue: Promise<void> = Promise.resolve();
+/** Messages received so far; a handler numbered below this has a newer request waiting. */
+let arrived = 0;
 self.onmessage = (e: MessageEvent<ToWorker>) => {
-  queue = queue.then(() => handle(e.data));
+  const n = ++arrived;
+  queue = queue.then(() => handle(e.data, n));
 };
 
-async function handle(msg: ToWorker): Promise<void> {
+/**
+ * One thumbnail per strip box: the source, then each step's output (what passes through
+ * for a switched-off step; traced order for an on-demand step that hasn't run).
+ */
+async function postThumbs(msg: Extract<ToWorker, { type: "run" }>, side: number, placed: StageData, results: StepResult[], n: number): Promise<void> {
+  const ran = results.map((r) => r.index);
+  const boxes = [
+    { key: "source", data: placed },
+    ...msg.recipe.steps.map((s, i) => {
+      const at = shownAt(i, ran);
+      return { key: s.id, data: at < 0 ? placed : results.find((r) => r.index === at)!.output };
+    }),
+  ];
+  const items: Array<{ key: string; png: Blob }> = [];
+  const t0 = performance.now();
+  for (const b of boxes) {
+    const fresh = !thumbnails.has(b.data, msg.recipe, side);
+    if (fresh && arrived > n && performance.now() - t0 > THUMB_BUDGET_MS) break;
+    items.push({ key: b.key, png: await thumbnails.png(b.data, msg.recipe, side) });
+  }
+  post({ type: "thumbs", id: msg.id, side, keys: boxes.map((b) => b.key), items });
+}
+
+async function handle(msg: ToWorker, n: number): Promise<void> {
   if (msg.type === "source") {
     src = { source: msg.source, key: msg.key };
     full.reset();
     proxy.reset();
     pngCache = new WeakMap();
+    thumbnails.reset();
     return;
   }
   if (!src) return;
@@ -111,8 +146,10 @@ async function handle(msg: ToWorker): Promise<void> {
     let inspected: InspectView | null = null;
     if (target === "source") inspected = await view(placed, -1, msg.recipe);
     else if (typeof target === "number") {
-      const r = results.find((x) => x.index === target);
-      if (r) inspected = await view(r.output, r.index, msg.recipe);
+      // A switched-off step shows what passes through it; an on-demand step that hasn't run, traced order.
+      const at = shownAt(target, results.map((r) => r.index));
+      const r = results.find((x) => x.index === at);
+      inspected = await view(r ? r.output : placed, target, msg.recipe);
     }
     post({
       type: "result",
@@ -123,12 +160,14 @@ async function handle(msg: ToWorker): Promise<void> {
       warnings,
       working: placed.kind === "geometry" ? null : { width: placed.width, height: placed.height, mmPerPx: placed.frame.widthMm / placed.width },
       stale,
-      steps: results.map((r) => ({ index: r.index, step: r.step, ms: r.ms, cached: r.cached, layers: r.layers })),
+      steps: results.map((r) => ({ index: r.index, id: msg.recipe.steps[r.index]!.id, step: r.step, ms: r.ms, cached: r.cached, layers: r.layers })),
       rasterLayers: await resultRasters(output, msg.recipe),
       inspected,
       underlay: placed.kind === "image" ? await imageView(placed, "source", "Source") : null,
       proof: msg.proof ? await proofView(output, plot, msg.recipe, msg.proxy) : null,
     });
+    // A thumbnail that fails to draw leaves the strip as it was; the run itself went fine.
+    if (msg.thumbs) await postThumbs(msg, msg.thumbs, placed, results, n).catch(() => undefined);
   } catch (err) {
     post({
       type: "error",

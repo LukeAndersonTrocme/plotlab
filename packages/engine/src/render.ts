@@ -1,5 +1,6 @@
-import { parseColor } from "./project.ts";
-import type { Layer, RawImage } from "./types.ts";
+import { parseColor, toPlot, type PassOrder } from "./project.ts";
+import { composite, renderPlates } from "./raster.ts";
+import type { Ink, Layer, Paper, RawImage, StageData } from "./types.ts";
 
 /** Pixels for showing a stage (ADR 0009 inspection). Pure, so it runs in workers and tests. */
 
@@ -31,4 +32,25 @@ export function layerToRGBA(layer: Layer, width: number, height: number, color: 
     out[i * 4 + 3] = v.kind === "tone" ? byte(v.data[i]!) : byte(v.data[i]! / v.count);
   }
   return out;
+}
+
+/** What a thumbnail needs from the recipe: the paper and who inks which layer. */
+export interface ThumbnailSettings {
+  paper: Paper;
+  inks: Ink[];
+  inkFor(layerId: string): Ink;
+  passOrder: PassOrder;
+}
+
+/**
+ * A small picture of any stage's data on the paper (the step strip, preset gallery and
+ * checkpoints use it): the image, layers tinted in their inks, and lines in traced or
+ * stroke order, mixed like the export. The long side of the paper is `maxSide` pixels.
+ * Finishing (mirror, registration marks) is left out: a thumbnail shows the work. RGBA bytes.
+ */
+export function renderThumbnail(data: StageData, s: ThumbnailSettings, maxSide: number): { width: number; height: number; rgba: Uint8ClampedArray } {
+  const dpi = (maxSide * 25.4) / Math.max(s.paper.widthMm, s.paper.heightMm);
+  const plot = data.kind === "plot" ? data : data.kind === "geometry" ? toPlot(data, s) : null;
+  const r = renderPlates(data, plot, { ...s, target: { kind: "vector" } }, dpi);
+  return { width: r.width, height: r.height, rgba: composite(r) };
 }

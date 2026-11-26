@@ -12,13 +12,20 @@ describe("presets", () => {
   for (const p of presets) {
     it(`${p.id} loads cleanly`, () => {
       const { warnings } = loadRecipe(
-        { schemaVersion: 2, paper: { widthMm: 210, heightMm: 297 }, inks: [{ id: "k", color: "#000" }], steps: presetSteps(p.id) },
+        { schemaVersion: 3, paper: { widthMm: 210, heightMm: 297 }, inks: [{ id: "k", color: "#000" }], steps: presetSteps(p.id) },
         createRegistry(),
       );
       expect(warnings).toEqual([]);
     });
     it(`${p.id} is proven by a golden case`, () => expect(goldenPresets).toContain(p.id));
   }
+  it("every preset step has an id, unique within the preset", () => {
+    for (const p of presets) {
+      const ids = presetSteps(p.id).map((s) => s.id);
+      expect(ids.every((id) => typeof id === "string" && id !== "")).toBe(true);
+      expect(new Set(ids).size).toBe(ids.length);
+    }
+  });
   it("presetSteps returns a fresh copy", () => {
     const a = presetSteps("topo-hatch");
     a[0]!.params.contrast = 99;
@@ -26,7 +33,7 @@ describe("presets", () => {
   });
   describe("applyPreset", () => {
     const base = (target: unknown): Recipe =>
-      loadRecipe({ schemaVersion: 2, paper: { widthMm: 210, heightMm: 297 }, inks: [{ id: "k", color: "#000" }], target, steps: presetSteps("centerline") }, createRegistry()).recipe;
+      loadRecipe({ schemaVersion: 3, paper: { widthMm: 210, heightMm: 297 }, inks: [{ id: "k", color: "#000" }], target, steps: presetSteps("centerline") }, createRegistry()).recipe;
     it("replaces the steps and leaves the target alone when the preset has none", () => {
       const r = base({ kind: "raster", dpi: 150 });
       const out = applyPreset(r, "topo-hatch");

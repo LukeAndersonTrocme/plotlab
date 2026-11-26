@@ -3,7 +3,7 @@ import type { Paper, Plot, Position } from "@plotlab/engine";
 import type { RasterView } from "./protocol.ts";
 
 /** An object URL for a PNG blob, revoked when it changes or unmounts. */
-function useBlobUrl(blob: Blob | undefined): string | undefined {
+export function useBlobUrl(blob: Blob | undefined): string | undefined {
   const [url, setUrl] = useState<string>();
   useEffect(() => {
     if (!blob) return setUrl(undefined);

@@ -13,6 +13,8 @@ export interface RunState {
   inspected: InspectView | null;
   underlay: RasterView | null;
   proof: RasterView | null;
+  /** Strip thumbnails by box key ("source" or step id); they may lag the canvas a little. */
+  thumbs: Record<string, Blob>;
   /** True while the preview shows a low-res proxy result (full resolution comes on release). */
   refining: boolean;
   busy: boolean;
@@ -30,6 +32,7 @@ export const EMPTY_RUN: RunState = {
   inspected: null,
   underlay: null,
   proof: null,
+  thumbs: {},
   refining: false,
   busy: false,
   error: null,
@@ -48,6 +51,8 @@ export class Runner {
   inspect: InspectTarget = null;
   /** Also render the page as it will export. */
   proof = false;
+  /** Strip thumbnail size in pixels (long side of the paper); null = no strip on screen. */
+  thumbs: number | null = null;
   private exports = new Map<number, { resolve: (f: { name: string; mime: string; data: Uint8Array | string; notes: string[] }) => void; reject: (e: Error) => void }>();
   state: RunState = EMPTY_RUN;
 
@@ -77,7 +82,7 @@ export class Runner {
     this.pending = null;
     const id = this.nextId++;
     this.inFlight = id;
-    const msg: ToWorker = { type: "run", id, recipe, proxy, inspect: this.inspect, runOnDemand, proof: this.proof };
+    const msg: ToWorker = { type: "run", id, recipe, proxy, inspect: this.inspect, runOnDemand, proof: this.proof, thumbs: this.thumbs };
     this.worker.postMessage(msg);
     this.set({ busy: true });
   }
@@ -98,6 +103,14 @@ export class Runner {
       this.exports.delete(m.id);
       if (m.type === "exported") p?.resolve(m);
       else p?.reject(new Error(m.message));
+      return;
+    }
+    if (m.type === "thumbs") {
+      // Keep pictures not redrawn this time (cut short), drop those no longer in the strip.
+      const thumbs: Record<string, Blob> = {};
+      for (const k of m.keys) if (this.state.thumbs[k]) thumbs[k] = this.state.thumbs[k]!;
+      for (const t of m.items) thumbs[t.key] = t.png;
+      this.set({ thumbs });
       return;
     }
     this.inFlight = null;

@@ -49,8 +49,8 @@ describe("resetStep", () => {
       runLayer: (l) => l,
     });
     const reg2 = new StepRegistry([scatter]);
-    const step: RecipeStep = { step: "scatter", version: 1, params: { amount: 8, seed: 4242 }, layers: ["ink"], enabled: false, layerParams: { ink: { amount: 3 } } };
+    const step: RecipeStep = { id: "scatter", step: "scatter", version: 1, params: { amount: 8, seed: 4242 }, layers: ["ink"], enabled: false, layerParams: { ink: { amount: 3 } } };
     const r = { ...recipe([]), steps: [step] };
-    expect(resetStep(r, 0, reg2).steps[0]).toEqual({ step: "scatter", version: 1, params: { amount: 1, seed: 4242 }, layers: ["ink"], enabled: false });
+    expect(resetStep(r, 0, reg2).steps[0]).toEqual({ id: "scatter", step: "scatter", version: 1, params: { amount: 1, seed: 4242 }, layers: ["ink"], enabled: false });
   });
 });

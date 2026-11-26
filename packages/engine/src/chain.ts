@@ -1,5 +1,5 @@
 import { defaultParams } from "./params.ts";
-import type { Recipe, RecipeStep } from "./recipe.ts";
+import { newStepId, type Recipe, type RecipeStep } from "./recipe.ts";
 import type { AnyStep, StepRegistry } from "./step.ts";
 import type { Ink, StageKind } from "./types.ts";
 
@@ -69,7 +69,8 @@ export function insertStep(
 ): { recipe: Recipe; index: number } | { reason: string } {
   const def = registry.get(stepId);
   if (!def) return { reason: `Unknown step "${stepId}".` };
-  const fresh: RecipeStep = { step: def.id, version: def.version, params: defaultParams(def.params), enabled: true };
+  const id = newStepId(recipe.steps.map((s) => s.id), def.id);
+  const fresh: RecipeStep = { id, step: def.id, version: def.version, params: defaultParams(def.params), enabled: true };
   const positions = at === undefined ? [...Array(recipe.steps.length + 1).keys()] : [at];
   let reason = "";
   for (const i of positions) {

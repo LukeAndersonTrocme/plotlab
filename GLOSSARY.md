@@ -76,6 +76,7 @@ still to be argued over with Nick. Change a term here first, then rename it ever
 | **Pass** | One ink's strokes in a plot; passes are separated by pen changes. |
 | **On-demand step** | A slow step (e.g. Stroke order) that runs when you press Run, not on every change. |
 | **Proxy** | A downscaled copy of the Source used while a slider is being dragged. |
+| **Step id** | A step's stable name within its recipe (`RecipeStep.id`, e.g. `fill`, `fill-2`). It survives reordering, setting changes, undo and save/load, so the UI refers to steps by id, not by position. |
 | **Step contract** | A step = `run` function + param declarations + `help.md` + tests (`defineStep`). |
 | **Cost** | A step's `live` / `on-demand` hint for the UI. |
 | **Storage adapter** | One implementation of the storage interface (IndexedDB, connected folder, later desktop) (ADR 0014). |

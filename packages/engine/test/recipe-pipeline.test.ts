@@ -17,7 +17,7 @@ function makeRegistry(spy = vi.fn()) {
   return new StepRegistry([a, b]);
 }
 
-const base = { schemaVersion: 2, paper: { widthMm: 100, heightMm: 100 }, inks: [{ id: "p", widthMm: 0.5, color: "#000" }] };
+const base = { schemaVersion: 3, paper: { widthMm: 100, heightMm: 100 }, inks: [{ id: "p", widthMm: 0.5, color: "#000" }] };
 
 describe("loadRecipe", () => {
   it("migrates old step versions with a warning", () => {

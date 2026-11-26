@@ -1,4 +1,4 @@
-import { defaultParams, retarget, type AnyStep, type Recipe, type RecipeStep, type TargetRequest } from "@plotlab/engine";
+import { defaultParams, retarget, withStepIds, type AnyStep, type Recipe, type RecipeStep, type TargetRequest } from "@plotlab/engine";
 import { bands } from "./bands/index.ts";
 import { cells } from "./cells/index.ts";
 import { centerline } from "./centerline/index.ts";
@@ -29,14 +29,15 @@ export interface Preset {
   target?: TargetRequest;
 }
 
-const s = (def: AnyStep, params: Record<string, unknown> = {}): RecipeStep => ({
+/** A preset step; `chain` gives the steps their ids. */
+const s = (def: AnyStep, params: Record<string, unknown> = {}): Omit<RecipeStep, "id"> => ({
   step: def.id,
   version: def.version,
   params: { ...defaultParams(def.params), ...params },
   enabled: true,
 });
 
-export const presets: Preset[] = [
+const chains: Array<Omit<Preset, "steps"> & { steps: Array<Omit<RecipeStep, "id">> }> = [
   {
     id: "centerline",
     title: "Single-line trace",
@@ -112,6 +113,8 @@ export const presets: Preset[] = [
     steps: [s(tone, { contrast: 1.5 }), s(stipple, { spacing: 1.6 }), s(order, { method: "single" })],
   },
 ];
+
+export const presets: Preset[] = chains.map((p) => ({ ...p, steps: withStepIds(p.steps) }));
 
 /** A fresh copy of a preset's steps, ready to put in a recipe. */
 export function presetSteps(id: string): RecipeStep[] {

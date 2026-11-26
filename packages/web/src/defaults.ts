@@ -20,6 +20,6 @@ export function defaultRecipe(): Recipe {
     layerInks: {},
     passOrder: "light-to-dark",
     machine: "generic",
-    steps: [threshold, centerline, order].map((s) => ({ step: s.id, version: s.version, params: defaultParams(s.params), enabled: true })),
+    steps: [threshold, centerline, order].map((s) => ({ id: s.id, step: s.id, version: s.version, params: defaultParams(s.params), enabled: true })),
   };
 }

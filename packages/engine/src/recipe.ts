@@ -5,9 +5,15 @@ import type { StepRegistry } from "./step.ts";
 import type { Ink, Paper, StageKind } from "./types.ts";
 
 /** Bump when the recipe envelope changes shape. Add an upgrader to `UPGRADERS`. */
-export const RECIPE_SCHEMA_VERSION = 2;
+export const RECIPE_SCHEMA_VERSION = 3;
 
 export interface RecipeStep {
+  /**
+   * Stable within the recipe: survives reordering, setting changes, undo and save/load, so
+   * the UI can refer to "this step" (pins, comparisons) while the chain changes. Made from
+   * the step name ("fill", then "fill-2"), so recipes and golden files stay deterministic.
+   */
+  id: string;
   step: string;
   version: number;
   params: Record<string, unknown>;
@@ -72,6 +78,43 @@ export class RecipeError extends Error {
 type Raw = Record<string, unknown>;
 const obj = (v: unknown): Raw => (typeof v === "object" && v !== null && !Array.isArray(v) ? (v as Raw) : {});
 
+/** A step id that isn't in `taken`: the step name, or the name with the next free number. */
+export function newStepId(taken: Iterable<string>, step: string): string {
+  const used = new Set(taken);
+  if (!used.has(step)) return step;
+  let n = 2;
+  while (used.has(`${step}-${n}`)) n++;
+  return `${step}-${n}`;
+}
+
+/**
+ * The steps with a unique id each: the first step to claim an id keeps it; steps without
+ * one, or repeating one, get a new one (in chain order).
+ */
+export function withStepIds<S extends { step: string; id?: unknown }>(steps: S[]): Array<S & { id: string }> {
+  const kept = new Set<number>();
+  const taken = new Set<string>();
+  steps.forEach((s, i) => {
+    if (typeof s.id === "string" && s.id !== "" && !taken.has(s.id)) {
+      taken.add(s.id);
+      kept.add(i);
+    }
+  });
+  return steps.map((s, i) => {
+    if (kept.has(i)) return s as S & { id: string };
+    const id = newStepId(taken, s.step);
+    taken.add(id);
+    const { id: _repeated, ...rest } = s;
+    return { id, ...rest } as unknown as S & { id: string };
+  });
+}
+
+/**
+ * Upgrades (by the version they start from) that lose and change nothing the person made,
+ * so there is nothing to tell them: v2 → v3 only adds step ids.
+ */
+const SILENT_UPGRADES = new Set([2]);
+
 const UPGRADERS: Record<number, (r: Raw) => Raw> = {
   // v1 → v2: pens become inks; the plot step's margin moves to the project layout and
   // the step itself becomes Stroke order (ADR 0005, 0008, 0011).
@@ -96,6 +139,8 @@ const UPGRADERS: Record<number, (r: Raw) => Raw> = {
       steps,
     };
   },
+  // v2 → v3: every step gets a stable id (pins and comparisons refer to steps by id).
+  2: (r) => ({ ...r, schemaVersion: 3, steps: withStepIds((Array.isArray(r.steps) ? (r.steps as Raw[]) : []).map((s) => ({ ...s, step: String(s.step) }))) }),
 };
 
 function readTarget(v: unknown, errors: RecipeWarning[], warnings: RecipeWarning[]): Target {
@@ -179,7 +224,7 @@ export function loadRecipe(raw: unknown, registry: StepRegistry): { recipe: Reci
     const up = UPGRADERS[v];
     if (!up) throw new RecipeError(`no upgrade path from recipe schemaVersion ${v}`);
     r = up(r);
-    warnings.push({ index: -1, message: `upgraded recipe from schemaVersion ${v} to ${v + 1}` });
+    if (!SILENT_UPGRADES.has(v)) warnings.push({ index: -1, message: `upgraded recipe from schemaVersion ${v} to ${v + 1}` });
     v += 1;
   }
 
@@ -201,6 +246,15 @@ export function loadRecipe(raw: unknown, registry: StepRegistry): { recipe: Reci
   const input = (r.input ?? "image") as StageKind;
   if (!ENTRY_STAGES.includes(input)) errors.push({ index: -1, message: `input must be one of ${ENTRY_STAGES.join(", ")}` });
   const rawSteps = Array.isArray(r.steps) ? (r.steps as unknown[]) : [];
+  // Ids: kept when unique, filled in when missing; a repeated id is replaced (with a warning).
+  const seen = new Set<string>();
+  rawSteps.forEach((rs, index) => {
+    const id = obj(rs).id;
+    if (typeof id !== "string" || id === "") return;
+    if (seen.has(id)) warnings.push({ index, message: `step id "${id}" is used twice; giving this step a new one` });
+    seen.add(id);
+  });
+  const ids = withStepIds(rawSteps.map((rs) => ({ step: String(obj(rs).step), id: obj(rs).id }))).map((s) => s.id);
 
   const steps: RecipeStep[] = [];
   let current: StageKind = input;
@@ -245,7 +299,7 @@ export function loadRecipe(raw: unknown, registry: StepRegistry): { recipe: Reci
       }
       current = def.output;
     }
-    const out: RecipeStep = { step: def.id, version, params: values, enabled };
+    const out: RecipeStep = { id: ids[index]!, step: def.id, version, params: values, enabled };
     if (!enabled && s.offForEntry === true) out.offForEntry = true;
     if (Array.isArray(s.layers) && s.layers.every((x) => typeof x === "string")) out.layers = s.layers;
     if (layerParams && typeof layerParams === "object") {

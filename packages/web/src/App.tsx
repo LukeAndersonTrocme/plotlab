@@ -8,7 +8,9 @@ import { PagePanel } from "./PagePanel.tsx";
 import { PlotPanel } from "./PlotPanel.tsx";
 import { fmtTime, setupSummary } from "./setup.ts";
 import { ModeSwitch, SetupChip } from "./Shell.tsx";
-import { canvasTarget, fitSelection, initialView, openSetup, RESULT, setMode, SOURCE, stepSelection, toggleSelect, type ViewState } from "./view.ts";
+import { canvasTarget, fitSelection, initialView, openSetup, readThumbSize, resizeThumbs, RESULT, select, selectedIndex, setMode, SOURCE, stepSelection, toggleSelect, writeThumbSize, type ViewState } from "./view.ts";
+import { Strip } from "./Strip.tsx";
+import { stripBoxes, thumbRenderSide, toggleBypass } from "./strip.ts";
 import { EMPTY_RUN, Runner, type RunState } from "./runner.ts";
 import { decodeFile, loadSample, sampleSource } from "./sample.ts";
 import { canRedo, canUndo, commit, createHistory, preview, redo, undo, type History } from "./history.ts";
@@ -58,6 +60,21 @@ export function App() {
   const runner = useMemo(() => new Runner(setRun), []);
   const recipeRef = useRef(recipe);
   recipeRef.current = recipe;
+  // What the screen shows (mode, selection): not a recipe edit, so never a Back step.
+  // The thumbnail size is remembered by this browser, not the project.
+  const [view, setView] = useState<ViewState>(() => resizeThumbs(initialView, readThumbSize(defaultLocalStorage() ?? null)));
+  const viewRef = useRef(view);
+  viewRef.current = view;
+  /** The worker has its first source: runs can go out. */
+  const started = useRef(false);
+  /** Strip thumbnails only while the strip shows (Design mode). */
+  const thumbSide = (v: ViewState) => (v.mode === "design" ? thumbRenderSide(v.thumb, window.devicePixelRatio || 1) : null);
+  /** Run a recipe. The selected step is found by id in that recipe, so it survives reordering. */
+  const send = (r: Recipe, proxy: boolean, runOnDemand = false) => {
+    runner.inspect = canvasTarget(viewRef.current, r);
+    runner.thumbs = thumbSide(viewRef.current);
+    runner.request(r, proxy, runOnDemand);
+  };
   // Storage (ADR 0014): the open project (its image, recipe and checkpoints) in a library.
   const [library, setLibrary] = useState<Library | null>(null);
   const [project, setProject] = useState<ProjectStore | null>(null);
@@ -113,7 +130,8 @@ export function App() {
       setProject(s.project);
       setPersistent(opened.persistent);
       setReady(true);
-      runner.request(recipeRef.current, false);
+      started.current = true;
+      send(recipeRef.current, false);
     })();
     return () => {
       alive = false;
@@ -151,7 +169,7 @@ export function App() {
       setProject(r.project);
       setHistory((h) => commit(h, fitted));
       setNotice(r.warnings.length ? r.warnings.join("\n") : null);
-      if (live) runner.request(fitted, false);
+      if (live) send(fitted, false);
       else setDirty(true);
     } catch (e) {
       setNotice(`Couldn't restore that checkpoint: ${errText(e)}`);
@@ -169,7 +187,7 @@ export function App() {
       setDirty(true);
       return;
     }
-    runner.request(next, proxy);
+    send(next, proxy);
   };
 
   const travel = (move: typeof undo) => {
@@ -177,7 +195,7 @@ export function App() {
     if (h === history) return;
     setHistory(h);
     setNotice(null);
-    if (live) runner.request(h.present, false);
+    if (live) send(h.present, false);
     else setDirty(true);
   };
   const back = () => travel(undo);
@@ -206,22 +224,29 @@ export function App() {
     return () => window.removeEventListener("keydown", onKey);
   }, []);
 
-  // What the screen shows (mode, selection): not a recipe edit, so never a Back step.
-  const [view, setView] = useState<ViewState>(initialView);
-  const inspect = canvasTarget(view);
+  const inspect = canvasTarget(view, recipe);
+  /** Chain position of the selected step, or -1. */
+  const selected = selectedIndex(view, recipe);
   const changeView = (next: ViewState) => {
-    if (next === view) return;
+    if (next === viewRef.current) return;
     setView(next);
-    const t = canvasTarget(next);
-    if (t === runner.inspect) return;
-    runner.inspect = t;
-    runner.request(recipeRef.current, false);
+    if (next.thumb !== viewRef.current.thumb) writeThumbSize(defaultLocalStorage() ?? null, next.thumb);
+    viewRef.current = next;
+    // Only ask the worker again when what it draws changes (the canvas, or thumbnail size).
+    if (!started.current) return;
+    if (canvasTarget(next, recipeRef.current) !== runner.inspect || thumbSide(next) !== runner.thumbs) send(recipeRef.current, false);
   };
-  const inspectStage = (t: InspectTarget) =>
-    changeView(toggleSelect(view, t === null ? RESULT : t === "source" ? SOURCE : stepSelection(t)));
-  // A removed step can't stay selected.
-  const stepCount = recipe.steps.length;
-  useEffect(() => changeView(fitSelection(view, stepCount)), [stepCount]);
+  const inspectStage = (t: InspectTarget) => {
+    const id = typeof t === "number" ? recipe.steps[t]?.id : undefined;
+    changeView(toggleSelect(view, t === "source" ? SOURCE : id ? stepSelection(id) : RESULT));
+  };
+  // A removed step can't stay selected: fall back to the step before it (or the result).
+  const stepIds = recipe.steps.map((s) => s.id).join("\n");
+  const chainBefore = useRef(recipe);
+  useEffect(() => {
+    changeView(fitSelection(viewRef.current, chainBefore.current, recipe));
+    chainBefore.current = recipe;
+  }, [stepIds]);
 
   const loadFile = async (file: File) => {
     if (!ready) return;
@@ -262,7 +287,7 @@ export function App() {
       const { recipe: fitted, note } = enter(next);
       setHistory((h) => commit(h, fitted));
       if (note) warnings.push(note);
-      runner.request(fitted, false);
+      send(fitted, false);
       setNotice(warnings.length ? warnings.join("\n") : null);
     } catch (e) {
       setNotice(`Couldn't read ${file.name}${e instanceof Error && e.message ? `: ${e.message}` : ""}. Try PNG, JPEG, WebP, TIFF or SVG.`);
@@ -272,7 +297,7 @@ export function App() {
   const showAsExported = (on: boolean) => {
     setAsExported(on);
     runner.proof = on;
-    runner.request(recipe, false);
+    send(recipe, false);
   };
 
   const exportAs = async (format: ExportFormat) => {
@@ -299,8 +324,11 @@ export function App() {
     ...(viewPlot?.layers.map((l) => ({ id: l.id, name: l.name, color: l.ink.color })) ?? []),
     ...viewRasters.filter((r) => r.color !== null).map((r) => ({ id: r.id, name: r.name, color: r.color! })),
   ];
-  const viewTitle =
-    inspect === "source" ? "the source, as placed on the paper" : typeof inspect === "number" ? `${registry.get(recipe.steps[inspect]?.step ?? "")?.title ?? "step"} output` : null;
+  const stepTitle = (i: number) => registry.get(recipe.steps[i]?.step ?? "")?.title ?? "step";
+  // A switched-off step shows what passes through it; an on-demand step that hasn't run, traced order.
+  const viewNote = (i: number) =>
+    recipe.steps[i]?.enabled === false ? " (switched off: what passes through)" : run.steps.some((x) => x.index === i) ? "" : run.stale.length ? " (not run yet: traced order)" : "";
+  const viewTitle = inspect === "source" ? "the source, as placed on the paper" : typeof inspect === "number" ? `${stepTitle(inspect)} output${viewNote(inspect)}` : null;
   const finalLayers = run.steps.at(-1)?.layers ?? [];
   const strokes = plot?.layers.reduce((n, l) => n + l.paths.length, 0) ?? 0;
   const notLines = run.rasterLayers.filter((r) => r.color !== null).map((r) => r.name);
@@ -344,7 +372,7 @@ export function App() {
             className="primary"
             onClick={() => {
               setDirty(false);
-              runner.request(recipe, false);
+              send(recipe, false);
             }}
           >
             Update
@@ -412,7 +440,9 @@ export function App() {
                 <span>
                   Viewing: <strong>{viewTitle}</strong>
                 </span>
-                <button onClick={() => inspectStage(null)}>Back to result</button>
+                <button onClick={() => changeView(select(view, RESULT))} title="Show the end result again">
+                  Show final
+                </button>
               </>
             ) : (
               <span>Result</span>
@@ -459,28 +489,42 @@ export function App() {
                   <span>{sourceName === "sample" ? "Open image, SVG or recipe…" : sourceName}</span>
                 </label>
               </div>
-              <StepList
-                recipe={recipe}
-                registry={registry}
-                steps={run.steps}
-                stale={run.stale}
-                error={run.error}
-                inspect={inspect}
-                onInspect={inspectStage}
-                onChange={(r, proxy, step) => apply(r, proxy, step)}
-                onReplace={(r) => {
-                  // A preset meets the source where it enters, like opening a recipe file does.
-                  const { recipe: fitted, note } = enter(r);
-                  apply(fitted, false);
-                  setNotice(note);
-                }}
-                onRun={() => {
-                  setDirty(false);
-                  runner.request(recipe, false, true);
-                }}
-                onHelp={setHelp}
-                onNotice={setNotice}
-              />
+              {view.selection.kind === "source" && <p className="hint side-note">The source, as placed on the paper. Pick a step in the strip below to change its settings.</p>}
+              {selected >= 0 && (
+                <div className="side-head">
+                  <span>
+                    Step {selected + 1} of {recipe.steps.length}
+                  </span>
+                  <button className="link" onClick={() => changeView(select(view, RESULT))} title="Show the end result and every step's settings">
+                    All steps
+                  </button>
+                </div>
+              )}
+              {view.selection.kind !== "source" && (
+                <StepList
+                  recipe={recipe}
+                  only={selected >= 0 ? selected : undefined}
+                  registry={registry}
+                  steps={run.steps}
+                  stale={run.stale}
+                  error={run.error}
+                  inspect={inspect}
+                  onInspect={inspectStage}
+                  onChange={(r, proxy, step) => apply(r, proxy, step)}
+                  onReplace={(r) => {
+                    // A preset meets the source where it enters, like opening a recipe file does.
+                    const { recipe: fitted, note } = enter(r);
+                    apply(fitted, false);
+                    setNotice(note);
+                  }}
+                  onRun={() => {
+                    setDirty(false);
+                    send(recipe, false, true);
+                  }}
+                  onHelp={setHelp}
+                  onNotice={setNotice}
+                />
+              )}
             </>
           )}
           {view.mode === "page" && (
@@ -516,6 +560,22 @@ export function App() {
           onRestore={(cp) => void restore(cp)}
         />
       </main>
+      {view.mode === "design" && (
+        <Strip
+          boxes={stripBoxes(recipe, registry, run)}
+          thumbs={run.thumbs}
+          selected={view.selection.kind === "step" ? view.selection.id : view.selection.kind === "source" ? "source" : null}
+          size={view.thumb}
+          onSelect={(key) => changeView(select(view, key === "source" ? SOURCE : stepSelection(key)))}
+          onBypass={(index) => {
+            const res = toggleBypass(recipe, index, registry);
+            if ("reason" in res) setNotice(res.reason);
+            else apply(res.recipe, false);
+          }}
+          onResize={(px) => changeView(resizeThumbs(viewRef.current, px))}
+          onNotice={setNotice}
+        />
+      )}
       {!ready && (
         <div className="starting" role="status">
           Opening your last session…
