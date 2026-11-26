@@ -3,7 +3,7 @@ import { budgetOnlyChange, inkFor, loadRecipe, retarget, showsTime, StepRegistry
 
 const ink = (id: string, color: string, widthMm = 0.5): Ink => ({ id, name: id, color, mix: "multiply", widthMm });
 const recipe = (over: Partial<Recipe> = {}): Recipe =>
-  loadRecipe({ schemaVersion: 2, paper: { widthMm: 100, heightMm: 100 }, inks: [ink("k", "#000000", 0.3)], steps: [], ...over }, new StepRegistry()).recipe;
+  loadRecipe({ schemaVersion: 3, paper: { widthMm: 100, heightMm: 100 }, inks: [ink("k", "#000000", 0.3)], steps: [], ...over }, new StepRegistry()).recipe;
 
 describe("workingMmPerPx", () => {
   it("plotter: half the narrowest ink", () => expect(workingMmPerPx(recipe())).toBeCloseTo(0.15));
@@ -51,7 +51,7 @@ describe("recipe v2 validation", () => {
   });
   it("drops layerInks that point at missing inks, with a warning", () => {
     const { recipe: r, warnings } = loadRecipe(
-      { schemaVersion: 2, paper: { widthMm: 100, heightMm: 100 }, inks: [ink("k", "#000")], layerInks: { a: "nope" }, steps: [] },
+      { schemaVersion: 3, paper: { widthMm: 100, heightMm: 100 }, inks: [ink("k", "#000")], layerInks: { a: "nope" }, steps: [] },
       new StepRegistry(),
     );
     expect(r.layerInks).toEqual({});
@@ -61,7 +61,7 @@ describe("recipe v2 validation", () => {
 
 describe("time budget (plotter targets)", () => {
   const load = (target: unknown) =>
-    loadRecipe({ schemaVersion: 2, paper: { widthMm: 100, heightMm: 100 }, inks: [ink("k", "#000000", 0.3)], steps: [], target }, new StepRegistry());
+    loadRecipe({ schemaVersion: 3, paper: { widthMm: 100, heightMm: 100 }, inks: [ink("k", "#000000", 0.3)], steps: [], target }, new StepRegistry());
 
   it("round-trips a budget in minutes", () => {
     const { recipe, warnings } = load({ kind: "plotter", budgetMin: 5 });

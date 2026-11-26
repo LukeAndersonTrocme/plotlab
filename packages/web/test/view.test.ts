@@ -2,20 +2,23 @@ import { describe, expect, it } from "vitest";
 import { canvasTarget, fitSelection, initialView, openSetup, RESULT, select, setMode, SOURCE, stepSelection, toggleSelect, type ViewState } from "../src/view.ts";
 
 const at = (patch: Partial<ViewState>): ViewState => ({ ...initialView, ...patch });
+/** Only the step ids matter to the view. */
+const chain = (...ids: string[]) => ({ steps: ids.map((id) => ({ id })) });
+const r = chain("threshold", "centerline", "order");
 
 describe("view state: mode", () => {
   it("starts in Design mode looking at the result", () => {
     expect(initialView.mode).toBe("design");
     expect(initialView.selection).toEqual(RESULT);
-    expect(canvasTarget(initialView)).toBeNull();
+    expect(canvasTarget(initialView, r)).toBeNull();
   });
 
   it("switching mode keeps the selection for when you come back to Design", () => {
-    let v = select(initialView, stepSelection(1));
+    let v = select(initialView, stepSelection("centerline"));
     v = setMode(v, "plot");
     expect(v.mode).toBe("plot");
     v = setMode(v, "design");
-    expect(v.selection).toEqual(stepSelection(1));
+    expect(v.selection).toEqual(stepSelection("centerline"));
   });
 
   it("the setup chip opens Page mode", () => {
@@ -32,46 +35,68 @@ describe("view state: mode", () => {
 
 describe("view state: selection", () => {
   it("selecting a step shows its output on the canvas", () => {
-    const v = select(initialView, stepSelection(2));
-    expect(v.selection).toEqual(stepSelection(2));
-    expect(canvasTarget(v)).toBe(2);
-    expect(canvasTarget(select(initialView, SOURCE))).toBe("source");
+    const v = select(initialView, stepSelection("order"));
+    expect(v.selection).toEqual(stepSelection("order"));
+    expect(canvasTarget(v, r)).toBe(2);
+    expect(canvasTarget(select(initialView, SOURCE), r)).toBe("source");
   });
 
   it("selecting from Page or Plot mode goes back to Design, where step settings are", () => {
-    const v = select(at({ mode: "page" }), stepSelection(0));
+    const v = select(at({ mode: "page" }), stepSelection("threshold"));
     expect(v.mode).toBe("design");
-    expect(canvasTarget(v)).toBe(0);
+    expect(canvasTarget(v, r)).toBe(0);
   });
 
   it("Page and Plot show the result, whatever is selected", () => {
-    const v = select(initialView, stepSelection(1));
-    expect(canvasTarget(setMode(v, "page"))).toBeNull();
-    expect(canvasTarget(setMode(v, "plot"))).toBeNull();
+    const v = select(initialView, stepSelection("centerline"));
+    expect(canvasTarget(setMode(v, "page"), r)).toBeNull();
+    expect(canvasTarget(setMode(v, "plot"), r)).toBeNull();
   });
 
   it("toggling the selected step goes back to the result; toggling another selects it", () => {
-    let v = toggleSelect(initialView, stepSelection(1));
-    expect(v.selection).toEqual(stepSelection(1));
-    v = toggleSelect(v, stepSelection(0));
-    expect(v.selection).toEqual(stepSelection(0));
-    v = toggleSelect(v, stepSelection(0));
+    let v = toggleSelect(initialView, stepSelection("centerline"));
+    expect(v.selection).toEqual(stepSelection("centerline"));
+    v = toggleSelect(v, stepSelection("threshold"));
+    expect(v.selection).toEqual(stepSelection("threshold"));
+    v = toggleSelect(v, stepSelection("threshold"));
     expect(v.selection).toEqual(RESULT);
     expect(toggleSelect(select(initialView, SOURCE), SOURCE).selection).toEqual(RESULT);
   });
 
   it("toggling from Page mode selects (in Design) rather than unselecting", () => {
-    const v = setMode(select(initialView, stepSelection(1)), "page");
-    const w = toggleSelect(v, stepSelection(1));
+    const v = setMode(select(initialView, stepSelection("centerline")), "page");
+    const w = toggleSelect(v, stepSelection("centerline"));
     expect(w.mode).toBe("design");
-    expect(w.selection).toEqual(stepSelection(1));
+    expect(w.selection).toEqual(stepSelection("centerline"));
   });
 
-  it("a selected step that no longer exists falls back to the result", () => {
-    const v = select(initialView, stepSelection(3));
-    expect(fitSelection(v, 4)).toBe(v);
-    expect(fitSelection(v, 3).selection).toEqual(RESULT);
+  it("a selection follows its step when the chain is reordered", () => {
+    const v = select(initialView, stepSelection("order"));
+    expect(canvasTarget(v, chain("order", "threshold", "centerline"))).toBe(0);
+    expect(fitSelection(v, r, chain("order", "threshold", "centerline"))).toBe(v);
+  });
+
+  it("a selected step that is removed falls back to the step before it", () => {
+    const v = select(initialView, stepSelection("centerline"));
+    expect(fitSelection(v, r, chain("threshold", "order")).selection).toEqual(stepSelection("threshold"));
+    // The step before it went too: the nearest earlier one that is left.
+    const w = select(initialView, stepSelection("order"));
+    expect(fitSelection(w, r, chain("threshold")).selection).toEqual(stepSelection("threshold"));
+  });
+
+  it("with nothing before it left, a removed step falls back to the result", () => {
+    const v = select(initialView, stepSelection("threshold"));
+    expect(fitSelection(v, r, chain("centerline", "order")).selection).toEqual(RESULT);
+    expect(fitSelection(v, r, chain()).selection).toEqual(RESULT);
+  });
+
+  it("the source and the result never need fitting", () => {
     const s = select(initialView, SOURCE);
-    expect(fitSelection(s, 0)).toBe(s);
+    expect(fitSelection(s, r, chain())).toBe(s);
+    expect(fitSelection(initialView, r, chain())).toBe(initialView);
+  });
+
+  it("an unknown step shows the result on the canvas", () => {
+    expect(canvasTarget(select(initialView, stepSelection("gone")), r)).toBeNull();
   });
 });

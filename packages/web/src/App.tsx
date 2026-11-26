@@ -58,6 +58,15 @@ export function App() {
   const runner = useMemo(() => new Runner(setRun), []);
   const recipeRef = useRef(recipe);
   recipeRef.current = recipe;
+  // What the screen shows (mode, selection): not a recipe edit, so never a Back step.
+  const [view, setView] = useState<ViewState>(initialView);
+  const viewRef = useRef(view);
+  viewRef.current = view;
+  /** Run a recipe. The selected step is found by id in that recipe, so it survives reordering. */
+  const send = (r: Recipe, proxy: boolean, runOnDemand = false) => {
+    runner.inspect = canvasTarget(viewRef.current, r);
+    runner.request(r, proxy, runOnDemand);
+  };
   // Storage (ADR 0014): the open project (its image, recipe and checkpoints) in a library.
   const [library, setLibrary] = useState<Library | null>(null);
   const [project, setProject] = useState<ProjectStore | null>(null);
@@ -113,7 +122,7 @@ export function App() {
       setProject(s.project);
       setPersistent(opened.persistent);
       setReady(true);
-      runner.request(recipeRef.current, false);
+      send(recipeRef.current, false);
     })();
     return () => {
       alive = false;
@@ -151,7 +160,7 @@ export function App() {
       setProject(r.project);
       setHistory((h) => commit(h, fitted));
       setNotice(r.warnings.length ? r.warnings.join("\n") : null);
-      if (live) runner.request(fitted, false);
+      if (live) send(fitted, false);
       else setDirty(true);
     } catch (e) {
       setNotice(`Couldn't restore that checkpoint: ${errText(e)}`);
@@ -169,7 +178,7 @@ export function App() {
       setDirty(true);
       return;
     }
-    runner.request(next, proxy);
+    send(next, proxy);
   };
 
   const travel = (move: typeof undo) => {
@@ -177,7 +186,7 @@ export function App() {
     if (h === history) return;
     setHistory(h);
     setNotice(null);
-    if (live) runner.request(h.present, false);
+    if (live) send(h.present, false);
     else setDirty(true);
   };
   const back = () => travel(undo);
@@ -206,22 +215,24 @@ export function App() {
     return () => window.removeEventListener("keydown", onKey);
   }, []);
 
-  // What the screen shows (mode, selection): not a recipe edit, so never a Back step.
-  const [view, setView] = useState<ViewState>(initialView);
-  const inspect = canvasTarget(view);
+  const inspect = canvasTarget(view, recipe);
   const changeView = (next: ViewState) => {
-    if (next === view) return;
+    if (next === viewRef.current) return;
     setView(next);
-    const t = canvasTarget(next);
-    if (t === runner.inspect) return;
-    runner.inspect = t;
-    runner.request(recipeRef.current, false);
+    viewRef.current = next;
+    if (canvasTarget(next, recipeRef.current) !== runner.inspect) send(recipeRef.current, false);
   };
-  const inspectStage = (t: InspectTarget) =>
-    changeView(toggleSelect(view, t === null ? RESULT : t === "source" ? SOURCE : stepSelection(t)));
-  // A removed step can't stay selected.
-  const stepCount = recipe.steps.length;
-  useEffect(() => changeView(fitSelection(view, stepCount)), [stepCount]);
+  const inspectStage = (t: InspectTarget) => {
+    const id = typeof t === "number" ? recipe.steps[t]?.id : undefined;
+    changeView(toggleSelect(view, t === "source" ? SOURCE : id ? stepSelection(id) : RESULT));
+  };
+  // A removed step can't stay selected: fall back to the step before it (or the result).
+  const stepIds = recipe.steps.map((s) => s.id).join("\n");
+  const chainBefore = useRef(recipe);
+  useEffect(() => {
+    changeView(fitSelection(viewRef.current, chainBefore.current, recipe));
+    chainBefore.current = recipe;
+  }, [stepIds]);
 
   const loadFile = async (file: File) => {
     if (!ready) return;
@@ -262,7 +273,7 @@ export function App() {
       const { recipe: fitted, note } = enter(next);
       setHistory((h) => commit(h, fitted));
       if (note) warnings.push(note);
-      runner.request(fitted, false);
+      send(fitted, false);
       setNotice(warnings.length ? warnings.join("\n") : null);
     } catch (e) {
       setNotice(`Couldn't read ${file.name}${e instanceof Error && e.message ? `: ${e.message}` : ""}. Try PNG, JPEG, WebP, TIFF or SVG.`);
@@ -272,7 +283,7 @@ export function App() {
   const showAsExported = (on: boolean) => {
     setAsExported(on);
     runner.proof = on;
-    runner.request(recipe, false);
+    send(recipe, false);
   };
 
   const exportAs = async (format: ExportFormat) => {
@@ -344,7 +355,7 @@ export function App() {
             className="primary"
             onClick={() => {
               setDirty(false);
-              runner.request(recipe, false);
+              send(recipe, false);
             }}
           >
             Update
@@ -476,7 +487,7 @@ export function App() {
                 }}
                 onRun={() => {
                   setDirty(false);
-                  runner.request(recipe, false, true);
+                  send(recipe, false, true);
                 }}
                 onHelp={setHelp}
                 onNotice={setNotice}

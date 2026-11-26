@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { checkChain, insertStep, loadRecipe, moveStep, removeStep } from "../src/index.ts";
+import { checkChain, insertStep, loadRecipe, moveStep, removeStep, withStepIds } from "../src/index.ts";
 import { createRegistry } from "../../steps/src/index.ts";
 
 const reg = createRegistry();
@@ -69,5 +69,36 @@ describe("removeStep", () => {
   it("removes a step at the end", () => {
     const res = removeStep(recipe(["threshold", "centerline", "order"]), 2, reg);
     expect("recipe" in res && ids(res.recipe)).toEqual(["threshold", "centerline"]);
+  });
+});
+
+describe("stable step ids", () => {
+  const stepIds = (r: { steps: Array<{ id: string }> }) => r.steps.map((s) => s.id);
+  it("a moved step keeps its id", () => {
+    const r = recipe(["tone", "pixelate", "levels", "bands"]);
+    const res = moveStep(r, 1, 2, reg);
+    if (!("recipe" in res)) throw new Error(res.reason);
+    expect(stepIds(res.recipe)).toEqual(["tone", "levels", "pixelate", "bands"]);
+  });
+  it("an added step gets a new id, unique in the recipe", () => {
+    const r = recipe(["tone", "levels", "bands"]);
+    const a = insertStep(r, "levels", reg, 1);
+    if (!("recipe" in a)) throw new Error(a.reason);
+    expect(stepIds(a.recipe)).toEqual(["tone", "levels-2", "levels", "bands"]);
+    const b = insertStep(a.recipe, "levels", reg, 1);
+    if (!("recipe" in b)) throw new Error(b.reason);
+    expect(new Set(stepIds(b.recipe)).size).toBe(5);
+  });
+  it("removing a step leaves the other ids alone", () => {
+    const res = removeStep(recipe(["threshold", "centerline", "order"]), 2, reg);
+    expect("recipe" in res && stepIds(res.recipe)).toEqual(["threshold", "centerline"]);
+  });
+  it("withStepIds fills in missing or repeated ids and keeps the rest", () => {
+    const steps = [
+      { step: "tone", version: 1, params: {} },
+      { step: "fill", version: 1, params: {}, id: "tone" },
+      { step: "fill", version: 1, params: {}, id: "tone" },
+    ];
+    expect(withStepIds(steps).map((s) => s.id)).toEqual(["tone-2", "tone", "fill"]);
   });
 });
