@@ -54,6 +54,8 @@ export class Runner {
   /** Strip thumbnail size in pixels (long side of the paper); null = no strip on screen. */
   thumbs: number | null = null;
   private exports = new Map<number, { resolve: (f: { name: string; mime: string; data: Uint8Array | string; notes: string[] }) => void; reject: (e: Error) => void }>();
+  private pictures = new Map<number, (png: Blob | null) => void>();
+  private gallerySeen: { id: number; onThumb: (key: string, png: Blob | null) => void } | null = null;
   state: RunState = EMPTY_RUN;
 
   constructor(private onChange: (s: RunState) => void) {
@@ -97,7 +99,43 @@ export class Runner {
     });
   }
 
+  /**
+   * The end result of `recipe` as a PNG (a checkpoint's picture), from the strip's thumbnail
+   * renderer in the worker. Comes after any run already sent, so ask before sending the next one.
+   */
+  thumbnail(recipe: Recipe, side: number): Promise<Blob | null> {
+    const id = this.nextId++;
+    const msg: ToWorker = { type: "thumbnail", id, recipe, side };
+    return new Promise((resolve) => {
+      this.pictures.set(id, resolve);
+      this.worker.postMessage(msg);
+    });
+  }
+
+  /** Preset gallery pictures, drawn in the background; each arrives through `onThumb`. Replaces an earlier request. */
+  gallery(items: Array<{ key: string; recipe: Recipe }>, side: number, onThumb: (key: string, png: Blob | null) => void): void {
+    const id = this.nextId++;
+    this.gallerySeen = { id, onThumb };
+    const msg: ToWorker = { type: "gallery", id, side, items };
+    this.worker.postMessage(msg);
+  }
+
+  /** Stop listening for gallery pictures (the gallery closed); the worker drops what's left. */
+  closeGallery(): void {
+    if (this.gallerySeen) this.gallery([], 0, () => {});
+    this.gallerySeen = null;
+  }
+
   private receive(m: FromWorker): void {
+    if (m.type === "thumbnail") {
+      this.pictures.get(m.id)?.(m.png);
+      this.pictures.delete(m.id);
+      return;
+    }
+    if (m.type === "gallery-thumb") {
+      if (this.gallerySeen?.id === m.id) this.gallerySeen.onThumb(m.key, m.png);
+      return;
+    }
     if (m.type === "exported" || m.type === "export-error") {
       const p = this.exports.get(m.id);
       this.exports.delete(m.id);

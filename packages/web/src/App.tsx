@@ -18,12 +18,18 @@ import type { InspectTarget } from "./protocol.ts";
 import { StageView } from "./StageView.tsx";
 import { StepList } from "./StepList.tsx";
 import { CheckpointSidebar } from "./CheckpointSidebar.tsx";
-import { createCheckpoint, restoreFrom } from "./checkpoints.ts";
+import { attachThumbnail, checkpointLabel, createCheckpoint, restoreSafely } from "./checkpoints.ts";
+import { galleryItems, pickPreset, type GalleryItem } from "./gallery.ts";
+import { focusOf, shortcut } from "./keys.ts";
+import { PresetGallery, type GalleryThumb } from "./PresetGallery.tsx";
 import { openImage, SAMPLE_NAME, startSession } from "./session.ts";
 import { defaultLocalStorage, openLibrary, type Checkpoint, type Library, type ProjectStore, type Source as StoredSource } from "./storage/index.ts";
-import { captureThumbnail } from "./thumbnail.ts";
 
 const registry = createRegistry();
+/** A checkpoint's picture, in pixels on the paper's long side (the sidebar shows it ~200 px wide). */
+const CHECKPOINT_SIDE = 240;
+/** A preset gallery picture: ~200 CSS px wide, sharp on high-density screens. */
+const gallerySide = () => Math.min(400, Math.round(200 * (window.devicePixelRatio || 1)));
 
 /** A stored recipe, upgraded (ADR 0002); throws if it can't be read. */
 const parseRecipe = (json: unknown) => {
@@ -144,35 +150,106 @@ export function App() {
     void project?.setRecipe({ recipe: history.base, savedAt: Date.now() }).catch((e) => setNotice(`Couldn't autosave: ${errText(e)}`));
   }, [project, history.base]);
 
-  const saveCheckpoint = async () => {
-    if (!project) return;
-    const svg = document.querySelector<SVGSVGElement>(".view svg.preview");
-    const thumbnail = svg ? await captureThumbnail(svg).catch(() => undefined) : undefined;
+  // A short confirmation that goes away by itself (saving a checkpoint).
+  const [toast, setToast] = useState<string | null>(null);
+  const toastTimer = useRef<ReturnType<typeof setTimeout>>();
+  const confirmSaved = (msg: string) => {
+    setToast(msg);
+    clearTimeout(toastTimer.current);
+    toastTimer.current = setTimeout(() => setToast(null), 3500);
+  };
+
+  /**
+   * A checkpoint's picture: the end result, drawn by the strip's thumbnail renderer in the
+   * worker and added once it's ready, so saving never waits for it. Call before sending the
+   * next run: the worker still has this recipe's result cached.
+   */
+  const addPicture = (p: ProjectStore, cp: Checkpoint, r: Recipe) => {
+    void runner
+      .thumbnail(r, CHECKPOINT_SIDE)
+      .then(async (png) => {
+        if (!png) return;
+        await attachThumbnail(p, cp.id, new Uint8Array(await png.arrayBuffer()));
+        setSaved((n) => n + 1);
+      })
+      .catch(() => undefined);
+  };
+
+  /** Save checkpoint, ⌘S and Branch from here: saved at once, with a confirmation. */
+  const saveCheckpoint = async (name?: string, message?: string) => {
+    if (!project) {
+      if (ready) setNotice("Checkpoints are off for this image (it isn't in browser storage). Reload the page to turn them back on.");
+      return;
+    }
+    const r = recipeRef.current;
     try {
-      await createCheckpoint(project, { recipe, ...(thumbnail && { thumbnail }) });
+      const cp = await createCheckpoint(project, { recipe: r, name });
+      addPicture(project, cp, r);
       setSaved((n) => n + 1);
-      setNotice(sidebar ? null : "Saved a checkpoint. Press S to see your checkpoints.");
+      confirmSaved(message ?? (sidebar ? "Checkpoint saved." : "Checkpoint saved. Press S to see your checkpoints."));
     } catch (e) {
       setNotice(`Couldn't save the checkpoint: ${errText(e)}`);
     }
   };
 
-  // Restoring is one Back step. A checkpoint of another image opens that project too
-  // (the image switch itself isn't a Back step, as when opening an image).
+  // Restoring saves where you are first, then is one Back step. A checkpoint of another
+  // image opens that project too (the image switch itself isn't a Back step, as when
+  // opening an image).
   const restore = async (cp: Checkpoint) => {
-    if (!library || !project) return;
+    if (!library || !project || !ready) return;
+    const before = history.present;
+    const label = checkpointLabel(cp);
     try {
-      const r = await restoreFrom(library, project, cp, history, parseRecipe);
+      const r = await restoreSafely(library, project, cp, history, parseRecipe, { name: `Before restoring “${label}”` });
+      if (r.saved.created) addPicture(project, r.saved.checkpoint, before);
+      setSaved((n) => n + 1);
       if (r.source) takeSource(await decodeStored(r.project, r.source, (m) => r.warnings.push(m)), nameOf(r.project), r.project.id);
       const { recipe: fitted, note } = enter(r.recipe);
       if (note) r.warnings.push(note);
       setProject(r.project);
       setHistory((h) => commit(h, fitted));
-      setNotice(r.warnings.length ? r.warnings.join("\n") : null);
+      const where = r.saved.created ? "Where you were is saved as a checkpoint." : "Where you were was already a checkpoint.";
+      setNotice([`Restored “${label}”. ${where}`, ...r.warnings].join("\n"));
       if (live) send(fitted, false);
       else setDirty(true);
     } catch (e) {
       setNotice(`Couldn't restore that checkpoint: ${errText(e)}`);
+    }
+  };
+
+  // The preset gallery: each preset drawn on your picture, in the worker's background.
+  const [gallery, setGallery] = useState<GalleryItem[] | null>(null);
+  const [galleryThumbs, setGalleryThumbs] = useState<Record<string, GalleryThumb>>({});
+  const openGallery = () => {
+    if (!ready) return;
+    const items = galleryItems(recipeRef.current, enter);
+    setGallery(items);
+    setGalleryThumbs({});
+    runner.gallery(
+      items.map((i) => ({ key: i.id, recipe: i.recipe })),
+      gallerySide(),
+      (key, png) => setGalleryThumbs((t) => ({ ...t, [key]: png })),
+    );
+  };
+  const closeGallery = () => {
+    setGallery(null);
+    runner.closeGallery();
+  };
+  /** Picking a preset saves the current settings as a checkpoint first, then replaces the steps. */
+  const choosePreset = async (id: string) => {
+    const before = recipeRef.current;
+    closeGallery();
+    try {
+      const r = await pickPreset(project, before, id, enter);
+      if (r.saved) {
+        if (r.saved.created && project) addPicture(project, r.saved.checkpoint, before);
+        setSaved((n) => n + 1);
+      }
+      setDirty(false);
+      apply(r.recipe, false);
+      setNotice(r.message);
+    } catch (e) {
+      setNotice(`Couldn't save your settings as a checkpoint first, so the preset wasn't applied: ${errText(e)}`);
     }
   };
 
@@ -206,19 +283,16 @@ export function App() {
     setNotice("Reset to the default recipe (your image stays). Back undoes this.");
   };
 
-  // ⌘Z / ⇧⌘Z (Ctrl on other systems). Text and number boxes keep their own undo.
-  const keys = useRef({ back, forward });
-  keys.current = { back, forward };
+  // ⌘S saves a checkpoint, S shows the checkpoints, ⌘Z / ⇧⌘Z go Back / Forward (keys.ts).
+  // While the preset gallery is open only ⌘S works (Escape closes it).
+  const keys = useRef({ back, forward, save: () => void saveCheckpoint(), checkpoints: () => setSidebar((o) => !o), modal: false });
+  keys.current = { back, forward, save: () => void saveCheckpoint(), checkpoints: () => setSidebar((o) => !o), modal: gallery !== null };
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      if (!(e.metaKey || e.ctrlKey) || e.altKey) return;
-      const t = e.target as HTMLElement | null;
-      if (t instanceof HTMLTextAreaElement || (t instanceof HTMLInputElement && (t.type === "text" || t.type === "number"))) return;
-      const k = e.key.toLowerCase();
-      if (k === "z" && !e.shiftKey) keys.current.back();
-      else if ((k === "z" && e.shiftKey) || k === "y") keys.current.forward();
-      else return;
+      const s = shortcut({ key: e.key, metaKey: e.metaKey, ctrlKey: e.ctrlKey, shiftKey: e.shiftKey, altKey: e.altKey, repeat: e.repeat, ...focusOf(e.target) });
+      if (!s || (keys.current.modal && s !== "save" && s !== "ignore")) return;
       e.preventDefault();
+      if (s !== "ignore") keys.current[s]();
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
@@ -361,6 +435,9 @@ export function App() {
             <span className="label">Forward</span> →
           </button>
         </span>
+        <button className="presets-btn" onClick={openGallery} disabled={!ready} title="Start from a ready-made set of steps, shown on your picture">
+          Presets
+        </button>
         <ModeSwitch mode={view.mode} onMode={(m) => changeView(setMode(view, m))} />
         <span className="spacer" />
         <SetupChip summary={summary} onOpen={() => changeView(openSetup(view))} />
@@ -378,12 +455,16 @@ export function App() {
             Update
           </button>
         )}
-        <button onClick={() => void saveCheckpoint()} disabled={!project} title="Save the current settings as a checkpoint, with a small picture" aria-label="Save a checkpoint">
-          ＋ <span className="label">Checkpoint</span>
-        </button>
-        <button className={sidebar ? "on" : ""} onClick={() => setSidebar(!sidebar)} aria-pressed={sidebar} title="Show or hide your checkpoints (S)">
-          Checkpoints
-        </button>
+        <span className="cp-group">
+          <button className="cp-save" onClick={() => void saveCheckpoint()} disabled={!project} title="Save the current settings as a checkpoint, with a small picture (⌘S)" aria-label="Save checkpoint">
+            ＋ <span className="label">
+              Save<span className="long"> checkpoint</span>
+            </span>
+          </button>
+          <button className={sidebar ? "on" : ""} onClick={() => setSidebar(!sidebar)} aria-pressed={sidebar} title="Show or hide your checkpoints (S)">
+            Checkpoints
+          </button>
+        </span>
         <button className="reset" onClick={startOver} title="Start over from the default recipe. Keeps your image. Back undoes it." aria-label="Reset">
           ↺ <span className="label">Reset</span>
         </button>
@@ -495,9 +576,22 @@ export function App() {
                   <span>
                     Step {selected + 1} of {recipe.steps.length}
                   </span>
-                  <button className="link" onClick={() => changeView(select(view, RESULT))} title="Show the end result and every step's settings">
-                    All steps
-                  </button>
+                  <span className="side-head-tools">
+                    <button
+                      className="link"
+                      onClick={() => {
+                        const name = `Before branching at ${stepTitle(selected)}`;
+                        void saveCheckpoint(name, `Saved this version as “${name}”. Your changes from here on are a new version; the saved one stays in Checkpoints.`);
+                      }}
+                      disabled={!project}
+                      title="Save this version as a checkpoint, then try something else from this step on"
+                    >
+                      Branch from here
+                    </button>
+                    <button className="link" onClick={() => changeView(select(view, RESULT))} title="Show the end result and every step's settings">
+                      All steps
+                    </button>
+                  </span>
                 </div>
               )}
               {view.selection.kind !== "source" && (
@@ -511,12 +605,6 @@ export function App() {
                   inspect={inspect}
                   onInspect={inspectStage}
                   onChange={(r, proxy, step) => apply(r, proxy, step)}
-                  onReplace={(r) => {
-                    // A preset meets the source where it enters, like opening a recipe file does.
-                    const { recipe: fitted, note } = enter(r);
-                    apply(fitted, false);
-                    setNotice(note);
-                  }}
                   onRun={() => {
                     setDirty(false);
                     send(recipe, false, true);
@@ -581,6 +669,12 @@ export function App() {
           Opening your last session…
         </div>
       )}
+      {toast && (
+        <div className="toast" role="status">
+          {toast}
+        </div>
+      )}
+      {gallery && <PresetGallery items={gallery} thumbs={galleryThumbs} onPick={(id) => void choosePreset(id)} onClose={closeGallery} />}
       {help && <HelpPanel markdown={help.help} onClose={() => setHelp(null)} />}
     </div>
   );

@@ -13,6 +13,11 @@ function newId(now: number): string {
   return `${now.toString(36)}-${counter.toString(36).padStart(2, "0")}${rand}`;
 }
 
+/** A checkpoint's short date and time, e.g. "Nov 26, 01:38 PM". */
+export const checkpointTime = (t: number) => new Date(t).toLocaleString(undefined, { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" });
+/** What a checkpoint is called in the list: its name, or when it was saved. */
+export const checkpointLabel = (cp: Checkpoint) => cp.name || checkpointTime(cp.createdAt);
+
 export async function createCheckpoint(
   project: ProjectStore,
   input: { recipe: unknown; thumbnail?: Uint8Array; name?: string; note?: string; now?: number },

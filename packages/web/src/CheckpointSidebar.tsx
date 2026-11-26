@@ -1,17 +1,9 @@
-import { useEffect, useRef, useState } from "react";
-import { deleteCheckpoint, listAllGrouped, listForProject, updateCheckpoint, type CheckpointGroup } from "./checkpoints.ts";
+import { useEffect, useState } from "react";
+import { checkpointLabel, checkpointTime as when, deleteCheckpoint, listAllGrouped, listForProject, updateCheckpoint, type CheckpointGroup } from "./checkpoints.ts";
 import { estimateStorage, storageWarning, type Checkpoint, type Library, type ProjectStore } from "./storage/index.ts";
 
-/** True when a key press belongs to a text field, not to the app's shortcuts. */
-function typing(t: EventTarget | null): boolean {
-  if (!(t instanceof HTMLElement)) return false;
-  if (t.isContentEditable || t instanceof HTMLTextAreaElement || t instanceof HTMLSelectElement) return true;
-  return t instanceof HTMLInputElement && !["range", "checkbox", "radio", "button", "color", "file"].includes(t.type);
-}
-
-const when = (t: number) => new Date(t).toLocaleString(undefined, { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" });
-
-function Thumb(props: { project: ProjectStore; id: string }) {
+/** `version` changes when a picture may have arrived (it's drawn after the checkpoint is saved). */
+function Thumb(props: { project: ProjectStore; id: string; version: number }) {
   const [url, setUrl] = useState<string>();
   useEffect(() => {
     let alive = true;
@@ -25,23 +17,23 @@ function Thumb(props: { project: ProjectStore; id: string }) {
       alive = false;
       if (u) URL.revokeObjectURL(u);
     };
-  }, [props.project, props.id]);
+  }, [props.project, props.id, props.version]);
   return url ? <img src={url} alt="" /> : <span className="ckpt-nothumb">no preview</span>;
 }
 
-function Item(props: { project: ProjectStore; cp: Checkpoint; onRestore: () => void; onChanged: () => void; onDelete: () => void }) {
+function Item(props: { project: ProjectStore; cp: Checkpoint; version: number; onRestore: () => void; onChanged: () => void; onDelete: () => void }) {
   const { cp, project } = props;
   const [renaming, setRenaming] = useState(false);
   const [noting, setNoting] = useState(false);
-  const label = cp.name || when(cp.createdAt);
+  const label = checkpointLabel(cp);
   const save = async (patch: { name?: string; note?: string }) => {
     await updateCheckpoint(project, cp.id, patch);
     props.onChanged();
   };
   return (
     <li className="ckpt">
-      <button className="ckpt-thumb" onClick={props.onRestore} title={`Restore “${label}” (Back undoes it)`} aria-label={`Restore ${label}`}>
-        <Thumb project={project} id={cp.id} />
+      <button className="ckpt-thumb" onClick={props.onRestore} title={`Go back to “${label}”. Where you are now is saved first.`} aria-label={`Restore ${label}`}>
+        <Thumb project={project} id={cp.id} version={props.version} />
       </button>
       <div className="ckpt-meta">
         {renaming ? (
@@ -96,7 +88,8 @@ function Item(props: { project: ProjectStore; cp: Checkpoint; onRestore: () => v
 }
 
 /**
- * The checkpoints sidebar (right edge; a bottom drawer on phones). `S` toggles it. Shows
+ * The checkpoints sidebar (right edge; a bottom drawer on phones). `S` toggles it (the app's
+ * shortcuts, keys.ts). Shows
  * the open project's checkpoints, or checkpoints across projects, grouped by image.
  * Swipe-to-delete on phones is left for the mobile pass (#46).
  */
@@ -117,18 +110,6 @@ export function CheckpointSidebar(props: {
   const [reload, setReload] = useState(0);
   const [warning, setWarning] = useState<string | null>(null);
   const [deleted, setDeleted] = useState<{ project: ProjectStore; cp: Checkpoint; thumb: Uint8Array | undefined } | null>(null);
-
-  const toggle = useRef(props.onToggle);
-  toggle.current = props.onToggle;
-  useEffect(() => {
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key.toLowerCase() !== "s" || e.repeat || e.metaKey || e.ctrlKey || e.altKey || typing(e.target)) return;
-      e.preventDefault();
-      toggle.current();
-    };
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
-  }, []);
 
   useEffect(() => {
     if (!props.open || !library || !project) return;
@@ -165,8 +146,9 @@ export function CheckpointSidebar(props: {
           ×
         </button>
       </div>
-      <button className="primary ckpt-save" onClick={props.onSave} disabled={!project}>
-        ＋ Checkpoint
+      <p className="ckpt-explain">A checkpoint is a saved copy of your settings. Click one to go back to it; where you are now is saved first, so nothing is lost.</p>
+      <button className="primary ckpt-save" onClick={props.onSave} disabled={!project} title="Save the current settings as a checkpoint (⌘S)">
+        ＋ Save checkpoint
       </button>
       <label className="toggle ckpt-all" title="Show checkpoints across all your projects, grouped by image">
         <input type="checkbox" checked={showAll} onChange={(e) => setShowAll(e.target.checked)} /> Show all
@@ -175,14 +157,14 @@ export function CheckpointSidebar(props: {
       {warning && <div className="hint ckpt-warn">{warning}</div>}
       {deleted && (
         <div className="hint">
-          Deleted “{deleted.cp.name || when(deleted.cp.createdAt)}”.{" "}
+          Deleted “{checkpointLabel(deleted.cp)}”.{" "}
           <button className="link" onClick={() => void undoDelete()}>
             Undo
           </button>
         </div>
       )}
       <div className="ckpt-scroll">
-        {empty && <div className="hint">No checkpoints {showAll ? "yet" : "for this image yet"}. ＋ Checkpoint saves the current settings with a small picture.</div>}
+        {empty && <div className="hint">No checkpoints {showAll ? "yet" : "for this image yet"}. Save checkpoint (⌘S) saves the current settings with a small picture.</div>}
         {groups
           .filter((g) => g.checkpoints.length)
           .map((g) => (
@@ -195,7 +177,7 @@ export function CheckpointSidebar(props: {
               )}
               <ul>
                 {g.checkpoints.map((cp) => (
-                  <Item key={cp.id} project={g.project} cp={cp} onRestore={() => props.onRestore(cp)} onChanged={changed} onDelete={() => void remove(g.project, cp)} />
+                  <Item key={cp.id} project={g.project} cp={cp} version={props.version} onRestore={() => props.onRestore(cp)} onChanged={changed} onDelete={() => void remove(g.project, cp)} />
                 ))}
               </ul>
             </section>

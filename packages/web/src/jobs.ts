@@ -32,19 +32,26 @@ export class Jobs {
     while (this.running) await this.running;
   }
 
+  private take(): Task | undefined {
+    return this.fg.shift() ?? this.bg.shift()?.task;
+  }
+
   private pump(): void {
     if (this.running) return;
-    this.running = (async () => {
-      for (;;) {
-        const next = this.fg.shift() ?? this.bg.shift()?.task;
-        if (!next) break;
-        try {
-          await next();
-        } catch {
-          // A task reports its own failure; the queue carries on.
-        }
+    // Only start when there's work: `drain` awaits before it clears `running`, so the flag
+    // can't be cleared before it's set.
+    const first = this.take();
+    if (first) this.running = this.drain(first);
+  }
+
+  private async drain(first: Task): Promise<void> {
+    for (let next: Task | undefined = first; next; next = this.take()) {
+      try {
+        await next();
+      } catch {
+        // A task reports its own failure; the queue carries on.
       }
-      this.running = null;
-    })();
+    }
+    this.running = null;
   }
 }

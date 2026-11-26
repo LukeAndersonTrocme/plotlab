@@ -47,7 +47,14 @@ export type ToWorker =
       thumbs: number | null;
     }
   /** Full-resolution run (on-demand steps included) → files for the target. */
-  | { type: "export"; id: number; recipe: Recipe; format: ExportFormat; stem: string };
+  | { type: "export"; id: number; recipe: Recipe; format: ExportFormat; stem: string }
+  /** A checkpoint's picture: the end result of `recipe`, `side` px on the paper's long side. */
+  | { type: "thumbnail"; id: number; recipe: Recipe; side: number }
+  /**
+   * Preset gallery pictures, one per item, drawn in the background (a run or export that
+   * arrives meanwhile goes first). A newer gallery request replaces what's left of this one.
+   */
+  | { type: "gallery"; id: number; side: number; items: Array<{ key: string; recipe: Recipe }> };
 
 export type FromWorker =
   | {
@@ -75,6 +82,10 @@ export type FromWorker =
    * only some of `keys`; keys not listed are no longer in the strip.
    */
   | { type: "thumbs"; id: number; side: number; keys: string[]; items: Array<{ key: string; png: Blob }> }
+  /** A checkpoint's picture; null if it couldn't be drawn. */
+  | { type: "thumbnail"; id: number; png: Blob | null }
+  /** One preset gallery picture; null if that preset couldn't be drawn on this source. */
+  | { type: "gallery-thumb"; id: number; key: string; png: Blob | null }
   | { type: "exported"; id: number; name: string; mime: string; data: Uint8Array | string; notes: string[] }
   | { type: "export-error"; id: number; message: string }
   | { type: "error"; id: number; index?: number; message: string };

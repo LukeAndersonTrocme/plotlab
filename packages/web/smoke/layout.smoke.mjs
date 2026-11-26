@@ -165,6 +165,53 @@ try {
     await page.close();
   }
 
+  // Presets and checkpoints: the gallery draws each preset on your photo; picking one saves
+  // a checkpoint first; Save checkpoint and ⌘S / Ctrl+S save at once with a confirmation;
+  // restoring saves where you are first.
+  {
+    const page = await open(1280);
+    check(!(await page.$("aside.side select.add-step >> text=Start from a preset")), "presets are no longer in the step list");
+    await page.click("header.top .presets-btn");
+    await page.waitForSelector("[role=dialog] .gallery .look");
+    const n = await page.$$eval(".gallery .look", (els) => els.length);
+    await page.waitForFunction(() => [...document.querySelectorAll(".gallery .look")].every((l) => l.querySelector("img") || l.textContent.includes("Can't preview")), null, { timeout: 120_000 });
+    const pics = await page.$$eval(".gallery .look img", (els) => els.filter((i) => i.naturalWidth > 0).length);
+    check(n >= 5 && pics === n, `Presets opens the gallery with each preset drawn on the photo (${pics} of ${n} pictures)`);
+    const title = await page.textContent('.gallery .look[data-preset="topo-hatch"] .look-title');
+    await page.click('.gallery .look[data-preset="topo-hatch"]');
+    await page.waitForFunction(() => document.querySelector(".notice")?.textContent?.includes("saved as a checkpoint"), null, { timeout: 30_000 });
+    check(!(await page.$("[role=dialog]")), "picking a preset closes the gallery and says the old settings are saved");
+
+    await page.click("header.top button:has-text('Checkpoints')");
+    await page.waitForSelector(".ckpt-sidebar .ckpt-explain");
+    await page.waitForFunction((t) => [...document.querySelectorAll(".ckpt-sidebar .ckpt-name")].some((e) => e.textContent === `Before “${t}”`), title, { timeout: 10_000 });
+    check(true, `the checkpoints list explains itself and holds “Before “${title}”” after picking the preset`);
+
+    const count = () => page.$$eval(".ckpt-sidebar .ckpt", (els) => els.length);
+    const c0 = await count();
+    await page.click("header.top .cp-save");
+    await page.waitForSelector(".toast:has-text('Checkpoint saved')", { timeout: 5_000 });
+    await page.waitForFunction((c) => document.querySelectorAll(".ckpt-sidebar .ckpt").length === c + 1, c0, { timeout: 5_000 });
+    check(true, "Save checkpoint saves at once and confirms");
+    // Wait for the confirmation to go, so the next one is a new one.
+    await page.waitForSelector(".toast", { state: "detached", timeout: 10_000 });
+    await page.keyboard.press("ControlOrMeta+s");
+    await page.waitForSelector(".toast:has-text('Checkpoint saved')", { timeout: 5_000 });
+    await page.waitForFunction((c) => document.querySelectorAll(".ckpt-sidebar .ckpt").length === c + 2, c0, { timeout: 5_000 });
+    check(true, "⌘S / Ctrl+S saves a checkpoint and confirms");
+    await page.waitForFunction(() => [...document.querySelectorAll(".ckpt-sidebar .ckpt-thumb")].every((b) => b.querySelector("img")), null, { timeout: 30_000 });
+    check(true, "every checkpoint gets its picture");
+
+    // Restore the one saved before the preset: where you are is saved first.
+    const c1 = await count();
+    await page.click(`.ckpt-sidebar .ckpt:has(.ckpt-name:text-is("Before “${title}”")) .ckpt-thumb`);
+    await page.waitForFunction(() => document.querySelector(".notice")?.textContent?.includes("Restored"), null, { timeout: 10_000 });
+    const note = await page.textContent(".notice");
+    // The current settings were just saved by ⌘S, so nothing new is needed.
+    check(/already a checkpoint|saved as a checkpoint/.test(note) && (await count()) >= c1, `restoring says where you were is kept ("${note.split("\n")[0]}")`);
+    await page.close();
+  }
+
   // Dark mode: the chrome goes dark, the paper stays paper-coloured.
   {
     const page = await open(1280, "dark");

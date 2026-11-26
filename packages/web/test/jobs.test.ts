@@ -93,4 +93,13 @@ describe("jobs: one at a time, foreground first", () => {
     await jobs.idle();
     expect(log).toEqual(["next"]);
   });
+
+  it("keeps working after an empty request (clearing the gallery when nothing was queued)", async () => {
+    const jobs = new Jobs();
+    const log: string[] = [];
+    jobs.background("gallery", []);
+    jobs.foreground(async () => void log.push("run"));
+    await jobs.idle();
+    expect(log).toEqual(["run"]);
+  });
 });
