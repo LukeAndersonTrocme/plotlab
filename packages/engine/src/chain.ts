@@ -1,7 +1,7 @@
 import { defaultParams } from "./params.ts";
 import type { Recipe, RecipeStep } from "./recipe.ts";
-import type { StepRegistry } from "./step.ts";
-import type { StageKind } from "./types.ts";
+import type { AnyStep, StepRegistry } from "./step.ts";
+import type { Ink, StageKind } from "./types.ts";
 
 /**
  * Chain rules for reordering, adding and removing steps (ADR 0009). Steps may go
@@ -76,13 +76,30 @@ export function insertStep(
     const steps = [...recipe.steps];
     steps.splice(i, 0, fresh);
     const res = validated(recipe, steps, registry);
-    if ("recipe" in res) return { recipe: res.recipe, index: i };
+    if ("recipe" in res) return { recipe: withStepInks(res.recipe, def), index: i };
     reason ||= res.reason;
   }
   // Prefer the reason about the new step itself (it's the one the person is placing).
   const end = [...recipe.steps, fresh];
   const own = checkChain(recipe.input, end, registry).find((x) => x.index === end.length - 1);
   return { reason: own?.reason ?? reason };
+}
+
+/**
+ * The recipe with a step's default inks (`layerInks` on the step) added: inks the recipe
+ * lacks are appended, and layers without an ink are pointed at theirs. Inks and layer
+ * assignments the recipe already has are kept.
+ */
+export function withStepInks(recipe: Recipe, def: AnyStep): Recipe {
+  const defaults = def.layerInks as Record<string, Ink> | undefined;
+  if (!defaults) return recipe;
+  const inks = [...recipe.inks];
+  const layerInks = { ...recipe.layerInks };
+  for (const [layer, ink] of Object.entries(defaults)) {
+    if (!inks.some((i) => i.id === ink.id)) inks.push({ ...ink });
+    if (!(layer in layerInks)) layerInks[layer] = ink.id;
+  }
+  return { ...recipe, inks, layerInks };
 }
 
 export function removeStep(recipe: Recipe, index: number, registry: StepRegistry): ChainResult {
