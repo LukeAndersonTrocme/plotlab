@@ -1,4 +1,4 @@
-import { checkChain, insertStep, moveStep, STAGE_WORDS, type ChainResult, type Recipe, type StageKind, type StepRegistry } from "@plotlab/engine";
+import { checkChain, insertStep, isSplitStep, moveStep, splitWith, STAGE_WORDS, type ChainResult, type Recipe, type StageKind, type StepRegistry } from "@plotlab/engine";
 import { stepIcon } from "./strip.ts";
 
 /**
@@ -26,6 +26,8 @@ export interface AddOption {
   summary: string;
   output: StageKind;
   experimental: boolean;
+  /** Adding it splits the picture into inks (Separate CMYK): the steps after it apply to every ink. */
+  split: boolean;
 }
 
 export interface AddMenu {
@@ -39,12 +41,26 @@ export interface AddMenu {
 
 const ORDER = "Each step turns one kind of data into the next: an image → layers → lines → a plot.";
 
-/** The steps a "+" at `gap` offers: exactly those `insertStep` accepts there. */
+/**
+ * Add a step at `gap`. A step that splits the picture into inks (Separate CMYK) splits it
+ * (`splitWith`): it takes the place of the step that made the layers, and the steps after it
+ * apply to every ink. Any other step goes in as it is (`insertStep`).
+ */
+function place(recipe: Recipe, registry: StepRegistry, gap: number, stepId: string): { recipe: Recipe; index: number; split: boolean } | { reason: string } {
+  if (isSplitStep(registry.get(stepId))) {
+    const res = splitWith(recipe, stepId, registry, gap);
+    return "reason" in res ? res : { recipe: res.recipe, index: res.index, split: true };
+  }
+  const res = insertStep(recipe, stepId, registry, gap);
+  return "reason" in res ? res : { ...res, split: false };
+}
+
+/** The steps a "+" at `gap` offers: exactly those that can go there (`addAt` accepts). */
 export function addMenu(recipe: Recipe, registry: StepRegistry, gap: number): AddMenu {
   const stage = stageAt(recipe, registry, gap);
   const options: AddOption[] = registry
     .list()
-    .filter((def) => "recipe" in insertStep(recipe, def.id, registry, gap))
+    .filter((def) => "recipe" in place(recipe, registry, gap, def.id))
     .map((def) => ({
       id: def.id,
       title: def.title,
@@ -52,6 +68,7 @@ export function addMenu(recipe: Recipe, registry: StepRegistry, gap: number): Ad
       summary: def.summary,
       output: def.output as StageKind,
       experimental: Boolean(def.experimental),
+      split: isSplitStep(def),
     }));
   if (options.length) return { stage, options, reason: null };
   const issue = checkChain(recipe.input, recipe.steps, registry)[0];
@@ -63,11 +80,14 @@ export function addMenu(recipe: Recipe, registry: StepRegistry, gap: number): Ad
   return { stage, options, reason };
 }
 
-/** Add a step at `gap` (default settings and inks); `id` is the new step's stable id. */
-export function addAt(recipe: Recipe, registry: StepRegistry, gap: number, stepId: string): { recipe: Recipe; id: string } | { reason: string } {
-  const res = insertStep(recipe, stepId, registry, gap);
+/**
+ * Add a step at `gap` (default settings and inks); `id` is the new step's stable id. `split`:
+ * it split the picture into inks (the app saves a checkpoint first, as for "Split into CMYK").
+ */
+export function addAt(recipe: Recipe, registry: StepRegistry, gap: number, stepId: string): { recipe: Recipe; id: string; split: boolean } | { reason: string } {
+  const res = place(recipe, registry, gap, stepId);
   if ("reason" in res) return res;
-  return { recipe: res.recipe, id: res.recipe.steps[res.index]!.id };
+  return { recipe: res.recipe, id: res.recipe.steps[res.index]!.id, split: res.split };
 }
 
 /** Move the step at `from` into `gap` (the gap's index is counted before the move). */

@@ -54,3 +54,37 @@ export function renderThumbnail(data: StageData, s: ThumbnailSettings, maxSide: 
   const r = renderPlates(data, plot, { ...s, target: { kind: "vector" } }, dpi);
   return { width: r.width, height: r.height, rgba: composite(r) };
 }
+
+/** The stage with only one layer left (lines, layers and the layers that aren't lines yet). */
+function onlyLayer(data: StageData, id: string): StageData {
+  const keep = <L extends { id: string }>(ls: L[]) => ls.filter((l) => l.id === id);
+  switch (data.kind) {
+    case "image":
+      return data;
+    case "layers":
+      return { ...data, layers: keep(data.layers) };
+    case "geometry":
+    case "plot": {
+      const rest = data.rasterLayers ? { rasterLayers: { ...data.rasterLayers, layers: keep(data.rasterLayers.layers) } } : {};
+      return { ...data, layers: keep(data.layers as Array<{ id: string }>), ...rest } as StageData;
+    }
+  }
+}
+
+/**
+ * A lane thumbnail (#66): each ink alone on its own small paper, tiled 2×2 in the order given
+ * (C top left, M top right, Y bottom left, K bottom right), so one strip box shows every ink.
+ * Each quarter's long side is `maxSide / 2`. RGBA bytes.
+ */
+export function renderLaneThumbnail(data: StageData, s: ThumbnailSettings, maxSide: number, layers: string[]): { width: number; height: number; rgba: Uint8ClampedArray } {
+  const half = Math.max(1, Math.floor(maxSide / 2));
+  const quarters = layers.slice(0, 4).map((id) => renderThumbnail(onlyLayer(data, id), s, half));
+  const qw = quarters[0]?.width ?? half, qh = quarters[0]?.height ?? half;
+  const width = qw * 2, height = qh * 2;
+  const rgba = new Uint8ClampedArray(width * height * 4).fill(255);
+  quarters.forEach((q, k) => {
+    const ox = (k % 2) * qw, oy = Math.floor(k / 2) * qh;
+    for (let y = 0; y < Math.min(qh, q.height); y++) rgba.set(q.rgba.subarray(y * q.width * 4, (y * q.width + Math.min(qw, q.width)) * 4), ((oy + y) * width + ox) * 4);
+  });
+  return { width, height, rgba };
+}

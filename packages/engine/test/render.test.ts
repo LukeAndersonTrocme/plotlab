@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { imageToRGBA, layerToRGBA, renderThumbnail, type Position } from "../src/index.ts";
+import { imageToRGBA, layerToRGBA, renderLaneThumbnail, renderThumbnail, type Position } from "../src/index.ts";
 
 describe("imageToRGBA", () => {
   it("expands gray to opaque RGBA", () => {
@@ -59,5 +59,30 @@ describe("renderThumbnail", () => {
     const img = { kind: "image" as const, width: 1, height: 1, channels: 1 as const, data: new Float32Array([0]), frame: { xMm: 0, yMm: 0, widthMm: 50, heightMm: 50 } };
     const t = renderThumbnail(img, { ...s, target: { kind: "plotter", mirror: true, registration: true } } as never, 40);
     expect(at(t, 5, 10)).toEqual([0, 0, 0]);
+  });
+});
+
+describe("renderLaneThumbnail: one picture per ink, as a 2×2", () => {
+  const paper = { widthMm: 100, heightMm: 100 };
+  const ink = (id: string, color: string) => ({ id, name: id, color, mix: "multiply" as const, widthMm: 0.5 });
+  const inks = { C: ink("c", "#00ffff"), M: ink("m", "#ff00ff"), Y: ink("y", "#ffff00"), K: ink("k", "#000000") };
+  const s = { paper, inks: Object.values(inks), inkFor: (id: string) => inks[id as keyof typeof inks], passOrder: "light-to-dark" as const };
+  const at = (t: { width: number; rgba: Uint8ClampedArray }, x: number, y: number) => [...t.rgba.slice((y * t.width + x) * 4, (y * t.width + x) * 4 + 3)];
+  const full = (id: string) => ({ id, name: id, values: { kind: "tone" as const, data: new Float32Array([1]) } });
+
+  it("C top left, M top right, Y bottom left, K bottom right, each ink alone on its own paper", () => {
+    const layers = { kind: "layers" as const, width: 1, height: 1, frame: { xMm: 0, yMm: 0, widthMm: 100, heightMm: 100 }, layers: ["C", "M", "Y", "K"].map(full) };
+    const t = renderLaneThumbnail(layers, s, 40, ["C", "M", "Y", "K"]);
+    expect([t.width, t.height]).toEqual([40, 40]);
+    expect(at(t, 10, 10)).toEqual([0, 255, 255]);
+    expect(at(t, 30, 10)).toEqual([255, 0, 255]);
+    expect(at(t, 10, 30)).toEqual([255, 255, 0]);
+    expect(at(t, 30, 30)).toEqual([0, 0, 0]);
+  });
+  it("an ink with nothing at this stage is bare paper in its quarter", () => {
+    const layers = { kind: "layers" as const, width: 1, height: 1, frame: { xMm: 0, yMm: 0, widthMm: 100, heightMm: 100 }, layers: [full("C")] };
+    const t = renderLaneThumbnail(layers, s, 40, ["C", "M", "Y", "K"]);
+    expect(at(t, 10, 10)).toEqual([0, 255, 255]);
+    expect(at(t, 30, 30)).toEqual([255, 255, 255]);
   });
 });
