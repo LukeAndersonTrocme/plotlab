@@ -35,7 +35,7 @@ still to be argued over with Nick. Change a term here first, then rename it ever
 | **Machine profile** | Description of a plotter: bed, speeds, protocol | the machine settings | device config |
 | **Step** | One operation in the pipeline, with its own parameters | a trick, a move | function |
 | **Recipe** | The ordered steps + all parameter values, as JSON | the settings, the process | pipeline config |
-| **Checkpoint** | A saved moment while exploring: recipe + thumbnail + optional name/note, tied to its source. Saved by hand; clicking one restores it (undoable). Working name, open to Nick | a version, a save | snapshot / parameter set |
+| **Checkpoint** | A saved moment while exploring: recipe + thumbnail + optional name/note, tied to its source. Saved by hand (Save checkpoint, ⌘S, Branch from here), and automatically before a preset or a restore replaces the recipe; clicking one restores it (undoable). Working name, open to Nick | a version, a save | snapshot / parameter set |
 | **Variant** | A randomized suggestion from Explore. Temporary; starring one keeps it as a checkpoint | a try, an option | random sample |
 | **Project** | One source with its recipe and checkpoints, stored as a project folder | a piece, a project | workspace |
 | **Bundle** | A project folder zipped into one file, for sharing or moving between devices | the file | archive |

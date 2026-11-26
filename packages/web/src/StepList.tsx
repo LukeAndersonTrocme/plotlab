@@ -16,11 +16,9 @@ import {
   type StageKind,
   type StepRegistry,
 } from "@plotlab/engine";
-import { applyPreset, presets } from "@plotlab/steps";
 import { LayerScope } from "./LayerScope.tsx";
 import { ParamControl } from "./ParamControl.tsx";
 import { splitSettings } from "./settings.ts";
-import { TARGETS } from "./setup.ts";
 import type { InspectTarget, StepInfo } from "./protocol.ts";
 import { STAGE_NAMES } from "./strip.ts";
 
@@ -40,8 +38,6 @@ export function StepList(props: {
   inspect: InspectTarget;
   onInspect: (t: InspectTarget) => void;
   onChange: (r: Recipe, proxy: boolean, step?: AnyStep) => void;
-  /** A whole new chain (a preset): the app fits it to the source before applying it. */
-  onReplace: (r: Recipe) => void;
   onRun: () => void;
   onHelp: (def: AnyStep) => void;
   onNotice: (msg: string) => void;
@@ -234,31 +230,6 @@ export function StepList(props: {
 
   return (
     <div className="steps">
-      <select
-        className="add-step"
-        value=""
-        title="Replace the steps with a ready-made chain. You can change everything afterwards."
-        onChange={(e) => {
-          const p = presets.find((x) => x.id === e.target.value);
-          if (!p) return;
-          const next = applyPreset(recipe, p.id);
-          const label = TARGETS.find((t) => t.kind === next.target.kind)?.label ?? next.target.kind;
-          const also =
-            JSON.stringify(next.target) === JSON.stringify(recipe.target)
-              ? ""
-              : next.target.kind !== recipe.target.kind
-                ? ` and switch the output to ${label}`
-                : ` and change the ${label} settings`;
-          if (recipe.steps.length === 0 || window.confirm(`Replace your steps with "${p.title}"${also}?`)) props.onReplace(next);
-        }}
-      >
-        <option value="">Start from a preset…</option>
-        {presets.map((p) => (
-          <option key={p.id} value={p.id} title={p.summary}>
-            {p.title}
-          </option>
-        ))}
-      </select>
       {items}
       <AddStep recipe={recipe} registry={registry} onAdd={(r) => props.onChange(r, false)} onNotice={props.onNotice} />
     </div>

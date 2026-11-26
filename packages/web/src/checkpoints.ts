@@ -13,6 +13,11 @@ function newId(now: number): string {
   return `${now.toString(36)}-${counter.toString(36).padStart(2, "0")}${rand}`;
 }
 
+/** A checkpoint's short date and time, e.g. "Nov 26, 01:38 PM". */
+export const checkpointTime = (t: number) => new Date(t).toLocaleString(undefined, { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" });
+/** What a checkpoint is called in the list: its name, or when it was saved. */
+export const checkpointLabel = (cp: Checkpoint) => cp.name || checkpointTime(cp.createdAt);
+
 export async function createCheckpoint(
   project: ProjectStore,
   input: { recipe: unknown; thumbnail?: Uint8Array; name?: string; note?: string; now?: number },
@@ -52,6 +57,37 @@ export async function updateCheckpoint(project: ProjectStore, id: string, patch:
 
 export const deleteCheckpoint = (project: ProjectStore, id: string) => project.deleteCheckpoint(id);
 
+/**
+ * Adds the picture to a checkpoint saved without one. Saving doesn't wait for the picture
+ * (it's drawn in the worker); a checkpoint deleted meanwhile stays deleted.
+ */
+export async function attachThumbnail(project: ProjectStore, id: string, thumbnail: Uint8Array): Promise<void> {
+  const cp = await project.getCheckpoint(id);
+  if (cp) await project.putCheckpoint(cp, thumbnail);
+}
+
+/** Same JSON content, whatever the key order (a restored recipe has been through the upgrader). */
+export function sameRecipe(a: unknown, b: unknown): boolean {
+  return canonical(a) === canonical(b);
+}
+const canonical = (v: unknown): string =>
+  JSON.stringify(v, (_k, x: unknown) =>
+    x && typeof x === "object" && !Array.isArray(x) ? Object.fromEntries(Object.entries(x as Record<string, unknown>).sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0))) : x,
+  );
+
+/**
+ * The checkpoint saved before something replaces the recipe (a preset, a restore), so no
+ * work is lost. A recipe that's already a checkpoint isn't saved twice: that one is returned.
+ */
+export async function autoCheckpoint(
+  project: ProjectStore,
+  input: { recipe: unknown; name: string; now?: number },
+): Promise<{ checkpoint: Checkpoint; created: boolean }> {
+  const existing = (await listForProject(project)).find((c) => sameRecipe(c.recipe, input.recipe));
+  if (existing) return { checkpoint: existing, created: false };
+  return { checkpoint: await createCheckpoint(project, input), created: true };
+}
+
 type Parse<R> = (json: unknown) => { recipe: R; warnings: string[] };
 
 /**
@@ -61,6 +97,23 @@ type Parse<R> = (json: unknown) => { recipe: R; warnings: string[] };
 export function restoreCheckpoint<R>(history: History<R>, cp: Checkpoint, parse: Parse<R>): { history: History<R>; recipe: R; warnings: string[] } {
   const { recipe, warnings } = parse(cp.recipe);
   return { history: commit(history, recipe), recipe, warnings };
+}
+
+/**
+ * Restoring from the Checkpoints list: where you are now is saved first (in the current
+ * project), then the checkpoint is restored as one Back step. If saving fails, nothing is
+ * restored (the error is thrown).
+ */
+export async function restoreSafely<R>(
+  library: Library,
+  current: ProjectStore,
+  cp: Checkpoint,
+  history: History<R>,
+  parse: Parse<R>,
+  save: { name: string; now?: number },
+): Promise<Awaited<ReturnType<typeof restoreFrom<R>>> & { saved: { checkpoint: Checkpoint; created: boolean } }> {
+  const saved = await autoCheckpoint(current, { recipe: history.present, ...save });
+  return { ...(await restoreFrom(library, current, cp, history, parse)), saved };
 }
 
 /**

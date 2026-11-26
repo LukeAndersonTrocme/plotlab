@@ -4,6 +4,8 @@ import { estimatePlot, getMachine } from "@plotlab/machines";
 import { createRegistry } from "@plotlab/steps";
 import type { FromWorker, InspectTarget, InspectView, RasterView, ToWorker } from "./protocol.ts";
 import { shownAt } from "./strip.ts";
+import { Jobs } from "./jobs.ts";
+import { drawResult, laneOf } from "./pictures.ts";
 import { ThumbnailRenderer } from "./thumbs.ts";
 
 /** Longest side of the low-res proxy used while dragging. */
@@ -17,6 +19,10 @@ const THUMB_BUDGET_MS = 25;
 const registry = createRegistry();
 const full = new Pipeline(registry);
 const proxy = new Pipeline(registry);
+/** Checkpoint and gallery pictures: their own pipeline, so the canvas cache stays as it is. */
+const picturePipe = new Pipeline(registry);
+/** Gallery pictures by recipe and size, for this source: reopening the gallery is instant. */
+let galleryCache = new Map<string, Promise<Blob>>();
 let src: { source: Source; key: string } | null = null;
 /** Encoded PNGs keyed by the pixel buffer they came from (outputs are cached by the pipeline, so identity is stable). */
 let pngCache = new WeakMap<object, Map<string, Promise<Blob>>>();
@@ -82,19 +88,49 @@ async function proofView(output: StageData, plot: Plot | null, recipe: Recipe, p
 }
 
 // One message at a time: an export must not interleave with a run on the same pipeline cache.
-let queue: Promise<void> = Promise.resolve();
-/** Messages received so far; a handler numbered below this has a newer request waiting. */
-let arrived = 0;
+// Pictures (checkpoint, gallery) wait in the background, one at a time, behind any run (pictures.ts).
+const jobs = new Jobs();
 self.onmessage = (e: MessageEvent<ToWorker>) => {
-  const n = ++arrived;
-  queue = queue.then(() => handle(e.data, n));
+  const msg = e.data;
+  const lane = laneOf(msg);
+  if (lane.lane === "foreground") {
+    if (msg.type !== "thumbnail" && msg.type !== "gallery") jobs.foreground(() => handle(msg));
+    return;
+  }
+  // The source is the one current when asked: a picture asked for before an image switch is of the old image.
+  const at = src;
+  if (msg.type === "gallery") jobs.background(lane.group, msg.items.map((item) => () => galleryThumb(at, msg.id, msg.side, item)));
+  else if (msg.type === "thumbnail") jobs.background(lane.group, [() => checkpointThumb(at, msg)]);
 };
+
+/** A checkpoint's picture: its end result, without running on-demand steps (never a full-resolution run). */
+async function checkpointThumb(at: typeof src, msg: Extract<ToWorker, { type: "thumbnail" }>): Promise<void> {
+  const png = at
+    ? await drawResult(picturePipe, at, msg.recipe, msg.side)
+        .then((r) => thumbnails.png(r.output, msg.recipe, msg.side))
+        .catch(() => null)
+    : null;
+  post({ type: "thumbnail", id: msg.id, png });
+}
+
+/** One preset drawn on the source, at about thumbnail resolution. */
+async function galleryThumb(at: typeof src, id: number, side: number, item: { key: string; recipe: Recipe }): Promise<void> {
+  if (!at) return;
+  const k = JSON.stringify([side, item.recipe]);
+  let p = galleryCache.get(k);
+  if (!p) {
+    p = drawResult(picturePipe, at, item.recipe, side).then((r) => thumbnails.png(r.output, item.recipe, side));
+    galleryCache.set(k, p);
+    p.catch(() => galleryCache.delete(k));
+  }
+  post({ type: "gallery-thumb", id, key: item.key, png: await p.catch(() => null) });
+}
 
 /**
  * One thumbnail per strip box: the source, then each step's output (what passes through
  * for a switched-off step; traced order for an on-demand step that hasn't run).
  */
-async function postThumbs(msg: Extract<ToWorker, { type: "run" }>, side: number, placed: StageData, results: StepResult[], n: number): Promise<void> {
+async function postThumbs(msg: Extract<ToWorker, { type: "run" }>, side: number, placed: StageData, results: StepResult[]): Promise<void> {
   const ran = results.map((r) => r.index);
   const boxes = [
     { key: "source", data: placed },
@@ -107,17 +143,20 @@ async function postThumbs(msg: Extract<ToWorker, { type: "run" }>, side: number,
   const t0 = performance.now();
   for (const b of boxes) {
     const fresh = !thumbnails.has(b.data, msg.recipe, side);
-    if (fresh && arrived > n && performance.now() - t0 > THUMB_BUDGET_MS) break;
+    if (fresh && jobs.waiting() && performance.now() - t0 > THUMB_BUDGET_MS) break;
     items.push({ key: b.key, png: await thumbnails.png(b.data, msg.recipe, side) });
   }
   post({ type: "thumbs", id: msg.id, side, keys: boxes.map((b) => b.key), items });
 }
 
-async function handle(msg: ToWorker, n: number): Promise<void> {
+async function handle(msg: Exclude<ToWorker, { type: "gallery" | "thumbnail" }>): Promise<void> {
   if (msg.type === "source") {
     src = { source: msg.source, key: msg.key };
     full.reset();
     proxy.reset();
+    picturePipe.reset();
+    galleryCache = new Map();
+    jobs.background("gallery", []);
     pngCache = new WeakMap();
     thumbnails.reset();
     return;
@@ -167,7 +206,7 @@ async function handle(msg: ToWorker, n: number): Promise<void> {
       proof: msg.proof ? await proofView(output, plot, msg.recipe, msg.proxy) : null,
     });
     // A thumbnail that fails to draw leaves the strip as it was; the run itself went fine.
-    if (msg.thumbs) await postThumbs(msg, msg.thumbs, placed, results, n).catch(() => undefined);
+    if (msg.thumbs) await postThumbs(msg, msg.thumbs, placed, results).catch(() => undefined);
   } catch (err) {
     post({
       type: "error",

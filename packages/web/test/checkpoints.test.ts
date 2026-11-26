@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { memoryLibrary, type Library, type ProjectStore } from "../src/storage/index.ts";
 import { canUndo, commit, createHistory, preview, undo } from "../src/history.ts";
-import { createCheckpoint, deleteCheckpoint, listAllGrouped, listForProject, restoreCheckpoint, restoreFrom, updateCheckpoint } from "../src/checkpoints.ts";
+import { attachThumbnail, autoCheckpoint, createCheckpoint, deleteCheckpoint, listAllGrouped, listForProject, restoreCheckpoint, restoreFrom, restoreSafely, sameRecipe, updateCheckpoint } from "../src/checkpoints.ts";
 
 const thumb = new Uint8Array([137, 80, 78, 71]);
 async function project(lib: Library, name: string, ...b: number[]): Promise<ProjectStore> {
@@ -106,4 +106,82 @@ describe("checkpoints", () => {
     expect(r.history.present).toEqual({ n: 7 });
     expect(r.warnings.join()).toMatch(/isn't stored/);
   });
+
+  it("a thumbnail can be added after the checkpoint is saved (saving doesn't wait for the picture)", async () => {
+    const p = await project(memoryLibrary(), "a.png", 1);
+    const cp = await createCheckpoint(p, { recipe: { n: 1 }, name: "x", now: 1 });
+    expect(await p.getThumbnail(cp.id)).toBeUndefined();
+    await attachThumbnail(p, cp.id, thumb);
+    expect([...(await p.getThumbnail(cp.id))!]).toEqual([...thumb]);
+    expect(await p.getCheckpoint(cp.id)).toEqual(cp);
+    // A checkpoint deleted meanwhile stays deleted.
+    await deleteCheckpoint(p, cp.id);
+    await attachThumbnail(p, cp.id, thumb);
+    expect(await listForProject(p)).toEqual([]);
+  });
 });
+
+describe("saving before a change that replaces the recipe", () => {
+  it("compares recipes by content, whatever the key order", () => {
+    expect(sameRecipe({ a: 1, b: { c: [1, 2], d: 2 } }, { b: { d: 2, c: [1, 2] }, a: 1 })).toBe(true);
+    expect(sameRecipe({ a: 1 }, { a: 2 })).toBe(false);
+    expect(sameRecipe({ s: [1, 2] }, { s: [2, 1] })).toBe(false);
+  });
+
+  it("saves the recipe as a named checkpoint", async () => {
+    const p = await project(memoryLibrary(), "a.png", 1);
+    const r = await autoCheckpoint(p, { recipe: { n: 1 }, name: "Before “Fine hatching”", now: 4 });
+    expect(r.created).toBe(true);
+    expect(r.checkpoint).toMatchObject({ recipe: { n: 1 }, name: "Before “Fine hatching”", createdAt: 4 });
+    expect(await listForProject(p)).toEqual([r.checkpoint]);
+  });
+
+  it("doesn't save a second copy of a recipe that's already a checkpoint", async () => {
+    const p = await project(memoryLibrary(), "a.png", 1);
+    const first = await createCheckpoint(p, { recipe: { n: 1, m: 2 }, now: 1 });
+    const r = await autoCheckpoint(p, { recipe: { m: 2, n: 1 }, name: "Before restoring", now: 2 });
+    expect(r).toEqual({ checkpoint: first, created: false });
+    expect((await listForProject(p)).length).toBe(1);
+  });
+
+  it("restoring saves where you are first, then restores as one Back step", async () => {
+    const lib = memoryLibrary();
+    const p = await project(lib, "a.png", 1);
+    const cp = await createCheckpoint(p, { recipe: { n: 9 }, name: "soft", now: 1 });
+    const h = commit(createHistory({ n: 0 }), { n: 5 });
+    const r = await restoreSafely(lib, p, cp, h, parse, { name: "Before restoring “soft”", now: 2 });
+    expect(r.saved?.created).toBe(true);
+    expect(r.saved?.checkpoint).toMatchObject({ recipe: { n: 5 }, name: "Before restoring “soft”" });
+    expect(r.history.present).toEqual({ n: 9 });
+    expect(undo(r.history).present).toEqual({ n: 5 });
+    expect((await listForProject(p)).map((c) => c.recipe)).toEqual([{ n: 5 }, { n: 9 }]);
+  });
+
+  it("restoring the checkpoint you're already on saves nothing new", async () => {
+    const lib = memoryLibrary();
+    const p = await project(lib, "a.png", 1);
+    const cp = await createCheckpoint(p, { recipe: { n: 9 }, now: 1 });
+    const r = await restoreSafely(lib, p, cp, createHistory({ n: 9 }), parse, { name: "Before restoring", now: 2 });
+    expect(r.saved).toEqual({ checkpoint: cp, created: false });
+    expect((await listForProject(p)).length).toBe(1);
+  });
+
+  it("restoring a checkpoint of another image saves where you are in the current project", async () => {
+    const lib = memoryLibrary();
+    const a = await project(lib, "a.png", 1);
+    const b = await project(lib, "b.png", 2);
+    const cp = await createCheckpoint(b, { recipe: { n: 7 }, now: 1 });
+    const r = await restoreSafely(lib, a, cp, createHistory({ n: 3 }), parse, { name: "Before restoring", now: 2 });
+    expect(r.project.id).toBe(b.id);
+    expect((await listForProject(a)).map((c) => c.recipe)).toEqual([{ n: 3 }]);
+  });
+
+  it("if saving first fails, nothing is restored", async () => {
+    const lib = memoryLibrary();
+    const p = await project(lib, "a.png", 1);
+    const cp = await createCheckpoint(p, { recipe: { n: 9 }, now: 1 });
+    const broken: ProjectStore = { ...p, listCheckpoints: p.listCheckpoints, putCheckpoint: async () => Promise.reject(new Error("disk full")) };
+    await expect(restoreSafely(lib, broken, cp, createHistory({ n: 1 }), parse, { name: "Before restoring" })).rejects.toThrow("disk full");
+  });
+});
+
