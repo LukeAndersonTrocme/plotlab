@@ -10,6 +10,7 @@ import { fmtTime, setupSummary } from "./setup.ts";
 import { ModeSwitch, SetupChip } from "./Shell.tsx";
 import { canvasTarget, fitSelection, initialView, openSetup, readThumbSize, resizeThumbs, RESULT, select, selectedIndex, setMode, SOURCE, stepSelection, toggleSelect, writeThumbSize, type ViewState } from "./view.ts";
 import { Strip } from "./Strip.tsx";
+import { addAt, moveToGap } from "./gaps.ts";
 import { stripBoxes, thumbRenderSide, toggleBypass } from "./strip.ts";
 import { EMPTY_RUN, Runner, type RunState } from "./runner.ts";
 import { decodeFile, loadSample, sampleSource } from "./sample.ts";
@@ -309,6 +310,15 @@ export function App() {
     // Only ask the worker again when what it draws changes (the canvas, or thumbnail size).
     if (!started.current) return;
     if (canvasTarget(next, recipeRef.current) !== runner.inspect || thumbSide(next) !== runner.thumbs) send(recipeRef.current, false);
+  };
+  /** A chain edit from the strip that ends with a step selected: the canvas shows that step. */
+  const applySelecting = (next: Recipe, id: string) => {
+    if (!ready) return;
+    const v = select(viewRef.current, stepSelection(id));
+    // Set the view first, so the run this edit sends already draws the selected step.
+    viewRef.current = v;
+    setView(v);
+    apply(next, false);
   };
   const inspectStage = (t: InspectTarget) => {
     const id = typeof t === "number" ? recipe.steps[t]?.id : undefined;
@@ -650,6 +660,8 @@ export function App() {
       </main>
       {view.mode === "design" && (
         <Strip
+          recipe={recipe}
+          registry={registry}
           boxes={stripBoxes(recipe, registry, run)}
           thumbs={run.thumbs}
           selected={view.selection.kind === "step" ? view.selection.id : view.selection.kind === "source" ? "source" : null}
@@ -662,6 +674,17 @@ export function App() {
           }}
           onResize={(px) => changeView(resizeThumbs(viewRef.current, px))}
           onNotice={setNotice}
+          onAdd={(gap, stepId) => {
+            const res = addAt(recipe, registry, gap, stepId);
+            if ("reason" in res) setNotice(res.reason);
+            else applySelecting(res.recipe, res.id);
+          }}
+          onMove={(from, gap) => {
+            const id = recipe.steps[from]?.id;
+            const res = moveToGap(recipe, registry, from, gap);
+            if ("reason" in res) setNotice(res.reason);
+            else if (id) applySelecting(res.recipe, id);
+          }}
         />
       )}
       {!ready && (

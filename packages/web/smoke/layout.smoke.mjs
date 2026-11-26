@@ -144,10 +144,19 @@ try {
     const byp = await page.$eval(`.strip .box[data-key="${first}"] .byp`, (e) => ({ disabled: e.getAttribute("aria-disabled"), label: e.getAttribute("aria-label") }));
     check(byp.disabled === "true" && /Can't switch off/.test(byp.label), `bypass is off on a stage-changing step, with a reason ("${byp.label}")`);
 
-    // Bypass works on a step that keeps its stage (Pixelate: layers in, layers out).
     await page.click(".view-bar button:has-text('Show final')").catch(() => {});
-    await page.selectOption("aside.side select.add-step >> nth=-1", "pixelate");
-    await page.waitForSelector('.strip .box[data-key="pixelate"]');
+    // "+" after Threshold offers only steps that work on layers; picking one adds a box and selects it.
+    await page.click('.strip .gap[data-gap="1"] .plus');
+    await page.waitForSelector(".add-menu[role=menu]");
+    const offered = await page.$$eval(".add-menu [role=menuitem]", (els) => els.map((e) => e.dataset.step).sort());
+    check(offered.join(",") === "levels,pixelate", `"+" after Threshold offers only the steps that fit there (${offered.join(", ")})`);
+    check(!(await page.$("aside.side select.add-step")), "the sidebar has no separate add-step list");
+    await page.click('.add-menu [role=menuitem][data-step="pixelate"]');
+    await page.waitForSelector('.strip .box[data-key="pixelate"].sel', { timeout: 10_000 });
+    const order = await page.$$eval(".strip .box", (els) => els.map((e) => e.dataset.key));
+    check(order.join(",") === "source,threshold,pixelate,centerline,order", `picking Pixelate adds its box there and selects it (${order.join(", ")})`);
+
+    // Bypass works on a step that keeps its stage (Pixelate: layers in, layers out).
     await page.click('.strip .box[data-key="pixelate"] .byp');
     await page.waitForSelector('.strip .box[data-key="pixelate"].off', { timeout: 10_000 });
     await page.click('.strip .box[data-key="pixelate"] .byp');
@@ -162,6 +171,48 @@ try {
     await page.waitForSelector(".stats .big", { timeout: 60_000 });
     const size2 = await page.$eval(".strip .box .pic", (e) => e.getBoundingClientRect().width);
     check(size1 > size0 && size2 === size1, `strip size grows with + and is remembered after a reload (${size0} → ${size1} → ${size2})`);
+    await page.close();
+  }
+
+  // The "+" says why when nothing fits; dragging a box lights up only the gaps it fits in,
+  // and dropping it there moves it and selects it. (A fresh page: this recipe isn't reloaded.)
+  {
+    const page = await open(1280);
+    await page.click('.strip .gap[data-gap="1"] .plus');
+    await page.click('.add-menu [role=menuitem][data-step="pixelate"]');
+    await page.waitForSelector('.strip .box[data-key="pixelate"].sel', { timeout: 10_000 });
+    const order = await page.$$eval(".strip .box", (els) => els.map((e) => e.dataset.key));
+
+    // "+" after the last step: nothing fits, and it says why.
+    await page.click(`.strip .box[data-key="${order.at(-1)}"] + .gap .plus`);
+    const none = await page.textContent(".add-menu .add-none");
+    check((await page.$$(".add-menu [role=menuitem]")).length === 0 && /Nothing fits here/.test(none), `"+" after the last step says why nothing fits ("${none}")`);
+    await page.keyboard.press("Escape");
+    await page.waitForSelector(".add-menu", { state: "detached" });
+    check(true, "Escape closes the add menu");
+
+    // Drag to reorder: add Levels too, then drag it past Pixelate. Only valid gaps light up.
+    await page.click('.strip .gap[data-gap="1"] .plus');
+    await page.click('.add-menu [role=menuitem][data-step="levels"]');
+    await page.waitForSelector('.strip .box[data-key="levels"].sel');
+    const b0 = await (await page.$('.strip .box[data-key="levels"] .pic')).boundingBox();
+    await page.mouse.move(b0.x + b0.width / 2, b0.y + b0.height / 2);
+    await page.mouse.down();
+    await page.mouse.move(b0.x + b0.width / 2 + 10, b0.y + b0.height / 2, { steps: 4 });
+    const lit = await page.$$eval(".strip .gap.drop-ok", (els) => els.map((e) => e.dataset.gap));
+    const dim = await page.$$eval(".strip .gap.drop-no", (els) => els.length);
+    const hint = await page.textContent(".strip-head .strip-hint");
+    check(lit.join(",") === "3" && dim > 0, `dragging Levels lights up only the gap it fits in (${lit.join(", ")}; ${dim} dimmed)`);
+    check(/Levels can go in 1 other place/.test(hint), `the hint says how many places it can go ("${hint}")`);
+    const t0 = await (await page.$('.strip .box[data-key="pixelate"] + .gap')).boundingBox();
+    await page.mouse.move(t0.x + t0.width / 2, t0.y + t0.height / 2, { steps: 6 });
+    await page.mouse.up();
+    await page.waitForFunction(
+      () => [...document.querySelectorAll(".strip .box")].map((e) => e.dataset.key).join(",") === "source,threshold,pixelate,levels,centerline,order",
+      null,
+      { timeout: 10_000 },
+    );
+    check(await page.$eval('.strip .box[data-key="levels"]', (e) => e.classList.contains("sel")), "dropping Levels moves it after Pixelate and selects it");
     await page.close();
   }
 
