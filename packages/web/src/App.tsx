@@ -161,8 +161,8 @@ export function App() {
 
   /**
    * A checkpoint's picture: the end result, drawn by the strip's thumbnail renderer in the
-   * worker and added once it's ready, so saving never waits for it. Call before sending the
-   * next run: the worker still has this recipe's result cached.
+   * worker's background (behind any run, at picture size, on-demand steps not run) and added
+   * once it's ready, so saving never waits for it.
    */
   const addPicture = (p: ProjectStore, cp: Checkpoint, r: Recipe) => {
     void runner

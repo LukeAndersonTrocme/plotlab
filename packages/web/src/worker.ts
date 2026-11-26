@@ -5,6 +5,7 @@ import { createRegistry } from "@plotlab/steps";
 import type { FromWorker, InspectTarget, InspectView, RasterView, ToWorker } from "./protocol.ts";
 import { shownAt } from "./strip.ts";
 import { Jobs } from "./jobs.ts";
+import { drawResult, laneOf } from "./pictures.ts";
 import { ThumbnailRenderer } from "./thumbs.ts";
 
 /** Longest side of the low-res proxy used while dragging. */
@@ -18,8 +19,8 @@ const THUMB_BUDGET_MS = 25;
 const registry = createRegistry();
 const full = new Pipeline(registry);
 const proxy = new Pipeline(registry);
-/** Its own pipeline, so drawing the gallery doesn't throw away the cache the sliders use. */
-const galleryPipe = new Pipeline(registry);
+/** Checkpoint and gallery pictures: their own pipeline, so the canvas cache stays as it is. */
+const picturePipe = new Pipeline(registry);
 /** Gallery pictures by recipe and size, for this source: reopening the gallery is instant. */
 let galleryCache = new Map<string, Promise<Blob>>();
 let src: { source: Source; key: string } | null = null;
@@ -87,22 +88,38 @@ async function proofView(output: StageData, plot: Plot | null, recipe: Recipe, p
 }
 
 // One message at a time: an export must not interleave with a run on the same pipeline cache.
-// Gallery pictures wait in the background, one preset at a time, behind anything else.
+// Pictures (checkpoint, gallery) wait in the background, one at a time, behind any run (pictures.ts).
 const jobs = new Jobs();
 self.onmessage = (e: MessageEvent<ToWorker>) => {
   const msg = e.data;
-  if (msg.type === "gallery") jobs.background("gallery", msg.items.map((item) => () => galleryThumb(msg.id, msg.side, item)));
-  else jobs.foreground(() => handle(msg));
+  const lane = laneOf(msg);
+  if (lane.lane === "foreground") {
+    if (msg.type !== "thumbnail" && msg.type !== "gallery") jobs.foreground(() => handle(msg));
+    return;
+  }
+  // The source is the one current when asked: a picture asked for before an image switch is of the old image.
+  const at = src;
+  if (msg.type === "gallery") jobs.background(lane.group, msg.items.map((item) => () => galleryThumb(at, msg.id, msg.side, item)));
+  else if (msg.type === "thumbnail") jobs.background(lane.group, [() => checkpointThumb(at, msg)]);
 };
 
-/** One preset drawn on the current source, at about thumbnail resolution. */
-async function galleryThumb(id: number, side: number, item: { key: string; recipe: Recipe }): Promise<void> {
-  if (!src) return;
-  const { source, key: sourceKey } = src;
+/** A checkpoint's picture: its end result, without running on-demand steps (never a full-resolution run). */
+async function checkpointThumb(at: typeof src, msg: Extract<ToWorker, { type: "thumbnail" }>): Promise<void> {
+  const png = at
+    ? await drawResult(picturePipe, at, msg.recipe, msg.side)
+        .then((r) => thumbnails.png(r.output, msg.recipe, msg.side))
+        .catch(() => null)
+    : null;
+  post({ type: "thumbnail", id: msg.id, png });
+}
+
+/** One preset drawn on the source, at about thumbnail resolution. */
+async function galleryThumb(at: typeof src, id: number, side: number, item: { key: string; recipe: Recipe }): Promise<void> {
+  if (!at) return;
   const k = JSON.stringify([side, item.recipe]);
   let p = galleryCache.get(k);
   if (!p) {
-    p = galleryPipe.run(source, item.recipe, { sourceKey, maxSidePx: Math.max(side, 160) }).then((r) => thumbnails.png(r.output, item.recipe, side));
+    p = drawResult(picturePipe, at, item.recipe, side).then((r) => thumbnails.png(r.output, item.recipe, side));
     galleryCache.set(k, p);
     p.catch(() => galleryCache.delete(k));
   }
@@ -132,27 +149,16 @@ async function postThumbs(msg: Extract<ToWorker, { type: "run" }>, side: number,
   post({ type: "thumbs", id: msg.id, side, keys: boxes.map((b) => b.key), items });
 }
 
-async function handle(msg: Exclude<ToWorker, { type: "gallery" }>): Promise<void> {
+async function handle(msg: Exclude<ToWorker, { type: "gallery" | "thumbnail" }>): Promise<void> {
   if (msg.type === "source") {
     src = { source: msg.source, key: msg.key };
     full.reset();
     proxy.reset();
-    galleryPipe.reset();
+    picturePipe.reset();
     galleryCache = new Map();
     jobs.background("gallery", []);
     pngCache = new WeakMap();
     thumbnails.reset();
-    return;
-  }
-  if (msg.type === "thumbnail") {
-    // The same pipeline as the canvas: the recipe on screen is already cached, so this is quick.
-    const png = src
-      ? await full
-          .run(src.source, msg.recipe, { sourceKey: src.key })
-          .then((r) => thumbnails.png(r.output, msg.recipe, msg.side))
-          .catch(() => null)
-      : null;
-    post({ type: "thumbnail", id: msg.id, png });
     return;
   }
   if (!src) return;

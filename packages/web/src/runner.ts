@@ -101,7 +101,8 @@ export class Runner {
 
   /**
    * The end result of `recipe` as a PNG (a checkpoint's picture), from the strip's thumbnail
-   * renderer in the worker. Comes after any run already sent, so ask before sending the next one.
+   * renderer in the worker. Drawn in the background at about `side` px, behind any run, and
+   * without running on-demand steps.
    */
   thumbnail(recipe: Recipe, side: number): Promise<Blob | null> {
     const id = this.nextId++;
