@@ -25,6 +25,9 @@ const ICONS: Record<string, string> = {
   fill: "▤",
   order: "↝",
 };
+/** The drag data a strip box carries: its step id. The sidebar takes it to pin that step. */
+export const STEP_DRAG = "application/x-plotlab-step";
+
 export const SOURCE_ICON = "▣";
 export const stepIcon = (step: string) => ICONS[step] ?? "•";
 

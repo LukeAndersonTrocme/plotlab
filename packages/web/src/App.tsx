@@ -8,22 +8,22 @@ import { PagePanel } from "./PagePanel.tsx";
 import { PlotPanel } from "./PlotPanel.tsx";
 import { fmtTime, setupSummary } from "./setup.ts";
 import { ModeSwitch, SetupChip } from "./Shell.tsx";
-import { canvasTarget, fitSelection, initialView, openSetup, readThumbSize, resizeThumbs, RESULT, select, selectedIndex, setMode, SOURCE, stepSelection, toggleSelect, writeThumbSize, type ViewState } from "./view.ts";
+import { canvasTarget, fitView, fromViewBlock, initialView, isPinned, openSetup, pin, readThumbSize, resizeThumbs, RESULT, select, selectedIndex, setMode, sidebarSteps, SOURCE, stepSelection, toggleSelect, togglePin, toViewBlock, writeThumbSize, type ViewState } from "./view.ts";
 import { Strip } from "./Strip.tsx";
 import { addAt, moveToGap } from "./gaps.ts";
-import { stripBoxes, thumbRenderSide, toggleBypass } from "./strip.ts";
+import { STEP_DRAG, stripBoxes, thumbRenderSide, toggleBypass } from "./strip.ts";
 import { EMPTY_RUN, Runner, type RunState } from "./runner.ts";
 import { decodeFile, loadSample, sampleSource } from "./sample.ts";
 import { canRedo, canUndo, commit, createHistory, preview, redo, undo, type History } from "./history.ts";
 import type { InspectTarget } from "./protocol.ts";
 import { StageView } from "./StageView.tsx";
-import { StepList } from "./StepList.tsx";
+import { StepList, type SidebarCards } from "./StepList.tsx";
 import { CheckpointSidebar } from "./CheckpointSidebar.tsx";
 import { attachThumbnail, checkpointLabel, createCheckpoint, restoreSafely } from "./checkpoints.ts";
 import { galleryItems, pickPreset, type GalleryItem } from "./gallery.ts";
 import { focusOf, shortcut } from "./keys.ts";
 import { PresetGallery, type GalleryThumb } from "./PresetGallery.tsx";
-import { openImage, SAMPLE_NAME, startSession } from "./session.ts";
+import { openImage, readView, SAMPLE_NAME, saveView, startSession } from "./session.ts";
 import { defaultLocalStorage, openLibrary, type Checkpoint, type Library, type ProjectStore, type Source as StoredSource } from "./storage/index.ts";
 
 const registry = createRegistry();
@@ -90,6 +90,12 @@ export function App() {
   const [ready, setReady] = useState(false);
   const [sidebar, setSidebar] = useState(false);
   const [saved, setSaved] = useState(0);
+  /**
+   * The open project's view block (pins), as last read or saved: saves keep the fields a
+   * newer build added. Null until it's read, so nothing saves over it before then.
+   */
+  const viewBlock = useRef<{ project: string; kept: unknown } | null>(null);
+  const wantView = useRef<string | null>(null);
   // Where the current source enters the chain (an SVG enters as lines, separations as layers).
   const entry = useRef<{ stage: StageKind; label: string }>({ stage: "image", label: "the sample" });
   /** Fit a recipe to the current source's entry stage; returns it and what to tell the person. */
@@ -135,6 +141,7 @@ export function App() {
       if (s.warnings.length) setNotice(s.warnings.join("\n"));
       setLibrary(opened.library);
       setProject(s.project);
+      openProjectView(s.project, start);
       setPersistent(opened.persistent);
       setReady(true);
       started.current = true;
@@ -150,6 +157,19 @@ export function App() {
   useEffect(() => {
     void project?.setRecipe({ recipe: history.base, savedAt: Date.now() }).catch((e) => setNotice(`Couldn't autosave: ${errText(e)}`));
   }, [project, history.base]);
+
+  // Save the pins into the project's view block: not a recipe edit (no Back step, no checkpoint).
+  const pinKey = view.pins.join("\n");
+  useEffect(() => {
+    const b = viewBlock.current;
+    if (!project || b?.project !== project.id) return;
+    if (JSON.stringify(toViewBlock(viewRef.current, b.kept)) === JSON.stringify(b.kept)) return;
+    void saveView(project, viewRef.current, b.kept)
+      .then((block) => {
+        if (viewBlock.current?.project === project.id) viewBlock.current.kept = block;
+      })
+      .catch((e) => setNotice(`Couldn't save your pinned steps: ${errText(e)}`));
+  }, [project, pinKey]);
 
   // A short confirmation that goes away by itself (saving a checkpoint).
   const [toast, setToast] = useState<string | null>(null);
@@ -208,6 +228,7 @@ export function App() {
       const { recipe: fitted, note } = enter(r.recipe);
       if (note) r.warnings.push(note);
       setProject(r.project);
+      openProjectView(r.project, fitted);
       setHistory((h) => commit(h, fitted));
       const where = r.saved.created ? "Where you were is saved as a checkpoint." : "Where you were was already a checkpoint.";
       setNotice([`Restored “${label}”. ${where}`, ...r.warnings].join("\n"));
@@ -320,15 +341,49 @@ export function App() {
     setView(v);
     apply(next, false);
   };
+  /**
+   * Another project's pins replace these (read from its view block); the same project keeps
+   * them. Until the block is read, nothing is saved, so a slow read can't be overwritten.
+   */
+  function openProjectView(p: ProjectStore | null, r: Recipe) {
+    if (p && viewBlock.current?.project === p.id) return;
+    viewBlock.current = null;
+    wantView.current = p?.id ?? null;
+    changeView(fromViewBlock(viewRef.current, undefined, r));
+    if (!p) return;
+    void readView(p).then((kept) => {
+      if (wantView.current !== p.id) return;
+      viewBlock.current = { project: p.id, kept };
+      changeView(fromViewBlock(viewRef.current, kept, recipeRef.current));
+    });
+  }
+  const stepName = (id: string) => {
+    const rs = recipeRef.current.steps.find((s) => s.id === id);
+    return registry.get(rs?.step ?? "")?.title ?? "That step";
+  };
+  /** The Pin button: pin or unpin, and say so. */
+  const flipPin = (id: string) => {
+    const was = isPinned(viewRef.current, id);
+    changeView(togglePin(viewRef.current, id));
+    confirmSaved(was ? `Unpinned ${stepName(id)}.` : `Pinned ${stepName(id)}. Its settings stay in the sidebar.`);
+  };
+  /** A strip box dropped on the sidebar: pin it (dropping a pinned one again changes nothing). */
+  const pinDropped = (id: string) => {
+    if (!recipeRef.current.steps.some((s) => s.id === id)) return;
+    const was = isPinned(viewRef.current, id);
+    changeView(pin(viewRef.current, id));
+    confirmSaved(was ? `${stepName(id)} is already pinned.` : `Pinned ${stepName(id)}. Its settings stay in the sidebar.`);
+  };
+  const [pinOver, setPinOver] = useState(false);
   const inspectStage = (t: InspectTarget) => {
     const id = typeof t === "number" ? recipe.steps[t]?.id : undefined;
     changeView(toggleSelect(view, t === "source" ? SOURCE : id ? stepSelection(id) : RESULT));
   };
-  // A removed step can't stay selected: fall back to the step before it (or the result).
+  // A removed step can't stay selected (fall back to the step before it, or the result), nor pinned.
   const stepIds = recipe.steps.map((s) => s.id).join("\n");
   const chainBefore = useRef(recipe);
   useEffect(() => {
-    changeView(fitSelection(viewRef.current, chainBefore.current, recipe));
+    changeView(fitView(viewRef.current, chainBefore.current, recipe));
     chainBefore.current = recipe;
   }, [stepIds]);
 
@@ -355,6 +410,7 @@ export function App() {
       if (opened instanceof Error || !opened) {
         warnings.push(`Couldn't keep ${file.name} in browser storage (${opened ? opened.message : "storage isn't open"}). It won't survive a reload, and checkpoints are off until you reload.`);
         setProject(null);
+        openProjectView(null, next);
       } else {
         if (opened.saved) {
           try {
@@ -365,6 +421,7 @@ export function App() {
           }
         }
         setProject(opened.project);
+        openProjectView(opened.project, next);
       }
       takeSource(img, file.name, opened && !(opened instanceof Error) ? opened.project.id : `${file.name}:${file.size}:${file.lastModified}`);
       // Reopened settings, and steps this source can't use switched off, are one Back step.
@@ -418,6 +475,16 @@ export function App() {
   const notLines = run.rasterLayers.filter((r) => r.color !== null).map((r) => r.name);
   const stem = sourceName.replace(/\.[^.]+$/, "");
   const cli = `plotlab run recipe.json -i ${sourceName === "sample" ? "photo.jpg" : JSON.stringify(sourceName)} -o out/`;
+
+  // Looking at a step or the source: that, then the pinned steps. Looking at the result: every step.
+  const side = sidebarSteps(view, recipe);
+  const indexOf = (id: string) => recipe.steps.findIndex((s) => s.id === id);
+  const cards: SidebarCards | undefined =
+    view.selection.kind === "result" ? undefined : { looking: side.looking === null ? null : indexOf(side.looking), pinned: side.pinned.map(indexOf), lookingPinned: side.lookingPinned };
+  const branch = (i: number) => {
+    const name = `Before branching at ${stepTitle(i)}`;
+    void saveCheckpoint(name, `Saved this version as “${name}”. Your changes from here on are a new version; the saved one stays in Checkpoints.`);
+  };
 
   const summary = setupSummary(recipe, run.estimate);
   const projectName = sourceName === "sample" ? "Sample image" : sourceName;
@@ -571,7 +638,28 @@ export function App() {
           />
         </section>
 
-        <aside className="side" aria-label={view.mode === "design" ? "Steps" : view.mode === "page" ? "Page setup" : "Plot"}>
+        <aside
+          className={`side${pinOver ? " pin-over" : ""}`}
+          aria-label={view.mode === "design" ? "Steps" : view.mode === "page" ? "Page setup" : "Plot"}
+          onDragOver={(e) => {
+            if (view.mode !== "design" || !e.dataTransfer.types.includes(STEP_DRAG)) return;
+            e.preventDefault();
+            e.dataTransfer.dropEffect = "move";
+            setPinOver(true);
+          }}
+          onDragLeave={(e) => {
+            if (!e.currentTarget.contains(e.relatedTarget as Node | null)) setPinOver(false);
+          }}
+          onDrop={(e) => {
+            const id = e.dataTransfer.getData(STEP_DRAG);
+            setPinOver(false);
+            if (!id) return;
+            // A box from the strip, not a file: don't open anything.
+            e.preventDefault();
+            e.stopPropagation();
+            pinDropped(id);
+          }}
+        >
           {view.mode === "design" && (
             <>
               <div className="card">
@@ -580,49 +668,37 @@ export function App() {
                   <span>{sourceName === "sample" ? "Open image, SVG or recipe…" : sourceName}</span>
                 </label>
               </div>
-              {view.selection.kind === "source" && <p className="hint side-note">The source, as placed on the paper. Pick a step in the strip below to change its settings.</p>}
-              {selected >= 0 && (
+              {(selected >= 0 || view.selection.kind === "source") && (
                 <div className="side-head">
-                  <span>
-                    Step {selected + 1} of {recipe.steps.length}
-                  </span>
+                  <span>{selected >= 0 ? `Looking at step ${selected + 1} of ${recipe.steps.length}` : "Looking at the source"}</span>
                   <span className="side-head-tools">
-                    <button
-                      className="link"
-                      onClick={() => {
-                        const name = `Before branching at ${stepTitle(selected)}`;
-                        void saveCheckpoint(name, `Saved this version as “${name}”. Your changes from here on are a new version; the saved one stays in Checkpoints.`);
-                      }}
-                      disabled={!project}
-                      title="Save this version as a checkpoint, then try something else from this step on"
-                    >
-                      Branch from here
-                    </button>
                     <button className="link" onClick={() => changeView(select(view, RESULT))} title="Show the end result and every step's settings">
                       All steps
                     </button>
                   </span>
                 </div>
               )}
-              {view.selection.kind !== "source" && (
-                <StepList
-                  recipe={recipe}
-                  only={selected >= 0 ? selected : undefined}
-                  registry={registry}
-                  steps={run.steps}
-                  stale={run.stale}
-                  error={run.error}
-                  inspect={inspect}
-                  onInspect={inspectStage}
-                  onChange={(r, proxy, step) => apply(r, proxy, step)}
-                  onRun={() => {
-                    setDirty(false);
-                    send(recipe, false, true);
-                  }}
-                  onHelp={setHelp}
-                  onNotice={setNotice}
-                />
-              )}
+              {view.selection.kind === "source" && <p className="hint side-note">The source, as placed on the paper. Pick a step in the strip below to change its settings.</p>}
+              <StepList
+                recipe={recipe}
+                {...(cards && { cards })}
+                pins={view.pins}
+                onPin={flipPin}
+                onBranch={project ? branch : null}
+                registry={registry}
+                steps={run.steps}
+                stale={run.stale}
+                error={run.error}
+                inspect={inspect}
+                onInspect={inspectStage}
+                onChange={(r, proxy, step) => apply(r, proxy, step)}
+                onRun={() => {
+                  setDirty(false);
+                  send(recipe, false, true);
+                }}
+                onHelp={setHelp}
+                onNotice={setNotice}
+              />
             </>
           )}
           {view.mode === "page" && (
@@ -666,6 +742,7 @@ export function App() {
           thumbs={run.thumbs}
           selected={view.selection.kind === "step" ? view.selection.id : view.selection.kind === "source" ? "source" : null}
           size={view.thumb}
+          pins={view.pins}
           onSelect={(key) => changeView(select(view, key === "source" ? SOURCE : stepSelection(key)))}
           onBypass={(index) => {
             const res = toggleBypass(recipe, index, registry);
