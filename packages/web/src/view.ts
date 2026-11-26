@@ -1,5 +1,5 @@
 import type { InspectTarget } from "./protocol.ts";
-import { addBand, compareTargets, MAX_STRIPS, pruneCompare, readCompare, thisVsBefore, type Compare } from "./compare.ts";
+import { compareTargets, pruneCompare, readCompare, shiftAdd, shiftRefusal, thisVsBefore, type Band, type Compare } from "./compare.ts";
 
 /**
  * The web UI's view state: what the screen shows, as opposed to the recipe (what gets made).
@@ -158,22 +158,33 @@ export function setCompare(v: ViewState, compare: Compare | null): ViewState {
   return compare === v.compare ? v : { ...v, compare };
 }
 
-/** Whether shift-clicking that box would add a strip (not at six, not a step already shown). */
+const bandOf = (selection: Selection): Band | null => (selection.kind === "source" ? "source" : selection.kind === "step" ? selection.id : null);
+
+/** Whether shift-clicking that box would change the comparison (`shiftRefusal` says why not). */
 export function canAddStrip(v: ViewState, selection: Selection): boolean {
-  const band = selection.kind === "source" ? "source" : selection.kind === "step" ? selection.id : null;
-  return !!v.compare && band !== null && v.compare.bands.length < MAX_STRIPS && !v.compare.bands.includes(band);
+  const band = bandOf(selection);
+  return !!v.compare && band !== null && shiftRefusal(v.compare, band) === null;
 }
 
 /**
- * A click on a strip thumbnail. While comparing the canvas shows the strips, so a click only
- * changes the sidebar (the selection), and shift-click adds that step (or the source) as a
- * strip instead, leaving the sidebar alone. A step already shown, or a seventh strip, changes
- * nothing. Not comparing, shift makes no difference.
+ * A click on a strip thumbnail. While comparing the canvas shows the comparison, so a click
+ * only changes the sidebar (the selection), and shift-click puts that step (or the source)
+ * in the comparison instead, leaving the sidebar alone (`shiftAdd`: a strip, what's in the
+ * lens, or a box). Not comparing, shift makes no difference.
  */
 export function clickBox(v: ViewState, selection: Selection, shift: boolean): ViewState {
-  if (!v.compare || !shift || selection.kind === "result") return select(v, selection);
-  if (!canAddStrip(v, selection)) return v;
-  return { ...v, compare: addBand(v.compare, selection.kind === "source" ? "source" : (selection as { id: string }).id) };
+  const band = bandOf(selection);
+  if (!v.compare || !shift || band === null) return select(v, selection);
+  const compare = shiftAdd(v.compare, band);
+  return compare === v.compare ? v : { ...v, compare };
+}
+
+/** The step being looked at, which a newly drawn box shows: the selected step, the source, or for the result the last step. */
+export function lookingBand(v: ViewState, chain: Chain): Band {
+  const s = v.selection;
+  if (s.kind === "source") return "source";
+  const at = selectedIndex(v, chain);
+  return at >= 0 ? chain.steps[at]!.id : (chain.steps.at(-1)?.id ?? "source");
 }
 
 export const isPinned = (v: ViewState, id: string) => v.pins.includes(id);
