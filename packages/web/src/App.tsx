@@ -1,10 +1,14 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { budgetOnlyChange, describeEntry, enterAt, exportFormats, FORMAT_LABEL, loadRecipe, sourceLabel, sourceStage, type AnyStep, type ExportFormat, type Recipe, type Source, type StageKind } from "@plotlab/engine";
+import { budgetOnlyChange, describeEntry, enterAt, loadRecipe, sourceLabel, sourceStage, type AnyStep, type ExportFormat, type Recipe, type Source, type StageKind } from "@plotlab/engine";
 import { budgetCheck } from "@plotlab/machines";
 import { createRegistry } from "@plotlab/steps";
 import { defaultRecipe } from "./defaults.ts";
 import { HelpPanel } from "./Help.tsx";
-import { ProjectPanel } from "./ProjectPanel.tsx";
+import { PagePanel } from "./PagePanel.tsx";
+import { PlotPanel } from "./PlotPanel.tsx";
+import { fmtTime, setupSummary } from "./setup.ts";
+import { ModeSwitch, SetupChip } from "./Shell.tsx";
+import { canvasTarget, fitSelection, initialView, openSetup, RESULT, setMode, SOURCE, stepSelection, toggleSelect, type ViewState } from "./view.ts";
 import { EMPTY_RUN, Runner, type RunState } from "./runner.ts";
 import { decodeFile, loadSample, sampleSource } from "./sample.ts";
 import { canRedo, canUndo, commit, createHistory, preview, redo, undo, type History } from "./history.ts";
@@ -36,12 +40,6 @@ function download(name: string, data: string | Uint8Array, type: string) {
   a.click();
   setTimeout(() => URL.revokeObjectURL(a.href), 1000);
 }
-
-const fmtTime = (s: number) => {
-  if (s < 60) return `${Math.round(s)} s`;
-  const m = Math.round(s / 60);
-  return m < 60 ? `${m} min` : `${Math.floor(m / 60)} h ${m % 60} min`;
-};
 
 export function App() {
   const [history, setHistory] = useState<History<Recipe>>(() => createHistory(defaultRecipe()));
@@ -208,13 +206,22 @@ export function App() {
     return () => window.removeEventListener("keydown", onKey);
   }, []);
 
-  const [inspect, setInspect] = useState<InspectTarget>(null);
-  const inspectStage = (t: InspectTarget) => {
-    const next = t === inspect ? null : t;
-    setInspect(next);
-    runner.inspect = next;
-    runner.request(recipe, false);
+  // What the screen shows (mode, selection): not a recipe edit, so never a Back step.
+  const [view, setView] = useState<ViewState>(initialView);
+  const inspect = canvasTarget(view);
+  const changeView = (next: ViewState) => {
+    if (next === view) return;
+    setView(next);
+    const t = canvasTarget(next);
+    if (t === runner.inspect) return;
+    runner.inspect = t;
+    runner.request(recipeRef.current, false);
   };
+  const inspectStage = (t: InspectTarget) =>
+    changeView(toggleSelect(view, t === null ? RESULT : t === "source" ? SOURCE : stepSelection(t)));
+  // A removed step can't stay selected.
+  const stepCount = recipe.steps.length;
+  useEffect(() => changeView(fitSelection(view, stepCount)), [stepCount]);
 
   const loadFile = async (file: File) => {
     if (!ready) return;
@@ -284,10 +291,10 @@ export function App() {
   const plot = run.plot;
   // What the view shows: an inspected stage, the page as it will export, or the end result
   // (lines + layers that stopped early).
-  const view = inspect !== null && run.inspected ? run.inspected : null;
-  const proof = !view && asExported ? run.proof : null;
-  const viewRasters = view ? view.rasters : proof ? [proof] : run.rasterLayers;
-  const viewPlot = view ? view.plot : proof ? null : plot;
+  const inspected = inspect !== null && run.inspected ? run.inspected : null;
+  const proof = !inspected && asExported ? run.proof : null;
+  const viewRasters = inspected ? inspected.rasters : proof ? [proof] : run.rasterLayers;
+  const viewPlot = inspected ? inspected.plot : proof ? null : plot;
   const viewLayers = [
     ...(viewPlot?.layers.map((l) => ({ id: l.id, name: l.name, color: l.ink.color })) ?? []),
     ...viewRasters.filter((r) => r.color !== null).map((r) => ({ id: r.id, name: r.name, color: r.color! })),
@@ -300,6 +307,9 @@ export function App() {
   const stem = sourceName.replace(/\.[^.]+$/, "");
   const cli = `plotlab run recipe.json -i ${sourceName === "sample" ? "photo.jpg" : JSON.stringify(sourceName)} -o out/`;
 
+  const summary = setupSummary(recipe, run.estimate);
+  const projectName = sourceName === "sample" ? "Sample image" : sourceName;
+
   return (
     <div
       className="app"
@@ -310,17 +320,22 @@ export function App() {
         if (f) void loadFile(f);
       }}
     >
-      <header>
+      <header className="top">
         <strong className="brand">plotlab</strong>
+        <span className="project-name" title={projectName}>
+          {projectName}
+        </span>
         <span className="history-btns">
           <button onClick={back} disabled={!canUndo(history)} title="Back: undo the last change (⌘Z)" aria-label="Back">
-            ← Back
+            ← <span className="label">Back</span>
           </button>
           <button onClick={forward} disabled={!canRedo(history)} title="Forward: redo (⇧⌘Z)" aria-label="Forward">
-            Forward →
+            <span className="label">Forward</span> →
           </button>
         </span>
+        <ModeSwitch mode={view.mode} onMode={(m) => changeView(setMode(view, m))} />
         <span className="spacer" />
+        <SetupChip summary={summary} onOpen={() => changeView(openSetup(view))} />
         <label className="toggle" title="Live: recompute while you drag. Manual: press Update.">
           <input type="checkbox" checked={live} onChange={(e) => setLive(e.target.checked)} /> Live
         </label>
@@ -335,57 +350,18 @@ export function App() {
             Update
           </button>
         )}
-        <button onClick={() => void saveCheckpoint()} disabled={!project} title="Save the current settings as a checkpoint, with a small picture">
-          ＋ Checkpoint
+        <button onClick={() => void saveCheckpoint()} disabled={!project} title="Save the current settings as a checkpoint, with a small picture" aria-label="Save a checkpoint">
+          ＋ <span className="label">Checkpoint</span>
         </button>
         <button className={sidebar ? "on" : ""} onClick={() => setSidebar(!sidebar)} aria-pressed={sidebar} title="Show or hide your checkpoints (S)">
           Checkpoints
         </button>
-        <button className="reset" onClick={startOver} title="Start over from the default recipe. Keeps your image. Back undoes it.">
-          ↺ Reset
+        <button className="reset" onClick={startOver} title="Start over from the default recipe. Keeps your image. Back undoes it." aria-label="Reset">
+          ↺ <span className="label">Reset</span>
         </button>
       </header>
 
-      <main>
-        <section className="panel">
-          <div className="card">
-            <label className="file">
-              <input type="file" accept="image/*,.png,.jpg,.jpeg,.webp,.tif,.tiff,.svg,.json" onChange={(e) => e.target.files?.[0] && loadFile(e.target.files[0])} />
-              <span>{sourceName === "sample" ? "Open image, SVG or recipe…" : sourceName}</span>
-            </label>
-          </div>
-          <ProjectPanel
-            recipe={recipe}
-            onChange={(r, proxy) => apply(r, proxy ?? false)}
-            layers={finalLayers}
-            passes={plot?.layers.map((l) => ({ id: l.id, name: l.name })) ?? []}
-            working={run.working}
-          />
-          <h2 className="section">Steps</h2>
-          <StepList
-            recipe={recipe}
-            registry={registry}
-            steps={run.steps}
-            stale={run.stale}
-            error={run.error}
-            inspect={inspect}
-            onInspect={inspectStage}
-            onChange={(r, proxy, step) => apply(r, proxy, step)}
-            onReplace={(r) => {
-              // A preset meets the source where it enters, like opening a recipe file does.
-              const { recipe: fitted, note } = enter(r);
-              apply(fitted, false);
-              setNotice(note);
-            }}
-            onRun={() => {
-              setDirty(false);
-              runner.request(recipe, false, true);
-            }}
-            onHelp={setHelp}
-            onNotice={setNotice}
-          />
-        </section>
-
+      <main className="work">
         <section className="view">
           <div className="stats">
             {run.estimate && (() => {
@@ -467,34 +443,68 @@ export function App() {
             paper={recipe.paper}
             rasters={viewRasters}
             plot={viewPlot}
-            showTravel={showTravel && recipe.target.kind === "plotter" && (!view || view.kind === "plot")}
+            showTravel={showTravel && recipe.target.kind === "plotter" && (!inspected || inspected.kind === "plot")}
             underlay={showSource && inspect !== "source" ? run.underlay : null}
             hidden={hidden}
             empty={run.busy ? "Working…" : "Nothing to show at this stage"}
           />
-          <div className="actions">
-            {exportFormats(recipe.target).map((f, i) => (
-              <button
-                key={f}
-                className={i === 0 ? "primary" : ""}
-                disabled={exporting !== null || (recipe.target.kind === "plotter" && !plot)}
-                onClick={() => void exportAs(f)}
-              >
-                {exporting === f ? "Exporting…" : `Download ${FORMAT_LABEL[f]}`}
-              </button>
-            ))}
-            <button onClick={() => download(`${stem}.recipe.json`, JSON.stringify(recipe, null, 2), "application/json")}>Download recipe</button>
-            <button onClick={() => void navigator.clipboard?.writeText(cli).then(() => setNotice(`Copied: ${cli}`))}>Copy as CLI command</button>
-          </div>
-          <details className="timings">
-            <summary>Step timings</summary>
-            {run.steps.map((t) => (
-              <div key={t.index}>
-                {registry.get(t.step)?.title ?? t.step}: {t.cached ? "cached" : `${t.ms.toFixed(0)} ms`}
-              </div>
-            ))}
-          </details>
         </section>
+
+        <aside className="side" aria-label={view.mode === "design" ? "Steps" : view.mode === "page" ? "Page setup" : "Plot"}>
+          {view.mode === "design" && (
+            <>
+              <div className="card">
+                <label className="file">
+                  <input type="file" accept="image/*,.png,.jpg,.jpeg,.webp,.tif,.tiff,.svg,.json" onChange={(e) => e.target.files?.[0] && loadFile(e.target.files[0])} />
+                  <span>{sourceName === "sample" ? "Open image, SVG or recipe…" : sourceName}</span>
+                </label>
+              </div>
+              <StepList
+                recipe={recipe}
+                registry={registry}
+                steps={run.steps}
+                stale={run.stale}
+                error={run.error}
+                inspect={inspect}
+                onInspect={inspectStage}
+                onChange={(r, proxy, step) => apply(r, proxy, step)}
+                onReplace={(r) => {
+                  // A preset meets the source where it enters, like opening a recipe file does.
+                  const { recipe: fitted, note } = enter(r);
+                  apply(fitted, false);
+                  setNotice(note);
+                }}
+                onRun={() => {
+                  setDirty(false);
+                  runner.request(recipe, false, true);
+                }}
+                onHelp={setHelp}
+                onNotice={setNotice}
+              />
+            </>
+          )}
+          {view.mode === "page" && (
+            <PagePanel
+              recipe={recipe}
+              onChange={(r, proxy) => apply(r, proxy ?? false)}
+              layers={finalLayers}
+              passes={plot?.layers.map((l) => ({ id: l.id, name: l.name })) ?? []}
+              working={run.working}
+            />
+          )}
+          {view.mode === "plot" && (
+            <PlotPanel
+              recipe={recipe}
+              registry={registry}
+              steps={run.steps}
+              canExport={recipe.target.kind !== "plotter" || plot !== null}
+              exporting={exporting}
+              onExport={(f) => void exportAs(f)}
+              onDownloadRecipe={() => download(`${stem}.recipe.json`, JSON.stringify(recipe, null, 2), "application/json")}
+              onCopyCli={() => void navigator.clipboard?.writeText(cli).then(() => setNotice(`Copied: ${cli}`))}
+            />
+          )}
+        </aside>
         <CheckpointSidebar
           open={sidebar}
           onToggle={() => setSidebar((o) => !o)}
