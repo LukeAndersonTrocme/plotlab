@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { canvasTarget, readThumbSize, resizeThumbs, THUMB, writeThumbSize, fitSelection, fitView, fromViewBlock, initialView, isPinned, openSetup, pin, RESULT, select, setMode, sidebarSteps, SOURCE, stepSelection, toggleSelect, togglePin, toggleSolo, toViewBlock, unpin, VIEW_BLOCK_VERSION, type ViewState } from "../src/view.ts";
+import { addBand, dragSplit, makeCompare, MAX_STRIPS, setLayout } from "../src/compare.ts";
+import { canvasTarget, clickBox, compareTargetsOf, readThumbSize, setCompare, toggleCompare, resizeThumbs, THUMB, writeThumbSize, fitSelection, fitView, fromViewBlock, initialView, isPinned, openSetup, pin, RESULT, select, setMode, sidebarSteps, SOURCE, stepSelection, toggleSelect, togglePin, toggleSolo, toViewBlock, unpin, VIEW_BLOCK_VERSION, type ViewState } from "../src/view.ts";
 
 const at = (patch: Partial<ViewState>): ViewState => ({ ...initialView, ...patch });
 /** Only the step ids matter to the view. */
@@ -192,13 +193,13 @@ describe("view state: pinned steps", () => {
 describe("view block (saved per project, beside recipe.json)", () => {
   it("holds the pins, with a version", () => {
     const block = toViewBlock(pin(pin(initialView, "order"), "threshold"));
-    expect(block).toEqual({ version: VIEW_BLOCK_VERSION, pins: ["order", "threshold"] });
+    expect(block).toEqual({ version: VIEW_BLOCK_VERSION, pins: ["order", "threshold"], compare: null });
     expect(JSON.parse(JSON.stringify(block))).toEqual(block);
   });
 
   it("doesn't hold the selection, the mode or the strip size", () => {
     const v = resizeThumbs(setMode(select(initialView, stepSelection("order")), "plot"), 150);
-    expect(Object.keys(toViewBlock(v)).sort()).toEqual(["pins", "version"]);
+    expect(Object.keys(toViewBlock(v)).sort()).toEqual(["compare", "pins", "version"]);
   });
 
   it("reading it back restores the pins of steps that are still in the recipe", () => {
@@ -219,8 +220,8 @@ describe("view block (saved per project, beside recipe.json)", () => {
     expect(fromViewBlock(v, undefined, r).pins).toEqual([]);
   });
 
-  it("keeps what a newer build saved that this one doesn't know (a later comparison), and still reads the pins", () => {
-    const newer = { version: VIEW_BLOCK_VERSION + 1, pins: ["order"], compare: { layout: "cols", bands: ["source", "order"] } };
+  it("keeps what a newer build saved that this one doesn't know, and still reads the pins", () => {
+    const newer = { version: VIEW_BLOCK_VERSION + 1, pins: ["order"], compare: null, zoom: { x: 0.2, k: 3 } };
     const v = fromViewBlock(initialView, newer, r);
     expect(v.pins).toEqual(["order"]);
     expect(toViewBlock(unpin(v, "order"), newer)).toEqual({ ...newer, pins: [] });
@@ -246,7 +247,125 @@ describe("view state: one pen in Plot mode", () => {
 
   it("isn't saved with the project, and doesn't change what the worker draws", () => {
     const v = toggleSolo(at({ mode: "plot" }), "dark");
-    expect(Object.keys(toViewBlock(v)).sort()).toEqual(["pins", "version"]);
+    expect(Object.keys(toViewBlock(v)).sort()).toEqual(["compare", "pins", "version"]);
     expect(canvasTarget(v, r)).toBeNull();
+  });
+});
+
+describe("view state: compare stages", () => {
+  const comparing = (bands: string[], patch: Partial<ViewState> = {}) => at({ compare: makeCompare(bands), ...patch });
+
+  it("starts off, and isn't part of the selection", () => {
+    expect(initialView.compare).toBeNull();
+    expect(compareTargetsOf(initialView, r)).toBeNull();
+  });
+
+  it("turning it on compares the selected step with the one before; off again clears it", () => {
+    const v = toggleCompare(select(initialView, stepSelection("centerline")), r);
+    expect(v.compare!.bands).toEqual(["threshold", "centerline"]);
+    expect(toggleCompare(v, r).compare).toBeNull();
+  });
+
+  it("turning it on with the first step selected compares it with the source", () => {
+    expect(toggleCompare(select(initialView, stepSelection("threshold")), r).compare!.bands).toEqual(["source", "threshold"]);
+  });
+
+  it("is a view change, not a recipe edit: it leaves the mode, selection, pins and strip size alone", () => {
+    const v = pin(select(initialView, stepSelection("order")), "order");
+    const w = toggleCompare(v, r);
+    expect({ ...w, compare: null }).toEqual(v);
+  });
+
+  it("while comparing the canvas draws the strips: no single stage, and the strips' targets follow their steps", () => {
+    const v = comparing(["source", "order"], { selection: stepSelection("threshold") });
+    expect(canvasTarget(v, r)).toBeNull();
+    expect(compareTargetsOf(v, r)).toEqual(["source", 2]);
+    expect(compareTargetsOf(v, chain("order", "threshold"))).toEqual(["source", 0]);
+  });
+
+  it("only Design mode compares (Page and Plot show the result); coming back to Design compares again", () => {
+    const v = comparing(["source", "order"]);
+    expect(compareTargetsOf(setMode(v, "plot"), r)).toBeNull();
+    expect(compareTargetsOf(setMode(setMode(v, "plot"), "design"), r)).toEqual(["source", 2]);
+  });
+
+  it("not comparing: clicking a thumbnail selects it, with or without shift", () => {
+    expect(clickBox(initialView, stepSelection("order"), false).selection).toEqual(stepSelection("order"));
+    expect(clickBox(initialView, stepSelection("order"), true)).toEqual(select(initialView, stepSelection("order")));
+  });
+
+  it("while comparing, clicking a thumbnail only changes the sidebar: the strips stay as they are", () => {
+    const v = comparing(["source", "order"]);
+    const w = clickBox(v, stepSelection("threshold"), false);
+    expect(w.selection).toEqual(stepSelection("threshold"));
+    expect(w.compare).toBe(v.compare);
+  });
+
+  it("while comparing, shift-click adds that step as a strip and leaves the sidebar alone", () => {
+    const v = comparing(["source", "order"], { selection: stepSelection("order") });
+    const w = clickBox(v, stepSelection("threshold"), true);
+    expect(w.compare!.bands).toEqual(["source", "order", "threshold"]);
+    expect(w.selection).toEqual(stepSelection("order"));
+    expect(clickBox(comparing(["order"]), SOURCE, true).compare!.bands).toEqual(["order", "source"]);
+  });
+
+  it("shift-click on a step that already has a strip, or with six strips, changes nothing", () => {
+    const v = comparing(["source", "order"]);
+    expect(clickBox(v, stepSelection("order"), true)).toBe(v);
+    const six = comparing(["source", "threshold", "centerline", "order", "source", "order"]);
+    expect(six.compare!.bands).toHaveLength(MAX_STRIPS);
+    expect(clickBox(six, stepSelection("threshold"), true)).toBe(six);
+  });
+
+  it("the result box can't be a strip: shift-clicking it just selects", () => {
+    const v = comparing(["source", "order"]);
+    expect(clickBox(v, RESULT, true).compare).toBe(v.compare);
+  });
+
+  it("reordering the steps keeps the strips on the same steps", () => {
+    const v = comparing(["threshold", "order"]);
+    expect(fitView(v, r, chain("order", "centerline", "threshold"))).toBe(v);
+  });
+
+  it("removing a step drops its strip; removing every compared step turns comparing off", () => {
+    const v = comparing(["source", "centerline", "order"]);
+    expect(fitView(v, r, chain("threshold", "order")).compare!.bands).toEqual(["source", "order"]);
+    expect(fitView(comparing(["centerline"]), r, chain("threshold", "order")).compare).toBeNull();
+  });
+
+  it("a step added later with a removed step's id (Fill removed, Fill added: \"fill\" again) doesn't get its strip back", () => {
+    const withFill = chain("threshold", "fill", "order");
+    const v = comparing(["source", "fill", "order"]);
+    const removed = fitView(v, withFill, chain("threshold", "order"));
+    const readded = fitView(removed, chain("threshold", "order"), withFill);
+    expect(readded.compare!.bands).toEqual(["source", "order"]);
+  });
+
+  it("setCompare returns the same state when nothing changes", () => {
+    const v = comparing(["source", "order"]);
+    expect(setCompare(v, v.compare)).toBe(v);
+    expect(setCompare(v, addBand(v.compare!, "threshold")).compare!.bands).toHaveLength(3);
+  });
+
+  it("the comparison is saved in the view block and read back for this recipe", () => {
+    const c = dragSplit(setLayout(makeCompare(["source", "threshold", "order"]), "rows"), 0, 0.2);
+    const block = JSON.parse(JSON.stringify(toViewBlock(at({ compare: c }))));
+    expect(block.compare).toEqual(c);
+    expect(fromViewBlock(initialView, block, r).compare).toEqual(c);
+    // Read for a recipe without Threshold: that strip is dropped.
+    expect(fromViewBlock(initialView, block, chain("order")).compare!.bands).toEqual(["source", "order"]);
+  });
+
+  it("another project's block replaces the comparison; no comparison saved means none", () => {
+    const v = comparing(["source", "order"]);
+    expect(fromViewBlock(v, { version: 1, pins: [] }, r).compare).toBeNull();
+    expect(fromViewBlock(v, undefined, r).compare).toBeNull();
+    expect(fromViewBlock(v, { version: 1, pins: [], compare: makeCompare(["threshold"]) }, r).compare!.bands).toEqual(["threshold"]);
+  });
+
+  it("reading the same block again changes nothing", () => {
+    const block = toViewBlock(comparing(["source", "order"]));
+    const v = fromViewBlock(initialView, block, r);
+    expect(fromViewBlock(v, block, r)).toBe(v);
   });
 });

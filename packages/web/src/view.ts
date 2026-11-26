@@ -1,10 +1,11 @@
 import type { InspectTarget } from "./protocol.ts";
+import { addBand, compareTargets, MAX_STRIPS, pruneCompare, readCompare, thisVsBefore, type Compare } from "./compare.ts";
 
 /**
  * The web UI's view state: what the screen shows, as opposed to the recipe (what gets made).
  * Pure and immutable, like `history.ts`: React holds one ViewState and renders from it.
  * Changing the view is never a recipe edit (no Back step, no checkpoint). The part worth
- * keeping with the project (pins now, the comparison later) is saved as the project's view
+ * keeping with the project (pins and the comparison) is saved as the project's view
  * block (`toViewBlock` / `fromViewBlock`); the rest lasts for the session, or (the thumbnail
  * size) is a per-device preference.
  */
@@ -44,9 +45,11 @@ export interface ViewState {
   pins: readonly string[];
   /** Plot mode: the one pen (pass, by layer id) shown on its own; null = every pen. Not saved. */
   solo: string | null;
+  /** Compare stages (Design): the canvas split into strips (`compare.ts`); null = off. */
+  compare: Compare | null;
 }
 
-export const initialView: ViewState = { mode: "design", selection: RESULT, thumb: THUMB.default, pins: [], solo: null };
+export const initialView: ViewState = { mode: "design", selection: RESULT, thumb: THUMB.default, pins: [], solo: null, compare: null };
 
 const clampThumb = (px: number) => Math.round(Math.min(THUMB.max, Math.max(THUMB.min, px)));
 
@@ -133,14 +136,44 @@ export function fitSelection(v: ViewState, before: Chain, after: Chain): ViewSta
 
 /**
  * After a chain edit (or Back/Forward): fit the selection (`fitSelection`) and drop the pins
- * of steps that are gone. Dropping them matters: the engine gives a new step the lowest free
- * id, so a Fill added after removing Fill is "fill" again and mustn't come back pinned.
+ * and strips of steps that are gone. Dropping them matters: the engine gives a new step the
+ * lowest free id, so a Fill added after removing Fill is "fill" again and mustn't come back
+ * pinned, or as a strip.
  */
 export function fitView(v: ViewState, before: Chain, after: Chain): ViewState {
   const w = fitSelection(v, before, after);
   const left = new Set(after.steps.map((x) => x.id));
   const pins = w.pins.filter((id) => left.has(id));
-  return pins.length === w.pins.length ? w : { ...w, pins };
+  const compare = w.compare && pruneCompare(w.compare, after);
+  if (pins.length === w.pins.length && compare === w.compare) return w;
+  return { ...w, pins: pins.length === w.pins.length ? w.pins : pins, compare };
+}
+
+/** The “Compare stages” toggle: on, it compares the selected step with the one before it. */
+export function toggleCompare(v: ViewState, chain: Chain): ViewState {
+  return { ...v, compare: v.compare ? null : thisVsBefore(chain, selectedIndex(v, chain)) };
+}
+
+export function setCompare(v: ViewState, compare: Compare | null): ViewState {
+  return compare === v.compare ? v : { ...v, compare };
+}
+
+/** Whether shift-clicking that box would add a strip (not at six, not a step already shown). */
+export function canAddStrip(v: ViewState, selection: Selection): boolean {
+  const band = selection.kind === "source" ? "source" : selection.kind === "step" ? selection.id : null;
+  return !!v.compare && band !== null && v.compare.bands.length < MAX_STRIPS && !v.compare.bands.includes(band);
+}
+
+/**
+ * A click on a strip thumbnail. While comparing the canvas shows the strips, so a click only
+ * changes the sidebar (the selection), and shift-click adds that step (or the source) as a
+ * strip instead, leaving the sidebar alone. A step already shown, or a seventh strip, changes
+ * nothing. Not comparing, shift makes no difference.
+ */
+export function clickBox(v: ViewState, selection: Selection, shift: boolean): ViewState {
+  if (!v.compare || !shift || selection.kind === "result") return select(v, selection);
+  if (!canAddStrip(v, selection)) return v;
+  return { ...v, compare: addBand(v.compare, selection.kind === "source" ? "source" : (selection as { id: string }).id) };
 }
 
 export const isPinned = (v: ViewState, id: string) => v.pins.includes(id);
@@ -170,13 +203,15 @@ export function sidebarSteps(v: ViewState, chain: Chain): { looking: string | nu
 
 /**
  * The project's view block: `view.json` in the project folder (ADR 0014), beside recipe.json
- * and not part of it. Version 1 holds the pins; the comparison (#75) goes here next.
+ * and not part of it. Version 1 holds the pins and the comparison (`compare`, null when off;
+ * added without a version bump, since older builds keep fields they don't know).
  */
 export const VIEW_BLOCK_VERSION = 1;
 
 export interface ViewBlock {
   version: number;
   pins: string[];
+  compare?: Compare | null;
   /** Whatever a newer build saved that this one doesn't know: kept, not lost. */
   [more: string]: unknown;
 }
@@ -187,26 +222,34 @@ const record = (x: unknown): Record<string, unknown> | null => (typeof x === "ob
 export function toViewBlock(v: ViewState, kept?: unknown): ViewBlock {
   const old = record(kept) ?? {};
   const version = Math.max(VIEW_BLOCK_VERSION, typeof old.version === "number" ? old.version : 0);
-  return { ...old, version, pins: [...v.pins] };
+  return { ...old, version, pins: [...v.pins], compare: v.compare };
 }
 
 /**
- * The view with a project's saved view block applied: its pins, for steps that are in this
- * recipe. A missing or unreadable block (or part of one) is ignored: it's only the view.
+ * The view with a project's saved view block applied: its pins and comparison, for steps that
+ * are in this recipe. A missing or unreadable block (or part of one) is ignored: it's only the view.
  */
 export function fromViewBlock(v: ViewState, block: unknown, chain: Chain): ViewState {
   const raw = record(block)?.pins;
   const ids = new Set(chain.steps.map((s) => s.id));
   const pins = Array.isArray(raw) ? [...new Set(raw.filter((p): p is string => typeof p === "string" && ids.has(p)))] : [];
-  if (!Array.isArray(raw) && !v.pins.length) return v;
-  return pins.join("\n") === v.pins.join("\n") ? v : { ...v, pins };
+  const compare = readCompare(record(block)?.compare, chain);
+  const samePins = pins.join("\n") === v.pins.join("\n");
+  const sameCompare = JSON.stringify(compare) === JSON.stringify(v.compare);
+  if (samePins && sameCompare) return v;
+  return { ...v, pins: samePins ? v.pins : pins, compare: sameCompare ? v.compare : compare };
 }
 
-/** What the worker should render: the selection in Design; the result in Page and Plot. */
+/** What the worker should render: the selection in Design (unless comparing); the result in Page and Plot. */
 export function canvasTarget(v: ViewState, chain: Chain): InspectTarget {
-  if (v.mode !== "design") return null;
+  if (v.mode !== "design" || v.compare) return null;
   const s = v.selection;
   if (s.kind === "source") return "source";
   const i = selectedIndex(v, chain);
   return i < 0 ? null : i;
+}
+
+/** The strips the worker should draw (Design, comparing): one target per strip; null otherwise. */
+export function compareTargetsOf(v: ViewState, chain: Chain): InspectTarget[] | null {
+  return v.mode === "design" && v.compare ? compareTargets(v.compare, chain) : null;
 }
