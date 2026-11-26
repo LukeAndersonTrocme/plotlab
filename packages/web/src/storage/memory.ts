@@ -5,6 +5,7 @@ interface Project {
   info: ProjectInfo;
   source: Source;
   recipe: SavedRecipe | undefined;
+  view: unknown;
   checkpoints: Map<string, Checkpoint>;
   thumbnails: Map<string, Uint8Array>;
 }
@@ -32,6 +33,14 @@ export function memoryLibrary(opts: { onSetRecipe?: (saved: SavedRecipe) => void
         const x = p();
         if (x) x.recipe = structuredClone(saved);
         opts.onSetRecipe?.(saved);
+      },
+      async getView() {
+        const v = p()?.view;
+        return v === undefined ? undefined : structuredClone(v);
+      },
+      async setView(view) {
+        const x = p();
+        if (x) x.view = structuredClone(view);
       },
       async putCheckpoint(cp, thumbnail) {
         const x = p();
@@ -66,7 +75,7 @@ export function memoryLibrary(opts: { onSetRecipe?: (saved: SavedRecipe) => void
       const have = projects.get(id);
       if (have) return { ...have.info };
       const info = { id, name: src.name };
-      projects.set(id, { info, source: { type: src.type, bytes: src.bytes.slice() }, recipe: undefined, checkpoints: new Map(), thumbnails: new Map() });
+      projects.set(id, { info, source: { type: src.type, bytes: src.bytes.slice() }, recipe: undefined, view: undefined, checkpoints: new Map(), thumbnails: new Map() });
       return { ...info };
     },
     async openProject(id) {

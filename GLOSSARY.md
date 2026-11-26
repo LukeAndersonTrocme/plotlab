@@ -36,6 +36,7 @@ still to be argued over with Nick. Change a term here first, then rename it ever
 | **Step** | One operation in the pipeline, with its own parameters | a trick, a move | function |
 | **Recipe** | The ordered steps + all parameter values, as JSON | the settings, the process | pipeline config |
 | **Checkpoint** | A saved moment while exploring: recipe + thumbnail + optional name/note, tied to its source. Saved by hand (Save checkpoint, ⌘S, Branch from here), and automatically before a preset or a restore replaces the recipe; clicking one restores it (undoable). Working name, open to Nick | a version, a save | snapshot / parameter set |
+| **Pin** | Keep a step's settings in the sidebar while looking at other steps (the Pin button, or drag its box onto the sidebar). Saved with the project, not in the recipe or its checkpoints | keep it open | |
 | **Variant** | A randomized suggestion from Explore. Temporary; starring one keeps it as a checkpoint | a try, an option | random sample |
 | **Project** | One source with its recipe and checkpoints, stored as a project folder | a piece, a project | workspace |
 | **Bundle** | A project folder zipped into one file, for sharing or moving between devices | the file | archive |
@@ -80,5 +81,6 @@ still to be argued over with Nick. Change a term here first, then rename it ever
 | **Step contract** | A step = `run` function + param declarations + `help.md` + tests (`defineStep`). |
 | **Cost** | A step's `live` / `on-demand` hint for the UI. |
 | **Storage adapter** | One implementation of the storage interface (IndexedDB, connected folder, later desktop) (ADR 0014). |
-| **Project folder** | The on-disk layout of a project: `source`, `recipe.json`, `checkpoints/`, `README.md` (ADR 0014). |
+| **Project folder** | The on-disk layout of a project: `source`, `recipe.json`, `view.json`, `checkpoints/`, `README.md` (ADR 0014). |
+| **View block** | `view.json` in a project folder: what the screen keeps for that project (pins; later the comparison), versioned on its own and never part of the recipe, so changing it is not a recipe edit (`packages/web/src/view.ts`). |
 | **Golden test** | A recipe + fixture whose output is compared to a human-approved file in `golden/approved/`. |

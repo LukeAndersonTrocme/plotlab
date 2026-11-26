@@ -1,7 +1,8 @@
 import { describe, expect, it } from "vitest";
 import { IDBFactory } from "fake-indexeddb";
 import { indexedDbLibrary, LEGACY_RECIPE_KEY, LEGACY_SAVED_AT_KEY, memoryLibrary, migrateLegacyRecipe, openLibrary, sha256Hex, storageWarning, type Library } from "../src/storage/index.ts";
-import { openImage, startSession } from "../src/session.ts";
+import { openImage, readView, saveView, startSession } from "../src/session.ts";
+import { fromViewBlock, initialView, pin } from "../src/view.ts";
 import { listForProject } from "../src/checkpoints.ts";
 
 function fakeLocalStorage(init: Record<string, string> = {}) {
@@ -175,5 +176,45 @@ describe("low storage warning", () => {
     expect(storageWarning({ usage: 70e6, quota: 100e6 })).toMatch(/30 MB left/);
     expect(storageWarning(undefined)).toBeNull();
     expect(storageWarning({})).toBeNull();
+  });
+});
+
+describe("the view block: pinned steps come back when the project is reopened", () => {
+  const chain = { steps: [{ id: "threshold" }, { id: "centerline" }, { id: "order" }] };
+  const libraries: [string, () => { first: () => Promise<Library>; again: () => Promise<Library> }][] = [
+    ["memory", () => { const lib = memoryLibrary(); return { first: async () => lib, again: async () => lib }; }],
+    ["fake IndexedDB", () => { const factory = new IDBFactory(); return { first: () => indexedDbLibrary({ factory }), again: () => indexedDbLibrary({ factory }) }; }],
+  ];
+
+  it.each(libraries)("%s library", async (_name, make) => {
+    const { first, again } = make();
+    const s1 = await start(await first());
+    const pinned = pin(pin(initialView, "order"), "threshold");
+    const kept = await readView(s1.project);
+    expect(kept).toBeUndefined();
+    await saveView(s1.project, pinned, kept);
+
+    const s2 = await start(await again());
+    expect(s2.project.id).toBe(s1.project.id);
+    expect(fromViewBlock(initialView, await readView(s2.project), chain).pins).toEqual(["order", "threshold"]);
+    // Saving the view wrote no recipe and made no checkpoint.
+    expect(await s2.project.getRecipe()).toBeUndefined();
+    expect(await listForProject(s2.project)).toEqual([]);
+  });
+
+  it("each image keeps its own pins", async () => {
+    const lib = memoryLibrary();
+    const a = await openImage(lib, { bytes: new Uint8Array([1]), name: "a.png", type: "image/png" });
+    const b = await openImage(lib, { bytes: new Uint8Array([2]), name: "b.png", type: "image/png" });
+    await saveView(a.project, pin(initialView, "order"), undefined);
+    expect(fromViewBlock(initialView, await readView(b.project), chain).pins).toEqual([]);
+    expect(fromViewBlock(initialView, await readView(a.project), chain).pins).toEqual(["order"]);
+  });
+
+  it("a view block that can't be read (storage failing) is no view block, not an error", async () => {
+    const lib = memoryLibrary();
+    const { project } = await openImage(lib, { bytes: new Uint8Array([3]), name: "c.png", type: "image/png" });
+    const failing = { ...project, getView: () => Promise.reject(new Error("disk on fire")) };
+    expect(await readView(failing)).toBeUndefined();
   });
 });

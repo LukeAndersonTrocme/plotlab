@@ -1,5 +1,6 @@
 /** Starting up and opening images, over the storage interface. No React here, so it's testable. */
 import { createCheckpoint, listForProject } from "./checkpoints.ts";
+import { toViewBlock, type ViewBlock, type ViewState } from "./view.ts";
 import { migrateLegacyRecipe, type KeyValue, type Library, type NewSource, type ProjectStore, type SavedRecipe, type Source } from "./storage/index.ts";
 
 /** The built-in sample's project name. It's a real project: its id is the hash of the bundled file. */
@@ -54,4 +55,20 @@ export async function openImage(library: Library, src: NewSource): Promise<{ pro
   await library.setLastOpened(project.id);
   const saved = await project.getRecipe();
   return { project, ...(saved && { saved }) };
+}
+
+/** A project's saved view block (view.json), as stored; undefined when there's none or it can't be read. */
+export async function readView(project: Pick<ProjectStore, "getView">): Promise<unknown> {
+  try {
+    return await project.getView();
+  } catch {
+    return undefined; // only the view: the work carries on without it
+  }
+}
+
+/** Saves the view block (pins), keeping what a newer build added to `kept`. Not a recipe edit. */
+export async function saveView(project: ProjectStore, view: ViewState, kept: unknown): Promise<ViewBlock> {
+  const block = toViewBlock(view, kept);
+  await project.setView(block);
+  return block;
 }

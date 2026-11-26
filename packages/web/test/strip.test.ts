@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { loadRecipe, type Recipe } from "@plotlab/engine";
 import { createRegistry } from "@plotlab/steps";
-import { shownAt, stripBoxes, thumbRenderSide, toggleBypass } from "../src/strip.ts";
+import { removeCheck, shownAt, stripBoxes, thumbRenderSide, toggleBypass } from "../src/strip.ts";
 
 const reg = createRegistry();
 const recipe = (steps: Array<string | { step: string; enabled?: boolean }>): Recipe =>
@@ -75,6 +75,33 @@ describe("toggleBypass", () => {
     const r = recipe([{ step: "pixelate", enabled: false }, "tone"]);
     const res = toggleBypass(r, 0, reg);
     expect("reason" in res && res.reason).toMatch(/Turning on Pixelate would break the chain/);
+  });
+});
+
+describe("switching a stage-changing step back on", () => {
+  // The strip's bypass and the sidebar's Switch on both use this, so they agree.
+  const r = recipe(["tone", "bands", "fill", { step: "order", enabled: false }]);
+
+  it("a stage-changing step that is off (say, in a loaded recipe) can go back on where it fits", () => {
+    expect(stripBoxes(r, reg, ran()).find((b) => b.key === "order")!.bypass).toEqual({ ok: true });
+    const on = toggleBypass(r, 3, reg);
+    if (!("recipe" in on)) throw new Error(on.reason);
+    expect(on.recipe.steps[3]!.enabled).toBe(true);
+    // ...and then, being on, it can't be switched off again.
+    expect(toggleBypass(on.recipe, 3, reg)).toEqual({ reason: expect.stringMatching(/Can't switch off Stroke order/) });
+  });
+});
+
+describe("removeCheck: whether Remove works on a step", () => {
+  it("a step whose removal keeps the chain working can be removed", () => {
+    const r = recipe(["tone", "levels", "bands", "fill", "order"]);
+    expect(removeCheck(r, 1, reg)).toEqual({ ok: true });
+    expect(removeCheck(r, 4, reg)).toEqual({ ok: true });
+  });
+
+  it("removing a step the next one needs says why", () => {
+    const r = recipe(["tone", "levels", "bands", "fill", "order"]);
+    expect(removeCheck(r, 0, reg)).toEqual({ ok: false, reason: expect.stringMatching(/^Removing Ink density would break the chain: /) });
   });
 });
 

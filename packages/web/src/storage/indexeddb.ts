@@ -2,7 +2,8 @@ import { sha256Hex } from "./hash.ts";
 import type { Checkpoint, Library, ProjectInfo, ProjectStore, SavedRecipe, Source } from "./types.ts";
 
 const DB_NAME = "plotlab";
-const VERSION = 1;
+// 1: projects, sources, recipes, checkpoints, thumbnails, kv. 2: adds views.
+const VERSION = 2;
 // Metadata and bytes live in separate stores so listing never loads images.
 const PROJECTS = "projects"; // { id, name, type }, key: id
 const SOURCES = "sources"; // Uint8Array, key: project id
@@ -10,7 +11,8 @@ const RECIPES = "recipes"; // SavedRecipe, key: project id
 const CHECKPOINTS = "checkpoints"; // Checkpoint, key: id, index byProject (sourceHash)
 const THUMBNAILS = "thumbnails"; // Uint8Array, key: checkpoint id
 const KV = "kv"; // "lastOpened" → project id
-const ALL = [PROJECTS, SOURCES, RECIPES, CHECKPOINTS, THUMBNAILS, KV];
+const VIEWS = "views"; // the view block (plain JSON), key: project id
+const ALL = [PROJECTS, SOURCES, RECIPES, CHECKPOINTS, THUMBNAILS, KV, VIEWS];
 
 const LOST = "Storage was upgraded in another tab. Reload this page to keep saving.";
 
@@ -66,7 +68,8 @@ export async function indexedDbLibrary(
         d.createObjectStore(THUMBNAILS);
         d.createObjectStore(KV);
       }
-      // Version 2 adds its stores here, under `if (e.oldVersion < 2)`.
+      if (e.oldVersion < 2) d.createObjectStore(VIEWS);
+      // Version 3 adds its stores here, under `if (e.oldVersion < 3)`.
     };
     open.onsuccess = () => {
       if (settled) return open.result.close(); // too late: we already fell back
@@ -135,6 +138,11 @@ export async function indexedDbLibrary(
         tx("readwrite", (t) => {
           t.objectStore(RECIPES).put(saved, id);
         }),
+      getView: () => tx("readonly", (t) => get<unknown>(t, VIEWS, id)),
+      setView: (view) =>
+        tx("readwrite", (t) => {
+          t.objectStore(VIEWS).put(view, id);
+        }),
       putCheckpoint: (cp, thumbnail) =>
         tx("readwrite", (t) => {
           t.objectStore(CHECKPOINTS).put({ ...cp, sourceHash: id });
@@ -177,7 +185,7 @@ export async function indexedDbLibrary(
           t.objectStore(CHECKPOINTS).delete(cid);
           t.objectStore(THUMBNAILS).delete(cid);
         }
-        for (const s of [PROJECTS, SOURCES, RECIPES]) t.objectStore(s).delete(id);
+        for (const s of [PROJECTS, SOURCES, RECIPES, VIEWS]) t.objectStore(s).delete(id);
       }),
     getLastOpened: () => tx("readonly", (t) => get<string>(t, KV, "lastOpened")),
     setLastOpened: (id) =>
