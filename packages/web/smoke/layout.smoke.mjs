@@ -338,6 +338,107 @@ try {
     await page.close();
   }
 
+  // Plot mode on a two-ink recipe (CMYK, with only cyan and black turned into lines): the
+  // time breakdown, one strip box per pen, solo, pass order (a Back step), the plot-order
+  // animation, and output with Send off for a digital target.
+  {
+    const page = await open(1280);
+    const recipe = {
+      schemaVersion: 3,
+      input: "image",
+      target: { kind: "plotter" },
+      paper: { widthMm: 297, heightMm: 210 },
+      inks: [
+        { id: "cyan", name: "Cyan", color: "#00a0d6", mix: "multiply", widthMm: 0.3 },
+        { id: "black", name: "Black", color: "#1d1d1b", mix: "multiply", widthMm: 0.3 },
+      ],
+      layerInks: { C: "cyan", K: "black" },
+      passOrder: "light-to-dark",
+      machine: "generic",
+      steps: [
+        { step: "cmyk", params: { blackGeneration: 0.7 } },
+        { step: "centerline", params: {}, layers: ["C", "K"] },
+        { step: "order", params: {} },
+      ],
+    };
+    await page.setInputFiles("aside.side input[type=file]", { name: "two-ink.json", mimeType: "application/json", buffer: Buffer.from(JSON.stringify(recipe)) });
+    await page.click(".modes button:has-text('Plot')");
+    await page.waitForFunction(() => document.querySelectorAll(".pass-strip .box").length === 2, null, { timeout: 60_000 });
+    await page.waitForSelector(".plot-time .bigtime", { timeout: 60_000 });
+    const passes = () => page.$$eval(".pass-strip .box", (els) => els.map((e) => e.dataset.pass));
+    const t = await page.evaluate(() => ({
+      big: document.querySelector(".plot-time .bigtime").textContent,
+      stats: document.querySelector(".stats .big").textContent,
+      rows: [...document.querySelectorAll(".plot-time .breakdown .row")].map((r) => r.dataset.part),
+      changes: document.querySelector('.plot-time .row[data-part="penChanges"] .detail').textContent,
+    }));
+    check(t.big === t.stats && t.rows.join(",") === "draw,travel,pen,penChanges" && t.changes === "1", `Plot mode: big time ${t.big} with drawing, travel, pen lifts, pen changes (${t.changes} pen change)`);
+    check((await passes()).join(",") === "C,K", `the strip has one box per pen in pass order, light first (${(await passes()).join(", ")})`);
+    await page.waitForFunction(() => [...document.querySelectorAll(".pass-strip .box .pic img")].length === 2, null, { timeout: 30_000 });
+    check(true, "each pen box gets a picture of its lines");
+
+    // Solo: only that pen's lines on the canvas; again (or All pens) shows both.
+    const strokes = () => page.$$eval(".view svg.preview path[stroke]", (els) => els.map((e) => e.getAttribute("stroke")));
+    check((await strokes()).length === 2, "both pens' lines are on the canvas");
+    await page.click('.pass-strip .box[data-pass="K"] .pic');
+    await page.waitForFunction(() => document.querySelectorAll(".view svg.preview path[stroke]").length === 1);
+    check((await strokes())[0] === "#1d1d1b" && /Showing only Black/.test(await page.textContent(".view-bar")), "clicking the Black box shows only black lines");
+    await page.click('.pass-strip .box[data-pass="K"] .pic');
+    await page.waitForFunction(() => document.querySelectorAll(".view svg.preview path[stroke]").length === 2);
+    await page.click('.pass-strip .box[data-pass="C"] .pic');
+    await page.waitForFunction(() => document.querySelectorAll(".view svg.preview path[stroke]").length === 1);
+    await page.click(".pass-strip .all-pens");
+    await page.waitForFunction(() => document.querySelectorAll(".view svg.preview path[stroke]").length === 2);
+    check(true, "clicking it again, or All pens, shows every pen");
+
+    // Pass order: Black first, then Back undoes it.
+    await page.click("aside.side button[aria-label='Plot Black earlier']");
+    await page.waitForFunction(() => [...document.querySelectorAll(".pass-strip .box")].map((e) => e.dataset.pass).join(",") === "K,C", null, { timeout: 30_000 });
+    const firstStroke = (await strokes())[0];
+    check(firstStroke === "#1d1d1b", `moving Black earlier reorders the strip and the preview (first drawn: ${firstStroke})`);
+    check(!(await page.$eval("header.top button[aria-label=Back]", (b) => b.disabled)), "a new pass order is a Back step");
+    await page.click("header.top button[aria-label=Back]");
+    await page.waitForFunction(() => [...document.querySelectorAll(".pass-strip .box")].map((e) => e.dataset.pass).join(",") === "C,K", null, { timeout: 30_000 });
+    check(true, "Back puts the pass order back");
+    // Showing one pen isn't an edit: an edit would clear Forward.
+    await page.click('.pass-strip .box[data-pass="K"] .pic');
+    await page.waitForFunction(() => document.querySelectorAll(".view svg.preview path[stroke]").length === 1);
+    check(!(await page.$eval("header.top button[aria-label=Forward]", (b) => b.disabled)), "showing one pen is not an edit (Forward is still there)");
+    await page.click(".pass-strip .all-pens");
+    await page.waitForFunction(() => document.querySelectorAll(".view svg.preview path[stroke]").length === 2);
+
+    // The animation: half way shows part of the plot with the pen marked; Play moves on.
+    const full = await page.$eval(".view svg.preview", (e) => e.innerHTML.length);
+    await page.$eval("aside.side input.scrub", (el) => {
+      const set = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value").set;
+      set.call(el, "500");
+      el.dispatchEvent(new Event("input", { bubbles: true }));
+    });
+    await page.waitForSelector(".view svg.preview .pen-head");
+    const half = await page.$eval(".view svg.preview", (e) => e.innerHTML.length);
+    const where = await page.textContent("aside.side .play-where");
+    check(half < full && /Pass \d of 2/.test(where), `scrubbing half way draws part of the plot with the pen marked ("${where}")`);
+    await page.click("aside.side button.play");
+    check((await page.textContent("aside.side button.play")) === "Pause", "Play starts the animation");
+    await page.waitForFunction(() => Number(document.querySelector("aside.side input.scrub").value) > 520, null, { timeout: 10_000 });
+    await page.click("aside.side button.play");
+    check(true, "the animation moves on while playing, and Pause stops it");
+
+    // Output: Send is on for a plotter; SVG and PNG come from the existing exporters.
+    check(!(await page.$eval("aside.side button.send", (b) => b.disabled)), "Send to plotter is on for a plotter target");
+    const [dl] = await Promise.all([page.waitForEvent("download", { timeout: 60_000 }), page.click('aside.side button[data-format="png"]')]);
+    check(/\.png$/.test(dl.suggestedFilename()), `Download PNG saves ${dl.suggestedFilename()}`);
+    check(!!(await page.$('aside.side button[data-format="svg"]')), "Download SVG is there too");
+
+    // A digital target: Send is off and says why.
+    await page.click(".modes button:has-text('Page')");
+    await page.click(".target-grid button:has-text('Digital image')");
+    await page.click(".modes button:has-text('Plot')");
+    const send = await page.$eval("aside.side button.send", (b) => ({ off: b.disabled, why: document.querySelector("aside.side .send-why")?.textContent ?? "" }));
+    check(send.off && /digital/.test(send.why), `Send is off for a digital target, with a reason ("${send.why}")`);
+    await page.close();
+  }
+
   // Dark mode: the chrome goes dark, the paper stays paper-coloured.
   {
     const page = await open(1280, "dark");
