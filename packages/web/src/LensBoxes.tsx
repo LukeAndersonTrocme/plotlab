@@ -10,7 +10,7 @@ const hits = (b: Rect, p: { x: number; y: number }, ex: number, ey: number) => p
 type Drag =
   | { t: "lens"; dx: number; dy: number; c: Compare }
   | { t: "move"; k: number; before: Box; dx: number; dy: number; c: Compare }
-  | { t: "resize"; k: number; before: Box; c: Compare }
+  | { t: "resize"; k: number; before: Box; dx: number; dy: number; c: Compare }
   | { t: "new"; x0: number; y0: number; rect: Rect };
 
 export type OverlayProps = {
@@ -90,7 +90,7 @@ export function LensBoxesCanvas(props: OverlayProps) {
       let k = now.boxes.length - 1;
       while (k >= 0 && !hits(now.boxes[k]!, p, cx * 0.3, cy * 0.3)) k--;
       const b = now.boxes[k];
-      if (b && p.x >= b.x + b.w - cx && p.y >= b.y + b.h - cy) d = { t: "resize", k, before: b, c: now };
+      if (b && p.x >= b.x + b.w - cx && p.y >= b.y + b.h - cy) d = { t: "resize", k, before: b, dx: b.x + b.w - p.x, dy: b.y + b.h - p.y, c: now };
       else if (b) d = { t: "move", k, before: b, dx: p.x - b.x, dy: p.y - b.y, c: now };
       else if (p.x >= 0 && p.x <= 1 && p.y >= 0 && p.y <= 1) d = { t: "new", x0: p.x, y0: p.y, rect: boxRect(p.x, p.y, p.x, p.y) };
     }
@@ -105,7 +105,7 @@ export function LensBoxesCanvas(props: OverlayProps) {
     if (!drag || !p) return;
     if (drag.t === "lens") setDrag({ ...drag, c: moveLens(drag.c, p.x - drag.dx, p.y - drag.dy, aspect) });
     else if (drag.t === "move") setDrag({ ...drag, c: moveBox(drag.c, drag.k, p.x - drag.dx, p.y - drag.dy) });
-    else if (drag.t === "resize") setDrag({ ...drag, c: resizeBox(drag.c, drag.k, p.x, p.y) });
+    else if (drag.t === "resize") setDrag({ ...drag, c: resizeBox(drag.c, drag.k, p.x + drag.dx, p.y + drag.dy) });
     else setDrag({ ...drag, rect: boxRect(drag.x0, drag.y0, p.x, p.y) });
   };
 
