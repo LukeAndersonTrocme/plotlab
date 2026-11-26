@@ -30,7 +30,7 @@ export async function createCheckpoint(
 
 const newestFirst = (a: Checkpoint, b: Checkpoint) => b.createdAt - a.createdAt || (a.id < b.id ? 1 : -1);
 
-export async function listForProject(project: ProjectStore): Promise<Checkpoint[]> {
+export async function listForProject(project: Pick<ProjectStore, "listCheckpoints">): Promise<Checkpoint[]> {
   return (await project.listCheckpoints()).sort(newestFirst);
 }
 
