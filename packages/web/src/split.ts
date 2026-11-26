@@ -1,4 +1,5 @@
 import { lanesOf, splitWith, type Recipe, type StepRegistry } from "@plotlab/engine";
+import { presets } from "@plotlab/steps";
 import { autoCheckpoint, listForProject, restoreSafely } from "./checkpoints.ts";
 import { commit, type History } from "./history.ts";
 import type { Checkpoint, Library, ProjectStore } from "./storage/index.ts";
@@ -54,7 +55,14 @@ export async function splitIntoCmyk(
 
 type Parse = (json: unknown) => { recipe: Recipe; warnings: string[] };
 
-/** The checkpoint to undo a split with: the one saved at the split if it's still there, else the newest one that isn't split. */
+/** Names of the checkpoints saved just before a split: "Split into CMYK", and picking a preset that splits. */
+const SPLIT_NAMES = new Set([PRE_SPLIT, ...presets.filter((p) => p.screenAngles).map((p) => `Before “${p.title}”`)]);
+
+/**
+ * The checkpoint to undo a split with: the one saved at this split (remembered this session)
+ * if it's still there, else the newest one saved just before a split, else the newest one
+ * that isn't split.
+ */
 async function preSplitCheckpoint(project: ProjectStore, parse: Parse, registry: StepRegistry, remembered?: string): Promise<Checkpoint | null> {
   const unsplit = (cp: Checkpoint) => {
     try {
@@ -66,14 +74,15 @@ async function preSplitCheckpoint(project: ProjectStore, parse: Parse, registry:
   const cps = await listForProject(project);
   const own = remembered ? cps.find((c) => c.id === remembered) : undefined;
   if (own && unsplit(own)) return own;
-  return cps.find(unsplit) ?? null;
+  return cps.find((c) => SPLIT_NAMES.has(c.name) && unsplit(c)) ?? cps.find(unsplit) ?? null;
 }
 
 /**
- * "Undo the split": restores the checkpoint from before the split as one Back step (the split
- * recipe, with any edits since, is saved as a checkpoint first). `remembered`: the checkpoint
- * saved at the split in this session. Without storage, the last recipe in Back's history from
- * before the split is used.
+ * "Undo the split": back to the recipe from before the split, as one Back step. That is the
+ * newest recipe in Back's history from before the split when it's still there (exactly what
+ * the split replaced); else (after a reload) the checkpoint saved at the split. The split
+ * recipe, with any edits since, is saved as a checkpoint first. `remembered`: the checkpoint
+ * saved at the latest split in this session.
  */
 export async function undoSplit(
   library: Library | null,
@@ -85,13 +94,17 @@ export async function undoSplit(
   now?: number,
 ): Promise<{ recipe: Recipe; history: History<Recipe>; saved: Saved | null; message: string } | { reason: string }> {
   if (!isSplit(history.present, registry)) return { reason: "The picture isn't split, so there's no split to undo." };
+  const before = [...history.past].reverse().find((r) => !isSplit(r, registry));
+  if (before) {
+    const saved = project ? await autoCheckpoint(project, { recipe: history.present, name: BEFORE_UNDO, now }) : null;
+    const where = !saved ? "Back returns to the split." : saved.created ? "The split version is saved as a checkpoint." : "The split version was already a checkpoint.";
+    return { recipe: before, history: commit(history, before), saved, message: `Undid the split: back to the settings from before it. ${where}` };
+  }
   const cp = library && project ? await preSplitCheckpoint(project, parse, registry, remembered) : null;
   if (library && project && cp) {
     const r = await restoreSafely(library, project, cp, history, parse, { name: BEFORE_UNDO, now });
     const where = r.saved.created ? "The split version is saved as a checkpoint." : "The split version was already a checkpoint.";
     return { recipe: r.recipe, history: r.history, saved: r.saved, message: [`Undid the split: back to the settings from before it. ${where}`, ...r.warnings].join("\n") };
   }
-  const before = [...history.past].reverse().find((r) => !isSplit(r, registry));
-  if (!before) return { reason: "Couldn't find the recipe from before the split. Pick a checkpoint from before it in Checkpoints, or remove Separate CMYK." };
-  return { recipe: before, history: commit(history, before), saved: null, message: "Undid the split: back to the settings from before it. Back returns to the split." };
+  return { reason: "Couldn't find the recipe from before the split. Pick a checkpoint from before it in Checkpoints, or remove Separate CMYK." };
 }

@@ -13,7 +13,7 @@ import { canvasTarget, clickBox, lookingBand, compareTargetsOf, fitView, fromVie
 import { Strip } from "./Strip.tsx";
 import { addAt, moveToGap } from "./gaps.ts";
 import { STACK_KEY, STEP_DRAG, stripBoxes, stripLanes, thumbRenderSide, toggleBypass, type StripBox } from "./strip.ts";
-import { canSplit, splitIntoCmyk, undoSplit } from "./split.ts";
+import { canSplit, isSplit, splitIntoCmyk, undoSplit } from "./split.ts";
 import { bandView, shiftRefusal, shownBands } from "./compare.ts";
 import { EMPTY_RUN, Runner, type RunState } from "./runner.ts";
 import { decodeFile, loadSample, sampleSource } from "./sample.ts";
@@ -249,8 +249,14 @@ function Editor(props: { hidden: boolean }) {
   // Restoring saves where you are first, then is one Back step. A checkpoint of another
   // image opens that project too (the image switch itself isn't a Back step, as when
   // opening an image).
+  /**
+   * The checkpoint saved at the latest split this session (Undo the split's fallback when Back's
+   * history no longer has the recipe from before it). Every split sets it; restores and loads clear it.
+   */
+  const preSplit = useRef<string | undefined>();
   const restore = async (cp: Checkpoint) => {
     if (!library || !project || !ready) return;
+    preSplit.current = undefined;
     const before = history.present;
     const label = checkpointLabel(cp);
     try {
@@ -296,6 +302,7 @@ function Editor(props: { hidden: boolean }) {
     closeGallery();
     try {
       const r = await pickPreset(project, before, id, enter);
+      preSplit.current = r.saved && isSplit(r.recipe, registry) ? r.saved.checkpoint.id : undefined;
       if (r.saved) {
         if (r.saved.created && project) addPicture(project, r.saved.checkpoint, before);
         setSaved((n) => n + 1);
@@ -309,14 +316,13 @@ function Editor(props: { hidden: boolean }) {
   };
 
   /** Split into CMYK (the source's sidebar, or Separate CMYK from the "+" at `gap`): saves a checkpoint first. */
-  const preSplit = useRef<string | undefined>();
   const split = async (gap?: number) => {
     const before = recipeRef.current;
     try {
       const r = await splitIntoCmyk(project, before, registry, gap);
       if ("reason" in r) return setNotice(r.reason);
+      preSplit.current = r.saved?.checkpoint.id;
       if (r.saved) {
-        preSplit.current = r.saved.checkpoint.id;
         if (r.saved.created && project) addPicture(project, r.saved.checkpoint, before);
         setSaved((n) => n + 1);
       }
@@ -458,6 +464,7 @@ function Editor(props: { hidden: boolean }) {
 
   const loadFile = async (file: File) => {
     if (!ready) return;
+    preSplit.current = undefined;
     if (file.name.endsWith(".json")) {
       try {
         const { recipe: loaded, warnings } = loadRecipe(JSON.parse(await file.text()), registry);
