@@ -6,6 +6,7 @@ import {
   removeStep,
   resetParam,
   resetStep,
+  setLaneParam,
   type AnyStep,
   type LayerInfo,
   type ParamDecl,
@@ -71,8 +72,12 @@ export function StepList(props: {
   const setParam = (index: number, name: string, value: unknown, proxy: boolean) => {
     const rs = recipe.steps[index]!;
     const layer = editing[index] ?? null;
-    if (layer === null) patchStep(index, { params: { ...rs.params, [name]: value } }, proxy);
-    else patchStep(index, { layerParams: { ...rs.layerParams, [layer]: { ...rs.layerParams?.[layer], [name]: value } } }, proxy);
+    if (layer === null) {
+      // A linked edit: the shared settings, written once for every ink (lanes, #66).
+      const res = setLaneParam(recipe, registry, rs.id, name, value, null);
+      if ("reason" in res) props.onNotice(res.reason);
+      else props.onChange(res.recipe, proxy, registry.get(rs.step));
+    } else patchStep(index, { layerParams: { ...rs.layerParams, [layer]: { ...rs.layerParams?.[layer], [name]: value } } }, proxy);
   };
   /** Whether Switch off / on works for the step at `index` (the same rule as the strip's toggle). */
   const bypassCheck = (index: number): { ok: true } | { ok: false; reason: string } => {

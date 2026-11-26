@@ -3,7 +3,7 @@ import { exportOutput, exportProof, imageToRGBA, inkFor, layerToRGBA, leftoverRa
 import { estimatePlot, getMachine } from "@plotlab/machines";
 import { createRegistry } from "@plotlab/steps";
 import type { FromWorker, InspectTarget, InspectView, RasterView, ToWorker } from "./protocol.ts";
-import { shownAt } from "./strip.ts";
+import { shownAt, STACK_KEY, stripBoxes, stripLanes } from "./strip.ts";
 import { Jobs } from "./jobs.ts";
 import { drawResult, laneOf } from "./pictures.ts";
 import { ThumbnailRenderer } from "./thumbs.ts";
@@ -139,23 +139,29 @@ async function passThumb(id: number, side: number, recipe: Recipe, plot: Plot, l
 
 /**
  * One thumbnail per strip box: the source, then each step's output (what passes through
- * for a switched-off step; traced order for an on-demand step that hasn't run).
+ * for a switched-off step; traced order for an on-demand step that hasn't run). In a split
+ * chain the split and the lane steps show each ink as a 2×2, and the Stack box shows all
+ * the inks together after the last lane step.
  */
 async function postThumbs(msg: Extract<ToWorker, { type: "run" }>, side: number, placed: StageData, results: StepResult[]): Promise<void> {
   const ran = results.map((r) => r.index);
+  const outputAt = (i: number) => {
+    const at = shownAt(i, ran);
+    return at < 0 ? placed : results.find((r) => r.index === at)!.output;
+  };
+  const lanes = stripLanes(msg.recipe, registry);
+  const laneBox = new Map(stripBoxes(msg.recipe, registry, { steps: [], stale: [] }).map((b) => [b.key, b.lane]));
   const boxes = [
-    { key: "source", data: placed },
-    ...msg.recipe.steps.map((s, i) => {
-      const at = shownAt(i, ran);
-      return { key: s.id, data: at < 0 ? placed : results.find((r) => r.index === at)!.output };
-    }),
+    { key: "source", data: placed, lanes: undefined as string[] | undefined },
+    ...msg.recipe.steps.map((s, i) => ({ key: s.id, data: outputAt(i), lanes: lanes && laneBox.get(s.id) ? lanes.layers : undefined })),
+    ...(lanes ? [{ key: STACK_KEY, data: outputAt(lanes.stackAfter), lanes: undefined }] : []),
   ];
   const items: Array<{ key: string; png: Blob }> = [];
   const t0 = performance.now();
   for (const b of boxes) {
-    const fresh = !thumbnails.has(b.data, msg.recipe, side);
+    const fresh = !thumbnails.has(b.data, msg.recipe, side, b.lanes);
     if (fresh && jobs.waiting() && performance.now() - t0 > THUMB_BUDGET_MS) break;
-    items.push({ key: b.key, png: await thumbnails.png(b.data, msg.recipe, side) });
+    items.push({ key: b.key, png: await thumbnails.png(b.data, msg.recipe, side, b.lanes) });
   }
   post({ type: "thumbs", id: msg.id, side, keys: boxes.map((b) => b.key), items });
 }

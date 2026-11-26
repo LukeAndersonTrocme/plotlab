@@ -12,7 +12,8 @@ import { ModeSwitch, SetupChip } from "./Shell.tsx";
 import { canvasTarget, clickBox, lookingBand, compareTargetsOf, fitView, fromViewBlock, initialView, isPinned, openSetup, pin, readThumbSize, resizeThumbs, RESULT, select, selectedIndex, setCompare, setMode, sidebarSteps, SOURCE, stepSelection, toggleCompare, toggleSelect, togglePin, toggleSolo, toViewBlock, writeThumbSize, type ViewState } from "./view.ts";
 import { Strip } from "./Strip.tsx";
 import { addAt, moveToGap } from "./gaps.ts";
-import { STEP_DRAG, stripBoxes, thumbRenderSide, toggleBypass, type StripBox } from "./strip.ts";
+import { STACK_KEY, STEP_DRAG, stripBoxes, stripLanes, thumbRenderSide, toggleBypass, type StripBox } from "./strip.ts";
+import { canSplit, splitIntoCmyk, undoSplit } from "./split.ts";
 import { bandView, shiftRefusal, shownBands } from "./compare.ts";
 import { EMPTY_RUN, Runner, type RunState } from "./runner.ts";
 import { decodeFile, loadSample, sampleSource } from "./sample.ts";
@@ -304,6 +305,39 @@ function Editor(props: { hidden: boolean }) {
       setNotice(r.message);
     } catch (e) {
       setNotice(`Couldn't save your settings as a checkpoint first, so the preset wasn't applied: ${errText(e)}`);
+    }
+  };
+
+  /** Split into CMYK (the source's sidebar, or Separate CMYK from the "+" at `gap`): saves a checkpoint first. */
+  const preSplit = useRef<string | undefined>();
+  const split = async (gap?: number) => {
+    const before = recipeRef.current;
+    try {
+      const r = await splitIntoCmyk(project, before, registry, gap);
+      if ("reason" in r) return setNotice(r.reason);
+      if (r.saved) {
+        preSplit.current = r.saved.checkpoint.id;
+        if (r.saved.created && project) addPicture(project, r.saved.checkpoint, before);
+        setSaved((n) => n + 1);
+      }
+      applySelecting(r.recipe, r.id);
+      setNotice(r.message);
+    } catch (e) {
+      setNotice(`Couldn't save your settings as a checkpoint first, so the picture wasn't split: ${errText(e)}`);
+    }
+  };
+  /** Undo the split: restores the checkpoint from before it (one Back step), saving the split version first. */
+  const unsplit = async () => {
+    const now = history.present;
+    try {
+      const r = await undoSplit(library, project, history, parseRecipe, registry, preSplit.current);
+      if ("reason" in r) return setNotice(r.reason);
+      if (r.saved?.created && project) addPicture(project, r.saved.checkpoint, now);
+      setSaved((n) => n + 1);
+      apply(enter(r.recipe).recipe, false);
+      setNotice(r.message);
+    } catch (e) {
+      setNotice(`Couldn't undo the split: ${errText(e)}`);
     }
   };
 
@@ -784,6 +818,14 @@ function Editor(props: { hidden: boolean }) {
                 </div>
               )}
               {view.selection.kind === "source" && <p className="hint side-note">The source, as placed on the paper. Pick a step in the strip below to change its settings.</p>}
+              {view.selection.kind === "source" && canSplit(recipe, registry) && (
+                <div className="card split-card">
+                  <button onClick={() => void split()} title="Split the picture into cyan, magenta, yellow and black inks. The steps after it apply to every ink (Linked).">
+                    Split into CMYK
+                  </button>
+                  <p className="hint">Four inks, one set of settings for all. Your current settings are saved as a checkpoint first.</p>
+                </div>
+              )}
               <StepList
                 recipe={recipe}
                 {...(cards && { cards })}
@@ -856,6 +898,8 @@ function Editor(props: { hidden: boolean }) {
           pins={view.pins}
           comparing={!!compare}
           onSelect={(key, shift) => {
+            // The Stack box: all the inks together, the end result.
+            if (key === STACK_KEY) return changeView(select(view, RESULT));
             const sel = key === "source" ? SOURCE : stepSelection(key);
             // While comparing a click only changes the sidebar; shift-click adds a strip, fills the lens or adds a box.
             const why = shift && compare ? shiftRefusal(compare, key) : null;
@@ -872,6 +916,7 @@ function Editor(props: { hidden: boolean }) {
           onAdd={(gap, stepId) => {
             const res = addAt(recipe, registry, gap, stepId);
             if ("reason" in res) setNotice(res.reason);
+            else if (res.split) void split(gap);
             else applySelecting(res.recipe, res.id);
           }}
           onMove={(from, gap) => {
@@ -880,6 +925,9 @@ function Editor(props: { hidden: boolean }) {
             if ("reason" in res) setNotice(res.reason);
             else if (id) applySelecting(res.recipe, id);
           }}
+          lanes={stripLanes(recipe, registry)}
+          onUnsplit={() => void unsplit()}
+          onScreenAngles={(on) => apply({ ...recipe, screenAngles: on }, false)}
         />
       )}
       {view.mode === "plot" && plot && plot.layers.length > 0 && (
