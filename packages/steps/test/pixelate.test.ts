@@ -10,7 +10,7 @@ const grid = (values: Layers["layers"][number]["values"]): Layers => ({ kind: "l
 describe("pixelate", () => {
   it("averages tone in each cell, keeping the grid", async () => {
     const data = Float32Array.from({ length: 16 }, (_, i) => i / 15);
-    const out = (await applyStep(pixelate, grid({ kind: "tone", data }), { params: { sizing: "mm", cellMm: 2, across: 40 } }, ctx)) as Layers;
+    const out = (await applyStep(pixelate, grid({ kind: "tone", data }), { params: { sizing: "mm", cellMm: 2, across: 40, offsetX: 0, offsetY: 0 } }, ctx)) as Layers;
     const d = out.layers[0]!.values.data;
     expect(out.width).toBe(4);
     const block = (x: number, y: number) => [d[y * 4 + x], d[y * 4 + x + 1], d[(y + 1) * 4 + x], d[(y + 1) * 4 + x + 1]];
@@ -20,7 +20,7 @@ describe("pixelate", () => {
   });
   it("takes the most common label for categories, and sizes by cells across", async () => {
     const data = Uint16Array.from([1, 1, 2, 2, 1, 2, 2, 2, 3, 3, 1, 1, 3, 1, 1, 1]);
-    const out = (await applyStep(pixelate, grid({ kind: "categories", data, count: 3 }), { params: { sizing: "across", cellMm: 5, across: 2 } }, ctx)) as Layers;
+    const out = (await applyStep(pixelate, grid({ kind: "categories", data, count: 3 }), { params: { sizing: "across", cellMm: 5, across: 2, offsetX: 0, offsetY: 0 } }, ctx)) as Layers;
     const v = out.layers[0]!.values;
     expect([v.data[0], v.data[2], v.data[8], v.data[10]]).toEqual([1, 2, 3, 1]);
     expect(v.kind === "categories" && v.count).toBe(3);
