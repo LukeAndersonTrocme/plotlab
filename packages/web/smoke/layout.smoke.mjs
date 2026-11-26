@@ -726,6 +726,71 @@ try {
     await page.close();
   }
 
+  // CMYK lanes (#77): "Split into CMYK" on the source's sidebar gives one row of 2×2 thumbnails
+  // (one ink in each corner) and a Stack box; Undo the split brings the single chain back;
+  // Separate CMYK from the "+" right after the source splits the same way.
+  {
+    const page = await open(1280);
+    const keys = () => page.$$eval(".strip .box", (els) => els.map((e) => e.dataset.key).join(","));
+    const before = await keys();
+    await page.click('.strip .box[data-key="source"] .pic');
+    await page.click("aside.side .split-card button:has-text('Split into CMYK')");
+    await page.waitForSelector(".strip .box.lane.split", { timeout: 30_000 });
+    const after = await keys();
+    check(after === "source,cmyk,centerline,stack,order", `Split into CMYK: the split and the lane steps, then a Stack box (${after})`);
+    const bar = await page.textContent(".strip-head .lanes-bar");
+    check(/C M Y K/.test(bar) && /Linked/.test(bar) && (await page.isChecked(".lanes-bar input[type=checkbox]")), `the strip says the four inks are linked, screen angles on ("${bar}")`);
+    // The split's thumbnail is a 2×2: cyan top left, magenta top right, yellow bottom left, black bottom right.
+    const quadsOf = (key, need = 4) =>
+      page.waitForFunction(
+        ({ k, need }) => {
+          const img = document.querySelector(`.strip .box[data-key="${k}"] .pic img`);
+          if (!img || !img.complete || !img.naturalWidth) return null;
+          const c = document.createElement("canvas");
+          c.width = img.naturalWidth;
+          c.height = img.naturalHeight;
+          const g = c.getContext("2d");
+          g.drawImage(img, 0, 0);
+          const w = c.width >> 1, h = c.height >> 1;
+          const avg = (x0, y0) => {
+            const d = g.getImageData(x0, y0, w, h).data;
+            let r = 0, gg = 0, b = 0, n = 0;
+            for (let i = 0; i < d.length; i += 4) {
+              if (d[i] > 235 && d[i + 1] > 235 && d[i + 2] > 235) continue; // bare paper
+              r += d[i]; gg += d[i + 1]; b += d[i + 2]; n++;
+            }
+            return n ? [r / n, gg / n, b / n].map(Math.round) : null;
+          };
+          const q = [avg(0, 0), avg(w, 0), avg(0, h), avg(w, h)];
+          return q.filter(Boolean).length >= need ? q : null;
+        },
+        { k: key, need },
+        { timeout: 30_000 },
+      ).then((h) => h.jsonValue());
+    const [c, m, y, k] = await quadsOf("cmyk");
+    const grey = Math.max(...k) - Math.min(...k) < 25 && Math.max(...k) < 220;
+    const cmykOk = c[2] > c[0] + 40 && m[0] > m[1] + 40 && y[0] > y[2] + 40 && y[1] > y[2] + 40 && grey;
+    check(cmykOk, `the split's thumbnail is 2×2 C / M / Y / K (${JSON.stringify([c, m, y, k])})`);
+    // A lane step (Centerline) draws each ink's lines in its own corner (an ink may have none here).
+    const lane = await quadsOf("centerline", 2);
+    const laneOk = !!lane[0] && lane[0][2] > lane[0][0] + 40 && !!lane[1] && lane[1][0] > lane[1][1] + 40 && (await page.$('.strip .box[data-key="centerline"] .pic.quad')) !== null;
+    check(laneOk, `a lane step's thumbnail is 2×2 too (${JSON.stringify(lane)})`);
+    await page.waitForFunction(() => document.querySelector('.strip .box[data-key="stack"] .pic img')?.naturalWidth > 0, null, { timeout: 30_000 });
+    await page.click('.strip .box[data-key="stack"] .pic');
+    await page.waitForSelector('.strip .box[data-key="stack"].sel', { timeout: 10_000 });
+    check((await page.textContent(".view-bar")).includes("Result"), "the Stack box has a thumbnail and shows all the inks together (the result)");
+
+    await page.click(".lanes-bar button:has-text('Undo the split')");
+    await page.waitForFunction((b) => [...document.querySelectorAll(".strip .box")].map((e) => e.dataset.key).join(",") === b, before, { timeout: 30_000 });
+    check(!(await page.$(".strip .lanes-bar")) && !(await page.$(".strip .box.stack")), `Undo the split brings back the single chain (${await keys()})`);
+
+    await page.click('.strip .gap[data-gap="0"] .plus');
+    await page.click('.add-menu [role=menuitem][data-step="cmyk"]');
+    await page.waitForSelector(".strip .box.stack", { timeout: 30_000 });
+    check((await keys()) === "source,cmyk,centerline,stack,order", `Separate CMYK from the "+" after the source splits the same way (${await keys()})`);
+    await page.close();
+  }
+
   // Dark mode: the chrome goes dark, the paper stays paper-coloured.
   {
     const page = await open(1280, "dark");
