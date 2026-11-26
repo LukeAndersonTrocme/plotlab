@@ -19,6 +19,12 @@ export interface StepContext {
    */
   inkFor(layerId: string): Ink;
   passOrder: PassOrder;
+  /**
+   * The print screen angle (degrees) to turn a layer's lattice by, given its id and place
+   * among the layers: the layer's print angle when the recipe's screen angles are on, else 0.
+   * Only steps that set `usesScreenAngles` may depend on it (the pipeline keys their cache on it).
+   */
+  screenAngle?(layerId: string, index: number): number;
   /** Report progress 0..1 for slow steps. */
   progress?: (fraction: number) => void;
 }
@@ -70,6 +76,8 @@ export interface StepDefinition<
    * recipe lacks (matched by ink id) and points layers that have no ink yet at them.
    */
   layerInks?: Record<string, Ink>;
+  /** Lattice steps (Fill): their output follows the recipe's print screen angles (`StepContext.screenAngle`). */
+  usesScreenAngles?: boolean;
   /** Layer value kinds `runLayer` can handle (default: both). */
   accepts?: LayerValueKind[];
   /**
