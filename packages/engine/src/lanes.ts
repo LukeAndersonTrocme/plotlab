@@ -87,8 +87,9 @@ export function lanesOf(recipe: Recipe, registry: StepRegistry): LaneView {
 
 /**
  * Change one setting of the step `stepId` from a lane. A linked edit (or `lane` null: the
- * shared settings) writes the step's `params` once; an edit in an independent lane writes
- * that layer's `layerParams` entry.
+ * shared settings) writes the step's `params` once; an edit in an independent lane (one with
+ * its own selector or settings) writes that layer's `layerParams` entry. A step that isn't
+ * in the named lane (a trunk step, or one narrowed to other inks) is refused.
  */
 export function setLaneParam(recipe: Recipe, registry: StepRegistry, stepId: string, name: string, value: unknown, lane: string | null): ChainResult {
   const index = recipe.steps.findIndex((s) => s.id === stepId);
@@ -96,7 +97,14 @@ export function setLaneParam(recipe: Recipe, registry: StepRegistry, stepId: str
   const def = rs && registry.get(rs.step);
   if (!rs || !def) return { reason: `There is no step "${stepId}" in this recipe.` };
   if (!(name in def.params)) return { reason: `${def.title} has no setting "${name}".` };
-  const own = lane !== null && def.runLayer && !lanesOf(recipe, registry).linked;
+  let own = false;
+  if (lane !== null) {
+    const l = lanesOf(recipe, registry).lanes.find((x) => x.layer === lane);
+    if (!l) return { reason: `There is no ${lane} lane: the picture isn't split into that ink.` };
+    if (!l.steps.some((x) => x.id === stepId)) return { reason: `${def.title} isn't in the ${lane} lane, so it can't be changed from there.` };
+    // The lane's own state: a lane with its own settings keeps them; a linked lane edits the shared ones.
+    own = !!def.runLayer && !l.linked;
+  }
   const next: RecipeStep = own
     ? { ...rs, layerParams: { ...rs.layerParams, [lane]: { ...rs.layerParams?.[lane], [name]: value } } }
     : { ...rs, params: { ...rs.params, [name]: value } };
@@ -130,6 +138,9 @@ export function splitWith(
   if (recipe.input !== "image") return { reason: `${def.title} splits a picture, but this source doesn't enter as a picture.` };
   const view = lanesOf(recipe, registry);
   if (view.split !== null) return { reason: `The picture is already split into ${view.layers.join(", ")}. Undo the split first.` };
+  if (recipe.steps.some((rs) => rs.step === def.id && rs.enabled === false)) {
+    return { reason: `${def.title} is already in the recipe, switched off. Switch it back on (its ● in the strip) instead of adding another.` };
+  }
   const makesLayers = (rs: RecipeStep) => {
     const d = registry.get(rs.step);
     return rs.enabled !== false && d?.input === "image" && d.output === "layers";

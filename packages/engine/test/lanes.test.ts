@@ -94,13 +94,26 @@ describe("setLaneParam: linked edits", () => {
       expect({ ...res.recipe, steps: res.recipe.steps.filter((s) => s.id !== "fill") }).toEqual({ ...r, steps: r.steps.filter((s) => s.id !== "fill") });
     }
   });
-  it("an independent lane edit writes that layer's override", () => {
+  it("an edit in an independent lane writes that layer's override; a lane that is still linked writes the shared params", () => {
     const ind = recipe(["cmyk", { step: "levels", layerParams: { C: { count: 3 } } }, "bands"]);
-    const res = setLaneParam(ind, reg, "levels", "count", 6, "M");
+    const res = setLaneParam(ind, reg, "levels", "count", 6, "C");
     if ("reason" in res) throw new Error(res.reason);
-    const lv = res.recipe.steps[1]!;
-    expect(lv.layerParams).toEqual({ C: { count: 3 }, M: { count: 6 } });
-    expect(lv.params.count).toBe(ind.steps[1]!.params.count);
+    expect(res.recipe.steps[1]!.layerParams).toEqual({ C: { count: 6 } });
+    expect(res.recipe.steps[1]!.params.count).toBe(ind.steps[1]!.params.count);
+    // Lane M has no overrides of its own: it is linked, so the edit is the shared setting.
+    const m = setLaneParam(ind, reg, "levels", "smoothing", 2, "M");
+    if ("reason" in m) throw new Error(m.reason);
+    expect(m.recipe.steps[1]!.params.smoothing).toBe(2);
+    expect(m.recipe.steps[1]!.layerParams).toEqual({ C: { count: 3 } });
+  });
+  it("refuses a step that isn't in that lane: a trunk step, or one narrowed to other inks; and an unknown lane", () => {
+    const r2 = recipe(["reaction", "cmyk", { step: "pixelate", layers: ["K"] }, "bands"]);
+    expect(setLaneParam(r2, reg, "reaction", "scale", 3, "C")).toEqual({ reason: expect.stringMatching(/isn't in the C lane/) });
+    expect(setLaneParam(r2, reg, "pixelate", "cellMm", 3, "C")).toEqual({ reason: expect.stringMatching(/Pixelate isn't in the C lane/) });
+    expect("recipe" in setLaneParam(r2, reg, "pixelate", "cellMm", 3, "K")).toBe(true);
+    expect(setLaneParam(r2, reg, "bands", "simplify", 1, "Z")).toEqual({ reason: expect.stringMatching(/no Z lane/) });
+    // The shared settings (lane null) of a trunk step are fine.
+    expect("recipe" in setLaneParam(r2, reg, "reaction", "scale", 3, null)).toBe(true);
   });
   it("refuses unknown steps and settings in plain words", () => {
     expect(setLaneParam(r, reg, "nope", "x", 1, null)).toEqual({ reason: expect.stringMatching(/no step/i) });
@@ -149,6 +162,10 @@ describe("splitWith: splitting from the photo", () => {
     const split = recipe(["cmyk", "bands"]);
     expect(splitWith(split, "cmyk", reg)).toEqual({ reason: expect.stringMatching(/already split/) });
     expect(splitWith(recipe(["tone"]), "tone", reg)).toEqual({ reason: expect.stringMatching(/doesn't split/) });
+  });
+  it("refuses a second Separate CMYK when one is there but switched off, and says to switch it back on", () => {
+    const off = recipe([{ step: "cmyk", enabled: false }, "tone", "levels", "bands"]);
+    for (const gap of [undefined, 0, 1]) expect(splitWith(off, "cmyk", reg, gap)).toEqual({ reason: expect.stringMatching(/Separate CMYK is already in the recipe, switched off\. Switch it back on/) });
   });
 });
 
