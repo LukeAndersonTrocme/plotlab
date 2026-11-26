@@ -76,7 +76,6 @@ export function PagePanel(props: {
   /** Layers at the end of the chain (from the last run). */
   layers: LayerInfo[];
   /** Line layers in their current pass order (from the last plot). */
-  passes: Array<{ id: string; name: string }>;
   working: { width: number; height: number; mmPerPx: number } | null;
 }) {
   const { recipe: r, onChange } = props;
@@ -89,13 +88,6 @@ export function PagePanel(props: {
   const orient = (wantLandscape: boolean) =>
     wantLandscape !== landscape && set({ paper: { widthMm: r.paper.heightMm, heightMm: r.paper.widthMm } });
   const plotter = r.target.kind === "plotter";
-  const movePass = (i: number, d: -1 | 1) => {
-    const ids = props.passes.map((p) => p.id);
-    const j = i + d;
-    if (j < 0 || j >= ids.length) return;
-    [ids[i], ids[j]] = [ids[j]!, ids[i]!];
-    set({ passOrder: ids });
-  };
 
   return (
     <div className="project page-panel">
@@ -269,27 +261,7 @@ export function PagePanel(props: {
             ))}
           </div>
         )}
-        {plotter && props.passes.length > 1 && (
-          <div className="param">
-            <label>Pass order</label>
-            <p className="hint">Each ink is one pass, with a pen change between passes. Light inks usually go first.</p>
-            {props.passes.map((p, i) => (
-              <div key={p.id} className="param-row pass">
-                <span className="swatch" style={{ background: r.inks.find((k) => k.id === (r.layerInks[p.id] ?? r.inks[0]!.id))?.color }} />
-                <span className="layer-name">
-                  {i + 1}. {p.name}
-                </span>
-                <button className="icon" disabled={i === 0} aria-label={`Move ${p.name} earlier`} onClick={() => movePass(i, -1)}>
-                  ↑
-                </button>
-                <button className="icon" disabled={i === props.passes.length - 1} aria-label={`Move ${p.name} later`} onClick={() => movePass(i, 1)}>
-                  ↓
-                </button>
-              </div>
-            ))}
-            {Array.isArray(r.passOrder) && <button onClick={() => set({ passOrder: "light-to-dark" })}>Light → dark</button>}
-          </div>
-        )}
+        {plotter && r.inks.length > 1 && <p className="hint">Each pen is one pass. Change the order the pens plot in under Plot.</p>}
       </section>
 
       <section className="panel-sec">

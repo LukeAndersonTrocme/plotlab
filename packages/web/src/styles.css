@@ -363,3 +363,22 @@ header button.on { background: var(--accent); color: var(--accent-ink); border-c
 .app:has(.strip-wrap.dragging) aside.side .pin-drop { border-color: var(--accent); color: var(--accent); }
 aside.side.pin-over { outline: 2px dashed var(--accent); outline-offset: -6px; }
 .box .pin-mark { flex: none; width: 7px; height: 7px; border-radius: 50%; background: var(--accent); }
+
+/* Plot mode (#73): the time and where it goes, pass order, the animation, and the pass strip. */
+.plot-time .bigtime { font-size: 30px; font-weight: 600; color: var(--ink); margin: 0 4px 6px; font-variant-numeric: tabular-nums; }
+.plot-time .breakdown { display: grid; gap: 3px; margin: 0 4px; font-size: 13px; font-variant-numeric: tabular-nums; }
+.plot-time .breakdown .row { display: flex; justify-content: space-between; gap: 12px; }
+.plot-time .breakdown .detail { color: var(--muted); }
+.pass-order { list-style: none; margin: 0 0 8px; padding: 0; }
+.pass-order .pass { display: flex; align-items: center; gap: 6px; margin-bottom: 4px; }
+.pass-order .pass .num { width: 1.4em; color: var(--muted); font-variant-numeric: tabular-nums; }
+.pass-order .pass .layer-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.play-row { display: flex; align-items: center; gap: 10px; }
+.play-row .play { min-width: 5.5em; }
+.play-row .scrub { flex: 1; min-width: 0; }
+.plot-panel .send-why { margin: -2px 2px 4px; }
+.pen-head { stroke: #fff; stroke-width: 0.6; }
+.pass-strip .box + .box { margin-left: 10px; }
+.pass-strip .box .lbl .swatch { flex: none; width: 10px; height: 10px; }
+.pass-strip .all-pens { margin-left: auto; padding: 2px 10px; font-size: 12px; }
+.pass-strip .all-pens.on { background: var(--accent); color: var(--accent-ink); }

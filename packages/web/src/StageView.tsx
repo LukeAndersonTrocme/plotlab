@@ -33,7 +33,16 @@ function Raster(props: { view: RasterView; opacity?: number }) {
   );
 }
 
-const pathD = (p: Position[]) => p.map(([x, y], i) => `${i ? "L" : "M"}${x.toFixed(2)} ${y.toFixed(2)}`).join("");
+/**
+ * A stroke's SVG path, kept per stroke array: the plot-order animation redraws every frame,
+ * and the strokes it has finished are the plot's own arrays, so only the cut one is new.
+ */
+const dCache = new WeakMap<Position[], string>();
+const pathD = (p: Position[]) => {
+  let d = dCache.get(p);
+  if (d === undefined) dCache.set(p, (d = p.map(([x, y], i) => `${i ? "L" : "M"}${x.toFixed(2)} ${y.toFixed(2)}`).join("")));
+  return d;
+};
 
 /**
  * The paper in mm: optional dimmed source underneath, then rasters (image or layers,
@@ -47,6 +56,8 @@ export function StageView(props: {
   underlay: RasterView | null;
   hidden: Set<string>;
   empty?: string;
+  /** Where the pen is in the plot-order animation, in its ink's colour. */
+  head?: { at: Position; color: string } | null;
 }) {
   const { paper, plot } = props;
   const { widthMm: w, heightMm: h } = paper;
@@ -78,6 +89,7 @@ export function StageView(props: {
             </g>
           ))}
       </g>
+      {props.head && <circle className="pen-head" cx={props.head.at[0]} cy={props.head.at[1]} r={Math.max(1.5, Math.min(w, h) / 120)} fill={props.head.color} />}
       {nothing && props.empty && (
         <text x={w / 2} y={h / 2} textAnchor="middle" className="empty-text">
           {props.empty}

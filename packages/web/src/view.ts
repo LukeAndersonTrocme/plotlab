@@ -15,7 +15,7 @@ export type Mode = "design" | "page" | "plot";
 export const MODES: Array<{ mode: Mode; label: string; hint: string }> = [
   { mode: "design", label: "Design", hint: "The steps that turn the image into lines" },
   { mode: "page", label: "Page", hint: "Paper, inks and machine" },
-  { mode: "plot", label: "Plot", hint: "Time estimate and the files to download" },
+  { mode: "plot", label: "Plot", hint: "Time estimate, pass order, watch it plot, send and download" },
 ];
 
 /**
