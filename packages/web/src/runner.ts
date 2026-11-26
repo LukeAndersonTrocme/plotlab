@@ -57,7 +57,7 @@ export class Runner {
   inspect: InspectTarget = null;
   /** Compare stages: the stage each strip shows, drawn in the same run; null = not comparing. */
   compare: InspectTarget[] | null = null;
-  /** Also render the page as it will export. */
+  /** Also render the page as it will export (not while comparing: the strips replace the canvas). */
   proof = false;
   /** Strip thumbnail size in pixels (long side of the paper); null = no strip on screen. */
   thumbs: number | null = null;
@@ -94,7 +94,7 @@ export class Runner {
     this.pending = null;
     const id = this.nextId++;
     this.inFlight = id;
-    const msg: ToWorker = { type: "run", id, recipe, proxy, inspect: this.inspect, compare: this.compare, runOnDemand, proof: this.proof, thumbs: this.thumbs, passes: this.passes };
+    const msg: ToWorker = { type: "run", id, recipe, proxy, inspect: this.inspect, compare: this.compare, runOnDemand, proof: this.proof && !this.compare, thumbs: this.thumbs, passes: this.passes };
     this.worker.postMessage(msg);
     this.set({ busy: true });
   }

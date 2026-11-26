@@ -13,7 +13,7 @@ import { canAddStrip, canvasTarget, clickBox, compareTargetsOf, fitView, fromVie
 import { Strip } from "./Strip.tsx";
 import { addAt, moveToGap } from "./gaps.ts";
 import { STEP_DRAG, stripBoxes, thumbRenderSide, toggleBypass, type StripBox } from "./strip.ts";
-import { MAX_STRIPS } from "./compare.ts";
+import { MAX_STRIPS, stripView } from "./compare.ts";
 import { EMPTY_RUN, Runner, type RunState } from "./runner.ts";
 import { decodeFile, loadSample, sampleSource } from "./sample.ts";
 import { canRedo, canUndo, commit, createHistory, preview, redo, undo, type History } from "./history.ts";
@@ -524,7 +524,7 @@ function Editor(props: { hidden: boolean }) {
   // Compare stages (Design): the canvas shows the strips, each from the same run as everything else.
   const compare = view.mode === "design" ? view.compare : null;
   const compareTargets = compareTargetsOf(view, recipe) ?? [];
-  const shownViews = compare ? (run.compared ?? []).filter((v) => v !== null) : [{ rasters: viewRasters, plot: viewPlot }];
+  const shownViews = compare ? compare.bands.flatMap((_, k) => stripView(run.compared, compare.bands, compareTargets, k) ?? []) : [{ rasters: viewRasters, plot: viewPlot }];
   const viewLayers = [
     ...new Map(
       shownViews.flatMap((v) => [

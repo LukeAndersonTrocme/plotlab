@@ -19,6 +19,8 @@ export interface InspectView {
   kind: StageKind | "source";
   /** Step index, or -1 for the source. */
   index: number;
+  /** The step's id (`RecipeStep.id`), or "source": what this is a view of, whatever its place in the chain. */
+  step: string;
   rasters: RasterView[];
   plot: Plot | null;
 }

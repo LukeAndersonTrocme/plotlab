@@ -61,16 +61,17 @@ async function layerViews(ls: Layers | undefined, recipe: Recipe): Promise<Raste
 }
 
 async function view(data: StageData, index: number, recipe: Recipe): Promise<InspectView> {
+  const step = index < 0 ? "source" : recipe.steps[index]!.id;
   const settings = { paper: recipe.paper, inkFor: (id: string) => inkFor(recipe, id), passOrder: recipe.passOrder };
   switch (data.kind) {
     case "image":
-      return { kind: index < 0 ? "source" : "image", index, rasters: [await imageView(data, "image", "Image")], plot: null };
+      return { kind: index < 0 ? "source" : "image", index, step, rasters: [await imageView(data, "image", "Image")], plot: null };
     case "layers":
-      return { kind: "layers", index, rasters: await layerViews(data, recipe), plot: null };
+      return { kind: "layers", index, step, rasters: await layerViews(data, recipe), plot: null };
     case "geometry":
-      return { kind: "geometry", index, rasters: await layerViews(data.rasterLayers, recipe), plot: toPlot(data, settings) };
+      return { kind: "geometry", index, step, rasters: await layerViews(data.rasterLayers, recipe), plot: toPlot(data, settings) };
     case "plot":
-      return { kind: "plot", index, rasters: await layerViews(data.rasterLayers, recipe), plot: data };
+      return { kind: "plot", index, step, rasters: await layerViews(data.rasterLayers, recipe), plot: data };
   }
 }
 

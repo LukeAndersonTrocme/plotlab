@@ -1,14 +1,11 @@
 import { useId, useRef, useState, type KeyboardEvent, type PointerEvent } from "react";
 import type { Paper } from "@plotlab/engine";
-import { addBand, dragSplit, everyStep, MAX_STRIPS, nextBand, removeBand, setBand, setLayout, thisVsBefore, type Chain, type Compare } from "./compare.ts";
+import { addBand, applySplits, bandInUse, dragSplit, stripView, everyStep, MAX_STRIPS, nextBand, removeBand, setBand, setLayout, thisVsBefore, type Chain, type Compare } from "./compare.ts";
 import type { InspectTarget, InspectView } from "./protocol.ts";
 import { StageLayers } from "./StageView.tsx";
 
 /** A strip's step, for its chip and label: "source" or a step id, with its name. */
 export type BandOption = { key: string; label: string };
-
-/** Whether a view from the worker is of the stage this strip asks for (a newer run may still be on its way). */
-const shows = (v: InspectView | null | undefined, t: InspectTarget | undefined): v is InspectView => !!v && v.index === (t === "source" ? -1 : t);
 
 /**
  * Compare stages (#75): the paper split into strips, each showing one step's output (or the
@@ -49,7 +46,8 @@ export function CompareCanvas(props: {
     if (drag && f !== null) setDrag({ k: drag.k, c: dragSplit(drag.c, drag.k, f) });
   };
   const release = () => {
-    if (drag && drag.c !== props.compare) props.onChange(drag.c);
+    // Only the dividers: a strip changed or removed during the drag stays as it is now.
+    if (drag) props.onChange(applySplits(props.compare, drag.c.splits));
     setDrag(null);
   };
   const nudge = (k: number, e: KeyboardEvent) => {
@@ -71,12 +69,11 @@ export function CompareCanvas(props: {
       </defs>
       <rect x={0} y={0} width={w} height={h} className="paper" />
       {c.bands.map((band, k) => {
-        const v = props.views?.[k];
-        const ok = shows(v, props.targets[k]);
+        const v = stripView(props.views, c.bands, props.targets, k);
         const r = rect(edges[k]!, edges[k + 1]!);
         return (
           <g key={k} clipPath={`url(#${id}-${k})`} className="strip-band" data-band={band}>
-            {ok ? (
+            {v ? (
               <StageLayers rasters={v.rasters} plot={v.plot} showTravel={props.showTravel && v.kind === "plot"} underlay={null} hidden={props.hidden} />
             ) : (
               <text x={r.x + r.width / 2} y={r.y + r.height / 2} textAnchor="middle" className="empty-text" fontSize={fs}>
@@ -168,7 +165,7 @@ export function CompareBar(props: { compare: Compare; chain: Chain; selected: nu
         <span key={k} className="band-chip">
           <select aria-label={`Strip ${k + 1}`} value={band} onChange={(e) => onChange(setBand(c, k, e.target.value))} title={name(band)}>
             {props.options.map((o) => (
-              <option key={o.key} value={o.key}>
+              <option key={o.key} value={o.key} disabled={bandInUse(c, k, o.key)}>
                 {o.label}
               </option>
             ))}
