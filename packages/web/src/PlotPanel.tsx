@@ -104,7 +104,7 @@ export function PlotPanel(props: {
             {!plot.ordered && <p className="hint">Traced order: add Stroke order in Design for a shorter, more accurate time.</p>}
           </>
         ) : (
-          <p className="hint">{props.busy ? "Working out the time…" : "No time estimate yet: the recipe has no lines to plot."}</p>
+          <p className="hint">{props.busy ? "Working out the time…" : plot ? "No time estimate yet." : "No time estimate yet: the recipe has no lines to plot."}</p>
         )}
       </section>
 
