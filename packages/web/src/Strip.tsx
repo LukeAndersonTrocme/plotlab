@@ -7,7 +7,7 @@ import { THUMB } from "./view.ts";
 
 const stageVar = (k: StageKind) => `var(--st-${k === "geometry" ? "lines" : k})`;
 
-function Thumb(props: { png: Blob | undefined }) {
+export function Thumb(props: { png: Blob | undefined }) {
   const url = useBlobUrl(props.png);
   return url ? <img src={url} alt="" draggable={false} /> : <span className="pic-empty" aria-hidden="true" />;
 }

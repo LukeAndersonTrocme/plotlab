@@ -5,10 +5,11 @@ import { createRegistry } from "@plotlab/steps";
 import { defaultRecipe } from "./defaults.ts";
 import { HelpPanel } from "./Help.tsx";
 import { PagePanel } from "./PagePanel.tsx";
-import { PlotPanel } from "./PlotPanel.tsx";
+import { PassStrip, PlotPanel, usePlayback } from "./PlotPanel.tsx";
+import { fitSolo, framePlot, passBoxes, soloPlot } from "./plotmode.ts";
 import { fmtTime, setupSummary } from "./setup.ts";
 import { ModeSwitch, SetupChip } from "./Shell.tsx";
-import { canvasTarget, fitView, fromViewBlock, initialView, isPinned, openSetup, pin, readThumbSize, resizeThumbs, RESULT, select, selectedIndex, setMode, sidebarSteps, SOURCE, stepSelection, toggleSelect, togglePin, toViewBlock, writeThumbSize, type ViewState } from "./view.ts";
+import { canvasTarget, fitView, fromViewBlock, initialView, isPinned, openSetup, pin, readThumbSize, resizeThumbs, RESULT, select, selectedIndex, setMode, sidebarSteps, SOURCE, stepSelection, toggleSelect, togglePin, toggleSolo, toViewBlock, writeThumbSize, type ViewState } from "./view.ts";
 import { Strip } from "./Strip.tsx";
 import { addAt, moveToGap } from "./gaps.ts";
 import { STEP_DRAG, stripBoxes, thumbRenderSide, toggleBypass } from "./strip.ts";
@@ -72,14 +73,18 @@ export function App() {
   const [view, setView] = useState<ViewState>(() => resizeThumbs(initialView, readThumbSize(defaultLocalStorage() ?? null)));
   const viewRef = useRef(view);
   viewRef.current = view;
+  const playback = usePlayback(view.mode === "plot");
   /** The worker has its first source: runs can go out. */
   const started = useRef(false);
-  /** Strip thumbnails only while the strip shows (Design mode). */
+  /** Strip thumbnails only while the strip shows steps (Design mode)… */
   const thumbSide = (v: ViewState) => (v.mode === "design" ? thumbRenderSide(v.thumb, window.devicePixelRatio || 1) : null);
+  /** …and one picture per pass while it shows passes (Plot mode). */
+  const passSide = (v: ViewState) => (v.mode === "plot" ? thumbRenderSide(v.thumb, window.devicePixelRatio || 1) : null);
   /** Run a recipe. The selected step is found by id in that recipe, so it survives reordering. */
   const send = (r: Recipe, proxy: boolean, runOnDemand = false) => {
     runner.inspect = canvasTarget(viewRef.current, r);
     runner.thumbs = thumbSide(viewRef.current);
+    runner.passes = passSide(viewRef.current);
     runner.request(r, proxy, runOnDemand);
   };
   // Storage (ADR 0014): the open project (its image, recipe and checkpoints) in a library.
@@ -330,7 +335,7 @@ export function App() {
     viewRef.current = next;
     // Only ask the worker again when what it draws changes (the canvas, or thumbnail size).
     if (!started.current) return;
-    if (canvasTarget(next, recipeRef.current) !== runner.inspect || thumbSide(next) !== runner.thumbs) send(recipeRef.current, false);
+    if (canvasTarget(next, recipeRef.current) !== runner.inspect || thumbSide(next) !== runner.thumbs || passSide(next) !== runner.passes) send(recipeRef.current, false);
   };
   /** A chain edit from the strip that ends with a step selected: the canvas shows that step. */
   const applySelecting = (next: Recipe, id: string) => {
@@ -454,13 +459,38 @@ export function App() {
     }
   };
 
+  /**
+   * Send to plotter. No plotter driver exists yet (ADR 0004: drivers come later; the machine
+   * profile's protocol is "svg"), so sending is the existing plotter export: the SVG to open in
+   * the plotter's own software. `PlotPanel` keeps it off for digital targets (`sendState`).
+   */
+  const sendToPlotter = async () => {
+    setExporting("svg");
+    try {
+      const f = await runner.export(recipe, "svg", stem);
+      download(f.name, f.data, f.mime);
+      setNotice([`Saved ${f.name} for the plotter. plotlab can't drive a plotter directly yet: open this file in your plotter's own software to plot it.`, ...f.notes].join("\n"));
+    } catch (e) {
+      setNotice(`Couldn't make the plotter file: ${errText(e)}`);
+    } finally {
+      setExporting(null);
+    }
+  };
+
   const plot = run.plot;
+  // Plot mode: one pen on its own, and the plot-order animation (only the view, never an edit).
+  const solo = view.mode === "plot" ? fitSolo(view.solo, plot) : null;
+  const shown = view.mode === "plot" && plot ? soloPlot(plot, solo) : null;
+  const frame = shown ? framePlot(shown, playback.t) : null;
+  /** Plot mode is showing part of the plot: only lines, never the leftover layers or the export proof. */
+  const partPlot = !!shown && (solo !== null || playback.t < 1);
   // What the view shows: an inspected stage, the page as it will export, or the end result
   // (lines + layers that stopped early).
   const inspected = inspect !== null && run.inspected ? run.inspected : null;
-  const proof = !inspected && asExported ? run.proof : null;
-  const viewRasters = inspected ? inspected.rasters : proof ? [proof] : run.rasterLayers;
-  const viewPlot = inspected ? inspected.plot : proof ? null : plot;
+  const proof = !inspected && asExported && !partPlot ? run.proof : null;
+  const viewRasters = inspected ? inspected.rasters : proof ? [proof] : partPlot ? [] : run.rasterLayers;
+  const viewPlot = inspected ? inspected.plot : proof ? null : (frame?.plot ?? plot);
+  const head = frame?.head ? { at: frame.head.at, color: shown!.layers.find((l) => l.id === frame.head!.layerId)!.ink.color } : null;
   const viewLayers = [
     ...(viewPlot?.layers.map((l) => ({ id: l.id, name: l.name, color: l.ink.color })) ?? []),
     ...viewRasters.filter((r) => r.color !== null).map((r) => ({ id: r.id, name: r.name, color: r.color! })),
@@ -593,7 +623,16 @@ export function App() {
             </div>
           )}
           <div className="view-bar">
-            {viewTitle ? (
+            {solo !== null && shown ? (
+              <>
+                <span>
+                  Showing only <strong>{shown.layers[0]!.name}</strong>
+                </span>
+                <button onClick={() => changeView(toggleSolo(view, null))} title="Show every pen again">
+                  All pens
+                </button>
+              </>
+            ) : viewTitle ? (
               <>
                 <span>
                   Viewing: <strong>{viewTitle}</strong>
@@ -635,6 +674,7 @@ export function App() {
             underlay={showSource && inspect !== "source" ? run.underlay : null}
             hidden={hidden}
             empty={run.busy ? "Working…" : "Nothing to show at this stage"}
+            head={head}
           />
         </section>
 
@@ -706,7 +746,6 @@ export function App() {
               recipe={recipe}
               onChange={(r, proxy) => apply(r, proxy ?? false)}
               layers={finalLayers}
-              passes={plot?.layers.map((l) => ({ id: l.id, name: l.name })) ?? []}
               working={run.working}
             />
           )}
@@ -715,6 +754,13 @@ export function App() {
               recipe={recipe}
               registry={registry}
               steps={run.steps}
+              plot={plot}
+              shown={shown}
+              estimate={run.estimate}
+              busy={run.busy}
+              playback={playback}
+              onSend={() => void sendToPlotter()}
+              onPassOrder={(order) => apply({ ...recipe, passOrder: order }, false)}
               canExport={recipe.target.kind !== "plotter" || plot !== null}
               exporting={exporting}
               onExport={(f) => void exportAs(f)}
@@ -763,6 +809,9 @@ export function App() {
             else if (id) applySelecting(res.recipe, id);
           }}
         />
+      )}
+      {view.mode === "plot" && plot && plot.layers.length > 0 && (
+        <PassStrip boxes={passBoxes(plot, run.estimate)} thumbs={run.passThumbs} solo={solo} size={view.thumb} onSolo={(id) => changeView(toggleSolo(viewRef.current, id))} />
       )}
       {!ready && (
         <div className="starting" role="status">

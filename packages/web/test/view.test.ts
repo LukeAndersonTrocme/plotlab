@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { canvasTarget, readThumbSize, resizeThumbs, THUMB, writeThumbSize, fitSelection, fitView, fromViewBlock, initialView, isPinned, openSetup, pin, RESULT, select, setMode, sidebarSteps, SOURCE, stepSelection, toggleSelect, togglePin, toViewBlock, unpin, VIEW_BLOCK_VERSION, type ViewState } from "../src/view.ts";
+import { canvasTarget, readThumbSize, resizeThumbs, THUMB, writeThumbSize, fitSelection, fitView, fromViewBlock, initialView, isPinned, openSetup, pin, RESULT, select, setMode, sidebarSteps, SOURCE, stepSelection, toggleSelect, togglePin, toggleSolo, toViewBlock, unpin, VIEW_BLOCK_VERSION, type ViewState } from "../src/view.ts";
 
 const at = (patch: Partial<ViewState>): ViewState => ({ ...initialView, ...patch });
 /** Only the step ids matter to the view. */
@@ -224,5 +224,29 @@ describe("view block (saved per project, beside recipe.json)", () => {
     const v = fromViewBlock(initialView, newer, r);
     expect(v.pins).toEqual(["order"]);
     expect(toViewBlock(unpin(v, "order"), newer)).toEqual({ ...newer, pins: [] });
+  });
+});
+
+describe("view state: one pen in Plot mode", () => {
+  it("clicking a pen box shows only that pen; clicking it again (or All) shows every pen", () => {
+    let v = toggleSolo(at({ mode: "plot" }), "dark");
+    expect(v.solo).toBe("dark");
+    expect(toggleSolo(v, "dark").solo).toBeNull();
+    expect(toggleSolo(v, "light").solo).toBe("light");
+    v = toggleSolo(v, null);
+    expect(v.solo).toBeNull();
+    expect(toggleSolo(v, null)).toBe(v);
+  });
+
+  it("leaving Plot mode goes back to every pen", () => {
+    const v = toggleSolo(at({ mode: "plot" }), "dark");
+    expect(setMode(v, "design").solo).toBeNull();
+    expect(setMode(v, "plot")).toBe(v);
+  });
+
+  it("isn't saved with the project, and doesn't change what the worker draws", () => {
+    const v = toggleSolo(at({ mode: "plot" }), "dark");
+    expect(Object.keys(toViewBlock(v)).sort()).toEqual(["pins", "version"]);
+    expect(canvasTarget(v, r)).toBeNull();
   });
 });

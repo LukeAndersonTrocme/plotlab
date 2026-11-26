@@ -15,7 +15,8 @@ export function drawResult(pipe: Pipeline, src: { source: Source; key: string },
  * Foreground messages are the ones the screen waits on: they go first, and while one waits
  * the strip's thumbnails are cut short. Pictures wait in the background. Each checkpoint
  * picture has its own group, so none is dropped; the gallery has one group, so a newer
- * request replaces what's left of the old one.
+ * request replaces what's left of the old one. Plot mode's pass pictures are queued by the
+ * worker itself after a run (group "passes", drawn from that run's plot), the same way.
  */
 export function laneOf(msg: ToWorker): { lane: "foreground" } | { lane: "background"; group: string } {
   switch (msg.type) {

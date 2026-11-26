@@ -15,6 +15,8 @@ export interface RunState {
   proof: RasterView | null;
   /** Strip thumbnails by box key ("source" or step id); they may lag the canvas a little. */
   thumbs: Record<string, Blob>;
+  /** Plot mode's strip: one picture per pass, by layer id; drawn in the background, so they may lag. */
+  passThumbs: Record<string, Blob>;
   /** True while the preview shows a low-res proxy result (full resolution comes on release). */
   refining: boolean;
   busy: boolean;
@@ -33,6 +35,7 @@ export const EMPTY_RUN: RunState = {
   underlay: null,
   proof: null,
   thumbs: {},
+  passThumbs: {},
   refining: false,
   busy: false,
   error: null,
@@ -53,6 +56,8 @@ export class Runner {
   proof = false;
   /** Strip thumbnail size in pixels (long side of the paper); null = no strip on screen. */
   thumbs: number | null = null;
+  /** Pass picture size for Plot mode's strip; null = not in Plot mode. */
+  passes: number | null = null;
   private exports = new Map<number, { resolve: (f: { name: string; mime: string; data: Uint8Array | string; notes: string[] }) => void; reject: (e: Error) => void }>();
   private pictures = new Map<number, (png: Blob | null) => void>();
   private gallerySeen: { id: number; onThumb: (key: string, png: Blob | null) => void } | null = null;
@@ -84,7 +89,7 @@ export class Runner {
     this.pending = null;
     const id = this.nextId++;
     this.inFlight = id;
-    const msg: ToWorker = { type: "run", id, recipe, proxy, inspect: this.inspect, runOnDemand, proof: this.proof, thumbs: this.thumbs };
+    const msg: ToWorker = { type: "run", id, recipe, proxy, inspect: this.inspect, runOnDemand, proof: this.proof, thumbs: this.thumbs, passes: this.passes };
     this.worker.postMessage(msg);
     this.set({ busy: true });
   }
@@ -142,6 +147,13 @@ export class Runner {
       this.exports.delete(m.id);
       if (m.type === "exported") p?.resolve(m);
       else p?.reject(new Error(m.message));
+      return;
+    }
+    if (m.type === "pass-thumb") {
+      const passThumbs: Record<string, Blob> = {};
+      for (const k of m.keys) if (this.state.passThumbs[k]) passThumbs[k] = this.state.passThumbs[k]!;
+      if (m.png) passThumbs[m.key] = m.png;
+      this.set({ passThumbs });
       return;
     }
     if (m.type === "thumbs") {

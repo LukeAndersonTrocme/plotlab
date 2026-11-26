@@ -1,5 +1,5 @@
 /// <reference lib="webworker" />
-import { exportOutput, exportProof, imageToRGBA, inkFor, layerToRGBA, leftoverRasters, Pipeline, StepError, toPlot, zipFiles, type Image, type Layers, type Plot, type Recipe, type Source, type StageData, type StepResult } from "@plotlab/engine";
+import { exportOutput, exportProof, imageToRGBA, inkFor, layerToRGBA, leftoverRasters, Pipeline, StepError, toPlot, zipFiles, type Image, type Layers, type Plot, type PlotLayer, type Recipe, type Source, type StageData, type StepResult } from "@plotlab/engine";
 import { estimatePlot, getMachine } from "@plotlab/machines";
 import { createRegistry } from "@plotlab/steps";
 import type { FromWorker, InspectTarget, InspectView, RasterView, ToWorker } from "./protocol.ts";
@@ -27,6 +27,8 @@ let src: { source: Source; key: string } | null = null;
 /** Encoded PNGs keyed by the pixel buffer they came from (outputs are cached by the pipeline, so identity is stable). */
 let pngCache = new WeakMap<object, Map<string, Promise<Blob>>>();
 const thumbnails = new ThumbnailRenderer();
+/** One pass on its own, kept per layer object, so an unchanged pass reuses its picture. */
+const passPlots = new WeakMap<PlotLayer, Plot>();
 
 const post = (m: FromWorker) => (self as unknown as DedicatedWorkerGlobalScope).postMessage(m);
 
@@ -126,6 +128,14 @@ async function galleryThumb(at: typeof src, id: number, side: number, item: { ke
   post({ type: "gallery-thumb", id, key: item.key, png: await p.catch(() => null) });
 }
 
+/** One pass's picture for Plot mode's strip: that pen's lines alone. */
+async function passThumb(id: number, side: number, recipe: Recipe, plot: Plot, layer: PlotLayer): Promise<void> {
+  let one = passPlots.get(layer);
+  if (!one) passPlots.set(layer, (one = { kind: "plot", paper: plot.paper, layers: [layer], ordered: plot.ordered }));
+  const png = await thumbnails.png(one, recipe, side).catch(() => null);
+  post({ type: "pass-thumb", id, keys: plot.layers.map((l) => l.id), key: layer.id, png });
+}
+
 /**
  * One thumbnail per strip box: the source, then each step's output (what passes through
  * for a switched-off step; traced order for an on-demand step that hasn't run).
@@ -157,6 +167,7 @@ async function handle(msg: Exclude<ToWorker, { type: "gallery" | "thumbnail" }>)
     picturePipe.reset();
     galleryCache = new Map();
     jobs.background("gallery", []);
+    jobs.background("passes", []);
     pngCache = new WeakMap();
     thumbnails.reset();
     return;
@@ -207,6 +218,12 @@ async function handle(msg: Exclude<ToWorker, { type: "gallery" | "thumbnail" }>)
     });
     // A thumbnail that fails to draw leaves the strip as it was; the run itself went fine.
     if (msg.thumbs) await postThumbs(msg, msg.thumbs, placed, results).catch(() => undefined);
+    // Pass pictures wait in the background, one pass per task, so a run sent meanwhile goes
+    // first; a newer run's pictures replace what's left of these.
+    if (msg.passes && plot && !msg.proxy) {
+      const side = msg.passes;
+      jobs.background("passes", plot.layers.map((l) => () => passThumb(msg.id, side, msg.recipe, plot, l)));
+    }
   } catch (err) {
     post({
       type: "error",

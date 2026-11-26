@@ -45,6 +45,8 @@ export type ToWorker =
       proof: boolean;
       /** Also send strip thumbnails, this many pixels on the paper's long side; null = none. */
       thumbs: number | null;
+      /** Plot mode's strip: also draw one picture per pass, in the background, at this size; null = none. */
+      passes: number | null;
     }
   /** Full-resolution run (on-demand steps included) → files for the target. */
   | { type: "export"; id: number; recipe: Recipe; format: ExportFormat; stem: string }
@@ -82,6 +84,11 @@ export type FromWorker =
    * only some of `keys`; keys not listed are no longer in the strip.
    */
   | { type: "thumbs"; id: number; side: number; keys: string[]; items: Array<{ key: string; png: Blob }> }
+  /**
+   * One pass's picture for Plot mode's strip (that pen's lines only), drawn in the background
+   * after a run. `keys`: the run's passes (layer ids); pictures of other passes are gone.
+   */
+  | { type: "pass-thumb"; id: number; keys: string[]; key: string; png: Blob | null }
   /** A checkpoint's picture; null if it couldn't be drawn. */
   | { type: "thumbnail"; id: number; png: Blob | null }
   /** One preset gallery picture; null if that preset couldn't be drawn on this source. */

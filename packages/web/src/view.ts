@@ -15,7 +15,7 @@ export type Mode = "design" | "page" | "plot";
 export const MODES: Array<{ mode: Mode; label: string; hint: string }> = [
   { mode: "design", label: "Design", hint: "The steps that turn the image into lines" },
   { mode: "page", label: "Page", hint: "Paper, inks and machine" },
-  { mode: "plot", label: "Plot", hint: "Time estimate and the files to download" },
+  { mode: "plot", label: "Plot", hint: "Time estimate, pass order, watch it plot, send and download" },
 ];
 
 /**
@@ -42,9 +42,11 @@ export interface ViewState {
   thumb: number;
   /** Pinned steps, by step id: their settings stay in the sidebar. Shown in recipe order. */
   pins: readonly string[];
+  /** Plot mode: the one pen (pass, by layer id) shown on its own; null = every pen. Not saved. */
+  solo: string | null;
 }
 
-export const initialView: ViewState = { mode: "design", selection: RESULT, thumb: THUMB.default, pins: [] };
+export const initialView: ViewState = { mode: "design", selection: RESULT, thumb: THUMB.default, pins: [], solo: null };
 
 const clampThumb = (px: number) => Math.round(Math.min(THUMB.max, Math.max(THUMB.min, px)));
 
@@ -81,7 +83,14 @@ export const sameSelection = (a: Selection, b: Selection) =>
 
 /** Each transition returns the same object when nothing changes, so React can skip a render. */
 export function setMode(v: ViewState, mode: Mode): ViewState {
-  return v.mode === mode ? v : { ...v, mode };
+  // Leaving Plot mode goes back to every pen.
+  return v.mode === mode ? v : { ...v, mode, solo: null };
+}
+
+/** A pen box in Plot mode: show only that pen; the same pen again, or null (All), shows every pen. */
+export function toggleSolo(v: ViewState, id: string | null): ViewState {
+  const solo = id === null || v.solo === id ? null : id;
+  return solo === v.solo ? v : { ...v, solo };
 }
 
 /** The setup chip in the top bar opens Page mode. */
