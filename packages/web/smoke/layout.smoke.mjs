@@ -105,6 +105,66 @@ try {
     await page.close();
   }
 
+  // The step strip: thumbnails of every step; clicking one shows that step on the canvas
+  // and its settings in the sidebar.
+  {
+    const page = await open(1280);
+    await page.waitForFunction(() => document.querySelectorAll(".strip .box .pic img").length === document.querySelectorAll(".strip .box").length, null, { timeout: 30_000 });
+    const keys = await page.$$eval(".strip .box", (els) => els.map((e) => e.dataset.key));
+    check(keys[0] === "source" && keys.length >= 3, `strip: the source plus one box per step, each with a thumbnail (${keys.join(", ")})`);
+    const snap = () =>
+      page.evaluate(() => ({
+        canvas: document.querySelector(".view svg.preview").innerHTML,
+        bar: document.querySelector(".view-bar").textContent,
+        cards: [...document.querySelectorAll("aside.side .card.step .title")].map((e) => e.textContent),
+      }));
+    const before = await snap();
+    const first = keys[1];
+    const title = await page.textContent(`.strip .box[data-key="${first}"] .name`);
+    await page.click(`.strip .box[data-key="${first}"] .pic`);
+    await page.waitForFunction((t) => document.querySelector(".view-bar")?.textContent?.includes(`${t} output`), title, { timeout: 30_000 });
+    await page.waitForFunction((html) => document.querySelector(".view svg.preview").innerHTML !== html, before.canvas, { timeout: 30_000 });
+    const after = await snap();
+    check(after.canvas !== before.canvas, `clicking the ${title} thumbnail changes the canvas`);
+    check(before.cards.length > 1 && after.cards.length === 1 && after.cards[0] === title, `clicking the ${title} thumbnail puts its settings in the sidebar (${before.cards.length} cards → ${after.cards.join(", ")})`);
+    check(await page.$eval(`.strip .box[data-key="${first}"]`, (e) => e.classList.contains("sel")), "the clicked box is marked as selected");
+
+    // Show final goes back to the result.
+    await page.click(".view-bar button:has-text('Show final')");
+    await page.waitForFunction(() => !document.querySelector(".view-bar")?.textContent?.includes("Viewing"));
+    check((await snap()).cards.length === before.cards.length, "Show final goes back to the result and every step's settings");
+
+    // Keyboard: Enter on a focused box selects it.
+    await page.focus(`.strip .box[data-key="source"] button.pick`);
+    await page.keyboard.press("Enter");
+    await page.waitForFunction(() => document.querySelector(".view-bar")?.textContent?.includes("the source"), null, { timeout: 10_000 });
+    check(true, "Enter on a focused box selects it");
+
+    // Bypass: a stage-changing step (the first one turns the image into layers) can't be switched off, and says why.
+    const byp = await page.$eval(`.strip .box[data-key="${first}"] .byp`, (e) => ({ disabled: e.getAttribute("aria-disabled"), label: e.getAttribute("aria-label") }));
+    check(byp.disabled === "true" && /Can't switch off/.test(byp.label), `bypass is off on a stage-changing step, with a reason ("${byp.label}")`);
+
+    // Bypass works on a step that keeps its stage (Pixelate: layers in, layers out).
+    await page.click(".view-bar button:has-text('Show final')").catch(() => {});
+    await page.selectOption("aside.side select.add-step >> nth=-1", "pixelate");
+    await page.waitForSelector('.strip .box[data-key="pixelate"]');
+    await page.click('.strip .box[data-key="pixelate"] .byp');
+    await page.waitForSelector('.strip .box[data-key="pixelate"].off', { timeout: 10_000 });
+    await page.click('.strip .box[data-key="pixelate"] .byp');
+    await page.waitForSelector('.strip .box[data-key="pixelate"]:not(.off)', { timeout: 10_000 });
+    check(true, "bypass switches a same-stage step off and on again");
+
+    // The strip size is remembered by this browser.
+    const size0 = await page.$eval(".strip .box .pic", (e) => e.getBoundingClientRect().width);
+    await page.click("button[aria-label='Bigger thumbnails']");
+    const size1 = await page.$eval(".strip .box .pic", (e) => e.getBoundingClientRect().width);
+    await page.reload();
+    await page.waitForSelector(".stats .big", { timeout: 60_000 });
+    const size2 = await page.$eval(".strip .box .pic", (e) => e.getBoundingClientRect().width);
+    check(size1 > size0 && size2 === size1, `strip size grows with + and is remembered after a reload (${size0} → ${size1} → ${size2})`);
+    await page.close();
+  }
+
   // Dark mode: the chrome goes dark, the paper stays paper-coloured.
   {
     const page = await open(1280, "dark");

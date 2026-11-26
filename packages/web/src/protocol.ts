@@ -25,6 +25,8 @@ export interface InspectView {
 
 export interface StepInfo {
   index: number;
+  /** The step's stable id (`RecipeStep.id`). */
+  id: string;
   step: string;
   ms: number;
   cached: boolean;
@@ -33,7 +35,17 @@ export interface StepInfo {
 
 export type ToWorker =
   | { type: "source"; source: Source; key: string }
-  | { type: "run"; id: number; recipe: Recipe; proxy: boolean; inspect: InspectTarget; runOnDemand: boolean; proof: boolean }
+  | {
+      type: "run";
+      id: number;
+      recipe: Recipe;
+      proxy: boolean;
+      inspect: InspectTarget;
+      runOnDemand: boolean;
+      proof: boolean;
+      /** Also send strip thumbnails, this many pixels on the paper's long side; null = none. */
+      thumbs: number | null;
+    }
   /** Full-resolution run (on-demand steps included) → files for the target. */
   | { type: "export"; id: number; recipe: Recipe; format: ExportFormat; stem: string };
 
@@ -57,6 +69,12 @@ export type FromWorker =
       /** The page as it will export (when asked for). */
       proof: RasterView | null;
     }
+  /**
+   * Strip thumbnails after a run, by box key ("source" or step id). Sent after the result and
+   * cut short when a newer request is waiting (the canvas comes first), so `items` may cover
+   * only some of `keys`; keys not listed are no longer in the strip.
+   */
+  | { type: "thumbs"; id: number; side: number; keys: string[]; items: Array<{ key: string; png: Blob }> }
   | { type: "exported"; id: number; name: string; mime: string; data: Uint8Array | string; notes: string[] }
   | { type: "export-error"; id: number; message: string }
   | { type: "error"; id: number; index?: number; message: string };

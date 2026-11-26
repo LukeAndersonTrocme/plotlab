@@ -22,15 +22,17 @@ import { ParamControl } from "./ParamControl.tsx";
 import { splitSettings } from "./settings.ts";
 import { TARGETS } from "./setup.ts";
 import type { InspectTarget, StepInfo } from "./protocol.ts";
-
-export const STAGE_NAMES: Record<StageKind, string> = { image: "Image", layers: "Layers", geometry: "Lines", plot: "Plot" };
+import { STAGE_NAMES } from "./strip.ts";
 
 /**
  * The chain as one ordered list (ADR 0009): stage dividers where the data type changes,
  * drag (or ↑/↓) to reorder within the type rules, add from the catalog, remove, disable.
+ * With `only`, just that step's card: the step picked in the strip.
  */
 export function StepList(props: {
   recipe: Recipe;
+  /** Show only the step at this chain position. */
+  only?: number;
   registry: StepRegistry;
   steps: StepInfo[];
   stale: number[];
@@ -224,6 +226,11 @@ export function StepList(props: {
       </div>,
     );
   });
+
+  if (props.only !== undefined) {
+    const card = items.find((el) => el.key === `s${props.only}`);
+    return <div className="steps">{card}</div>;
+  }
 
   return (
     <div className="steps">

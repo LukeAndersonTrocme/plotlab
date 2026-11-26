@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { canvasTarget, fitSelection, initialView, openSetup, RESULT, select, setMode, SOURCE, stepSelection, toggleSelect, type ViewState } from "../src/view.ts";
+import { canvasTarget, readThumbSize, resizeThumbs, THUMB, writeThumbSize, fitSelection, initialView, openSetup, RESULT, select, setMode, SOURCE, stepSelection, toggleSelect, type ViewState } from "../src/view.ts";
 
 const at = (patch: Partial<ViewState>): ViewState => ({ ...initialView, ...patch });
 /** Only the step ids matter to the view. */
@@ -98,5 +98,34 @@ describe("view state: selection", () => {
 
   it("an unknown step shows the result on the canvas", () => {
     expect(canvasTarget(select(initialView, stepSelection("gone")), r)).toBeNull();
+  });
+});
+
+describe("view state: strip size", () => {
+  it("starts at the default size and stays within bounds", () => {
+    expect(initialView.thumb).toBe(THUMB.default);
+    expect(resizeThumbs(initialView, 10).thumb).toBe(THUMB.min);
+    expect(resizeThumbs(initialView, 999).thumb).toBe(THUMB.max);
+    expect(resizeThumbs(initialView, 120.4).thumb).toBe(120);
+    expect(resizeThumbs(initialView, THUMB.default)).toBe(initialView);
+  });
+
+  it("is remembered per device (in this browser's storage)", () => {
+    const m = new Map<string, string>();
+    const storage = { getItem: (k: string) => m.get(k) ?? null, setItem: (k: string, v: string) => void m.set(k, v) };
+    expect(readThumbSize(storage)).toBe(THUMB.default);
+    writeThumbSize(storage, 144);
+    expect(readThumbSize(storage)).toBe(144);
+    m.set([...m.keys()][0]!, "nonsense");
+    expect(readThumbSize(storage)).toBe(THUMB.default);
+    m.set([...m.keys()][0]!, "5000");
+    expect(readThumbSize(storage)).toBe(THUMB.max);
+  });
+
+  it("storage that is missing or throws doesn't break anything", () => {
+    const broken = { getItem: () => { throw new Error("blocked"); }, setItem: () => { throw new Error("blocked"); } };
+    expect(readThumbSize(broken)).toBe(THUMB.default);
+    expect(() => writeThumbSize(broken, 120)).not.toThrow();
+    expect(readThumbSize(null)).toBe(THUMB.default);
   });
 });

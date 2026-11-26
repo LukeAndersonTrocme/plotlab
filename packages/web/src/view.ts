@@ -30,12 +30,47 @@ export const stepSelection = (id: string): Selection => ({ kind: "step", id });
 /** The view only needs the step ids of the chain. */
 export type Chain = { steps: ReadonlyArray<{ id: string }> };
 
+/** Thumbnail size in the step strip, in CSS px: a per-device preference, not part of the project. */
+export const THUMB = { min: 56, max: 200, step: 24, default: 96 } as const;
+
 export interface ViewState {
   mode: Mode;
   selection: Selection;
+  /** Thumbnail size in the step strip (CSS px). */
+  thumb: number;
 }
 
-export const initialView: ViewState = { mode: "design", selection: RESULT };
+export const initialView: ViewState = { mode: "design", selection: RESULT, thumb: THUMB.default };
+
+const clampThumb = (px: number) => Math.round(Math.min(THUMB.max, Math.max(THUMB.min, px)));
+
+/** Bigger or smaller thumbnails (the grip, or − / +). */
+export function resizeThumbs(v: ViewState, px: number): ViewState {
+  const thumb = clampThumb(px);
+  return thumb === v.thumb ? v : { ...v, thumb };
+}
+
+/** Where this device remembers the thumbnail size. */
+export const THUMB_KEY = "plotlab:thumb-size";
+type KeyValue = { getItem(k: string): string | null; setItem(k: string, v: string): void };
+
+/** The remembered thumbnail size; the default when there is none, it can't be read, or storage is off. */
+export function readThumbSize(storage: KeyValue | null): number {
+  try {
+    const n = Number(storage?.getItem(THUMB_KEY) ?? NaN);
+    return Number.isFinite(n) && n > 0 ? clampThumb(n) : THUMB.default;
+  } catch {
+    return THUMB.default;
+  }
+}
+
+export function writeThumbSize(storage: KeyValue | null, px: number): void {
+  try {
+    storage?.setItem(THUMB_KEY, String(clampThumb(px)));
+  } catch {
+    // Private windows and blocked storage: the size just isn't remembered.
+  }
+}
 
 export const sameSelection = (a: Selection, b: Selection) =>
   a.kind === b.kind && (a.kind !== "step" || a.id === (b as { id: string }).id);
