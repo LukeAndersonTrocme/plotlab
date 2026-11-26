@@ -719,7 +719,10 @@ function Editor(props: { hidden: boolean }) {
               compare={compare}
               targets={compareTargets}
               views={run.compared}
-              labels={compare.bands.map((b) => bandOption(boxes.find((x) => x.key === b) ?? boxes[0]!).label)}
+              labels={compare.bands.map((b) => {
+                const box = boxes.find((x) => x.key === b);
+                return box ? bandOption(box).label : ""; // a removed step's strip, until the view catches up
+              })}
               hidden={hidden}
               showTravel={showTravel && recipe.target.kind === "plotter"}
               busy={run.busy}
