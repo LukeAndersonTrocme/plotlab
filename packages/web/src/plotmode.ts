@@ -1,4 +1,4 @@
-import { exportFormats, type ExportFormat, type Plot, type PlotLayer, type Position, type Target } from "@plotlab/engine";
+import { exportFormats, type ExportFormat, type PassOrder, type Plot, type PlotLayer, type Position, type Target } from "@plotlab/engine";
 import { timeBreakdown, type PlotEstimate, type TimeComponent } from "@plotlab/machines";
 
 /**
@@ -62,9 +62,23 @@ export function passBoxes(plot: Plot, e: PlotEstimate | null): PassBox[] {
   }));
 }
 
-/** Pass `i` one place earlier (-1) or later (+1): the new `passOrder` (layer ids), or null at an end. */
-export function movePass(plot: Plot, i: number, d: -1 | 1): string[] | null {
-  const ids = plot.layers.map((l) => l.id);
+/**
+ * The passes in the recipe's order: the plot's order, unless the recipe names an order the
+ * plot hasn't caught up with yet (a move made while the re-run is on its way). Passes the
+ * order doesn't name follow in plot order.
+ */
+export function orderedPasses(plot: Plot, passOrder: PassOrder): PlotLayer[] {
+  if (!Array.isArray(passOrder)) return plot.layers;
+  const named = passOrder.map((id) => plot.layers.find((l) => l.id === id)).filter((l): l is PlotLayer => !!l);
+  return [...named, ...plot.layers.filter((l) => !named.includes(l))];
+}
+
+/**
+ * Pass `i` (in `orderedPasses`) one place earlier (-1) or later (+1): the new `passOrder`
+ * (layer ids), or null at an end. Works from the recipe's order, so two quick moves add up.
+ */
+export function movePass(plot: Plot, passOrder: PassOrder, i: number, d: -1 | 1): string[] | null {
+  const ids = orderedPasses(plot, passOrder).map((l) => l.id);
   const j = i + d;
   if (i < 0 || i >= ids.length || j < 0 || j >= ids.length) return null;
   [ids[i], ids[j]] = [ids[j]!, ids[i]!];
@@ -166,8 +180,11 @@ export function framePlot(plot: Plot, t: number): Frame {
   return { plot: { ...plot, layers }, head };
 }
 
-/** Under the scrubber: which pass the pen is on, and how far through the plot. */
-export function frameLabel(plot: Plot, t: number): string {
+/**
+ * Under the scrubber: which pass the pen is on, and how far through the plot. `all`: the
+ * whole plot, when `plot` is one pen of it, so the pass is numbered as in the strip.
+ */
+export function frameLabel(plot: Plot, t: number, all: Plot = plot): string {
   const w = weightsOf(plot);
   if (t >= 1 || w.total === 0) return "The whole plot";
   const at = Math.max(0, t) * w.total;
@@ -180,7 +197,10 @@ export function frameLabel(plot: Plot, t: number): string {
       break;
     }
   }
-  return `Pass ${pass + 1} of ${plot.layers.length}: ${plot.layers[pass]!.name} · ${Math.round(Math.max(0, t) * 100)}%`;
+  const layer = plot.layers[pass]!;
+  const n = all.layers.findIndex((l) => l.id === layer.id);
+  const [num, of] = n < 0 ? [pass + 1, plot.layers.length] : [n + 1, all.layers.length];
+  return `Pass ${num} of ${of}: ${layer.name} · ${Math.round(Math.max(0, t) * 100)}%`;
 }
 
 /** The animation `dtMs` later (it never goes backwards and stops at the end). */

@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState, type CSSProperties } from "react";
 import { FORMAT_LABEL, type ExportFormat, type Plot, type Recipe, type StepRegistry } from "@plotlab/engine";
 import type { PlotEstimate } from "@plotlab/machines";
-import { advance, frameLabel, movePass, outputFormats, sendState, startPlay, timeRows, type PassBox } from "./plotmode.ts";
+import { advance, frameLabel, movePass, orderedPasses, outputFormats, sendState, startPlay, timeRows, type PassBox } from "./plotmode.ts";
 import type { StepInfo } from "./protocol.ts";
 import { fmtTime } from "./setup.ts";
 import { Thumb } from "./Strip.tsx";
@@ -113,9 +113,9 @@ export function PlotPanel(props: {
           <h3>Pass order</h3>
           <p className="hint">Each pen is one pass, with a pen change between passes. Light inks usually go first.</p>
           <ol className="pass-order">
-            {plot.layers.map((l, i) => {
-              const up = movePass(plot, i, -1);
-              const down = movePass(plot, i, 1);
+            {orderedPasses(plot, r.passOrder).map((l, i) => {
+              const up = movePass(plot, r.passOrder, i, -1);
+              const down = movePass(plot, r.passOrder, i, 1);
               return (
                 <li key={l.id} className="param-row pass" data-pass={l.id}>
                   <span className="num">{i + 1}</span>
@@ -158,7 +158,7 @@ export function PlotPanel(props: {
             />
           </div>
           <p className="hint play-where" aria-live="off">
-            {frameLabel(props.shown, pb.t)}
+            {frameLabel(props.shown, pb.t, plot ?? props.shown)}
           </p>
         </section>
       )}

@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { Ink, Plot, Position } from "@plotlab/engine";
 import { estimatePlot, getMachine, timeBreakdown } from "@plotlab/machines";
-import { advance, fitSolo, framePlot, frameLabel, movePass, outputFormats, passBoxes, penLifts, PLAY_MS, sendState, soloPlot, startPlay, timeRows } from "../src/plotmode.ts";
+import { advance, fitSolo, framePlot, frameLabel, movePass, orderedPasses, outputFormats, passBoxes, penLifts, PLAY_MS, sendState, soloPlot, startPlay, timeRows } from "../src/plotmode.ts";
 
 const ink = (id: string, color: string): Ink => ({ id, name: id, color, mix: "multiply", widthMm: 0.5 });
 const yellow = ink("Yellow", "#f2d500");
@@ -50,13 +50,27 @@ describe("Plot mode: time breakdown", () => {
 
 describe("Plot mode: pass order", () => {
   it("moving a pass earlier or later gives the new order as passOrder (layer ids)", () => {
-    expect(movePass(plot, 1, -1)).toEqual(["dark", "light"]);
-    expect(movePass(plot, 0, 1)).toEqual(["dark", "light"]);
+    expect(movePass(plot, "light-to-dark", 1, -1)).toEqual(["dark", "light"]);
+    expect(movePass(plot, "light-to-dark", 0, 1)).toEqual(["dark", "light"]);
   });
 
   it("can't move the first pass earlier or the last one later", () => {
-    expect(movePass(plot, 0, -1)).toBeNull();
-    expect(movePass(plot, 1, 1)).toBeNull();
+    expect(movePass(plot, "light-to-dark", 0, -1)).toBeNull();
+    expect(movePass(plot, "light-to-dark", 1, 1)).toBeNull();
+  });
+
+  it("two moves in a row build on each other, even before the plot is run again", () => {
+    const three: Plot = { ...plot, layers: [...plot.layers, { id: "mid", name: "Mid", ink: black, paths: [] }] };
+    // The plot still has the old order (light, dark, mid); the recipe already has the first move.
+    const first = movePass(three, "light-to-dark", 2, -1)!;
+    expect(first).toEqual(["light", "mid", "dark"]);
+    expect(movePass(three, first, 1, -1)).toEqual(["mid", "light", "dark"]);
+  });
+
+  it("the pass list follows the recipe's order; passes it doesn't name follow in plot order", () => {
+    expect(orderedPasses(plot, ["dark", "light"]).map((l) => l.id)).toEqual(["dark", "light"]);
+    expect(orderedPasses(plot, ["dark", "gone"]).map((l) => l.id)).toEqual(["dark", "light"]);
+    expect(orderedPasses(plot, "light-to-dark")).toBe(plot.layers);
   });
 
   it("one box per pass, in pass order, with its ink, line count and time", () => {
@@ -124,6 +138,10 @@ describe("Plot mode: plot-order animation", () => {
     expect(frameLabel(plot, 1)).toBe("The whole plot");
     expect(frameLabel(plot, 0.75)).toBe("Pass 2 of 2: Dark · 75%");
     expect(frameLabel(plot, 0)).toBe("Pass 1 of 2: Light · 0%");
+  });
+
+  it("with one pen shown, its pass number is its place in the whole plot", () => {
+    expect(frameLabel(soloPlot(plot, "dark"), 0.5, plot)).toBe("Pass 2 of 2: Dark · 50%");
   });
 
   it("plays at a steady pace and stops at the end", () => {

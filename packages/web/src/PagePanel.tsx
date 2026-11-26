@@ -75,7 +75,6 @@ export function PagePanel(props: {
   onChange: (r: Recipe, proxy?: boolean) => void;
   /** Layers at the end of the chain (from the last run). */
   layers: LayerInfo[];
-  /** Line layers in their current pass order (from the last plot). */
   working: { width: number; height: number; mmPerPx: number } | null;
 }) {
   const { recipe: r, onChange } = props;
