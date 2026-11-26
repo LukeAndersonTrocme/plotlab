@@ -20,6 +20,8 @@ import type { InspectTarget } from "./protocol.ts";
 import { StageView } from "./StageView.tsx";
 import { StepList, type SidebarCards } from "./StepList.tsx";
 import { CheckpointSidebar } from "./CheckpointSidebar.tsx";
+import { PhoneViewer, usePhoneWidth } from "./PhoneViewer.tsx";
+import { keepEditor } from "./phone.ts";
 import { attachThumbnail, checkpointLabel, createCheckpoint, restoreSafely } from "./checkpoints.ts";
 import { galleryItems, pickPreset, type GalleryItem } from "./gallery.ts";
 import { focusOf, shortcut } from "./keys.ts";
@@ -51,7 +53,29 @@ function download(name: string, data: string | Uint8Array, type: string) {
   setTimeout(() => URL.revokeObjectURL(a.href), 1000);
 }
 
+/**
+ * Phone-sized screens get the viewer only (#74); the editor doesn't even mount there, so
+ * none of its work starts. Turning the phone or resizing the window switches between them.
+ */
 export function App() {
+  const phone = usePhoneWidth();
+  // Once the editor has started it stays (hidden), so narrowing the window loses no work.
+  const editor = useRef(false);
+  editor.current = keepEditor(editor.current, phone);
+  return (
+    <>
+      {editor.current && (
+        <div className="editor-host" hidden={phone}>
+          <Editor hidden={phone} />
+        </div>
+      )}
+      {phone && <PhoneViewer />}
+    </>
+  );
+}
+
+/** `hidden`: the phone viewer is on screen; the editor keeps its state but takes no keys. */
+function Editor(props: { hidden: boolean }) {
   const [history, setHistory] = useState<History<Recipe>>(() => createHistory(defaultRecipe()));
   const recipe = history.present;
   const [run, setRun] = useState<RunState>(EMPTY_RUN);
@@ -312,10 +336,11 @@ export function App() {
 
   // ⌘S saves a checkpoint, S shows the checkpoints, ⌘Z / ⇧⌘Z go Back / Forward (keys.ts).
   // While the preset gallery is open only ⌘S works (Escape closes it).
-  const keys = useRef({ back, forward, save: () => void saveCheckpoint(), checkpoints: () => setSidebar((o) => !o), modal: false });
-  keys.current = { back, forward, save: () => void saveCheckpoint(), checkpoints: () => setSidebar((o) => !o), modal: gallery !== null };
+  const keys = useRef({ back, forward, save: () => void saveCheckpoint(), checkpoints: () => setSidebar((o) => !o), modal: false, hidden: props.hidden });
+  keys.current = { back, forward, save: () => void saveCheckpoint(), checkpoints: () => setSidebar((o) => !o), modal: gallery !== null, hidden: props.hidden };
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
+      if (keys.current.hidden) return;
       const s = shortcut({ key: e.key, metaKey: e.metaKey, ctrlKey: e.ctrlKey, shiftKey: e.shiftKey, altKey: e.altKey, repeat: e.repeat, ...focusOf(e.target) });
       if (!s || (keys.current.modal && s !== "save" && s !== "ignore")) return;
       e.preventDefault();

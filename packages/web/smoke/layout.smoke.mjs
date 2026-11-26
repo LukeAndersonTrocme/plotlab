@@ -439,6 +439,86 @@ try {
     await page.close();
   }
 
+  // Phone (#74): under 700 px a viewer replaces the editor, and it works by touch.
+  {
+    const ctx = await browser.newContext({ viewport: { width: 390, height: 844 }, hasTouch: true, isMobile: true });
+    const page = await ctx.newPage();
+    await page.goto(APP_URL);
+    await page.waitForSelector(".phone-project", { timeout: 30_000 });
+    check(!(await page.$(".app")) && !(await page.$("aside.side")), "phone: the editor isn't there at 390 px");
+    check(/sample to look at/.test(await page.textContent(".phone")), "phone: a fresh browser shows the sample to look at");
+    await page.tap(".phone-project");
+    await page.waitForSelector(".compare[role=slider]", { timeout: 60_000 });
+    await page.waitForSelector(".phone-box .pic img", { timeout: 60_000 });
+    const before = Number(await page.getAttribute(".compare", "aria-valuenow"));
+    const box = await page.locator(".compare").boundingBox();
+    await page.touchscreen.tap(box.x + box.width * 0.2, box.y + box.height / 2);
+    const tapped = Number(await page.getAttribute(".compare", "aria-valuenow"));
+    check(before === 50 && Math.abs(tapped - 20) <= 2, `phone: a tap moves the before/after line (${before}% → ${tapped}%)`);
+    const clip = await page.$eval(".compare-after", (el) => el.style.clipPath);
+    check(/^inset\(0(px)? 0(px)? 0(px)? (19|20|21)/.test(clip), `phone: the plot shows right of the line (${clip})`);
+    await page.mouse.move(box.x + box.width * 0.3, box.y + 20);
+    await page.mouse.down();
+    await page.mouse.move(box.x + box.width * 0.8, box.y + 20, { steps: 4 });
+    await page.mouse.up();
+    const dragged = Number(await page.getAttribute(".compare", "aria-valuenow"));
+    check(Math.abs(dragged - 80) <= 2, `phone: dragging moves it too (${dragged}%)`);
+    const strip = await page.$eval(".phone-strip", (el) => ({ scroll: el.scrollWidth, width: el.clientWidth, page: document.documentElement.scrollWidth, inner: window.innerWidth }));
+    check(strip.scroll > strip.width && strip.page <= strip.inner, `phone: the strip scrolls sideways, the page doesn't (${strip.scroll} > ${strip.width}, page ${strip.page})`);
+    await page.tap(".phone-box >> nth=1");
+    const shown = await page
+      .waitForFunction(() => /^Step 1/.test(document.querySelector(".phone-caption")?.textContent ?? ""), null, { timeout: 30_000 })
+      .then(() => true, () => false);
+    check(shown, "phone: tapping a step in the strip shows that step");
+    await page.tap(".phone-stage-bar .phone-full");
+    const full = await page.$eval(".phone-stage", (el) => {
+      const r = el.getBoundingClientRect();
+      return r.width === window.innerWidth && r.height === window.innerHeight;
+    });
+    check(full, "phone: Full screen fills the screen");
+    await page.tap(".phone-stage-bar .phone-full");
+    await ctx.close();
+  }
+
+  // Laptop to phone width and back: the editor stays (hidden) so nothing is lost, and the
+  // viewer shows the stored project and its checkpoint without saving anything.
+  {
+    const page = await open(1280);
+    const backOff = () => page.$eval("header.top button[aria-label=Back]", (b) => b.disabled);
+    await page.click('.strip .box[data-key="threshold"] .pic');
+    await page.focus('aside.side .card.step.focus[data-step="threshold"] input[type=range]');
+    await page.keyboard.press("ArrowRight");
+    check(!(await backOff()), "laptop: changing a setting is a Back step");
+    // Save a checkpoint and narrow at once: its picture is still being drawn.
+    await page.keyboard.press("ControlOrMeta+s");
+    await page.waitForSelector(".toast", { timeout: 10_000 });
+    await page.setViewportSize({ width: 390, height: 844 });
+    await page.waitForSelector(".phone-project", { timeout: 30_000 });
+    const hidden = await page.$eval(".app", (el) => el.getBoundingClientRect().width === 0 && el.closest("[hidden]") !== null);
+    check(hidden, "resizing under 700 px hides the editor behind the viewer");
+    const meta = await page.textContent(".phone-project-meta");
+    check(meta === "1 checkpoint" && !/sample to look at/.test(await page.textContent(".phone")), `phone: the stored project shows with its checkpoint ("${meta}")`);
+    await page.keyboard.press("ControlOrMeta+z");
+    await page.keyboard.press("ControlOrMeta+s");
+    await page.setViewportSize({ width: 1280, height: 800 });
+    await page.waitForSelector(".app", { state: "visible", timeout: 10_000 });
+    check(!(await page.$(".phone")), "widening again brings the editor back");
+    check(!(await backOff()), "the editor kept its Back step (and took no keys while hidden)");
+    await page.keyboard.press("s");
+    await page.waitForSelector(".ckpt", { timeout: 10_000 });
+    check((await page.$$(".ckpt")).length === 1, "still one checkpoint: the viewer saved nothing, nor did keys pressed on it");
+    const pic = await page.waitForSelector(".ckpt-thumb img", { timeout: 30_000 }).then(() => true, () => false);
+    check(pic, "the checkpoint saved just before narrowing got its picture");
+    await page.keyboard.press("s");
+    await page.setViewportSize({ width: 390, height: 844 });
+    await page.click(".phone-project");
+    await page.waitForSelector(".phone-ckpt:not(.sel) .phone-ckpt-pic img", { timeout: 30_000 });
+    check(true, "phone: the checkpoint shows its saved picture");
+    await page.click(".phone-ckpt:not(.sel)");
+    check((await page.getAttribute(".phone-ckpt:nth-child(2)", "aria-pressed")) === "true", "phone: tapping a checkpoint shows that version");
+    await page.close();
+  }
+
   // Dark mode: the chrome goes dark, the paper stays paper-coloured.
   {
     const page = await open(1280, "dark");
