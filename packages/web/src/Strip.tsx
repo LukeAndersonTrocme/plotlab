@@ -2,7 +2,7 @@ import { Fragment, useEffect, useRef, useState, type CSSProperties, type Keyboar
 import { STAGE_WORDS, type Recipe, type StageKind, type StepRegistry } from "@plotlab/engine";
 import { addMenu, dragHint, dropGaps, type DropGap } from "./gaps.ts";
 import { useBlobUrl } from "./StageView.tsx";
-import { STAGE_NAMES, STAGES, type StripBox } from "./strip.ts";
+import { STAGE_NAMES, STAGES, STEP_DRAG, type StripBox } from "./strip.ts";
 import { THUMB } from "./view.ts";
 
 const stageVar = (k: StageKind) => `var(--st-${k === "geometry" ? "lines" : k})`;
@@ -16,7 +16,8 @@ function Thumb(props: { png: Blob | undefined }) {
  * The recipe as a row of boxes along the bottom (#66): the source, then each step with a
  * thumbnail of its output, its stage colours and a bypass toggle. Click (or Enter) shows
  * that step on the canvas and its settings in the sidebar. The grip and − / + resize it.
- * A "+" between boxes adds a step that fits there; dragging a box shows where it can go.
+ * A "+" between boxes adds a step that fits there; dragging a box shows where it can go,
+ * and dropping it on the sidebar pins it. Pinned boxes carry a mark.
  */
 export function Strip(props: {
   recipe: Recipe;
@@ -27,6 +28,8 @@ export function Strip(props: {
   selected: string | null;
   /** Thumbnail size in CSS px. */
   size: number;
+  /** Ids of the pinned steps. */
+  pins: readonly string[];
   onSelect: (key: string) => void;
   onBypass: (index: number) => void;
   onResize: (px: number) => void;
@@ -104,7 +107,7 @@ export function Strip(props: {
       <div className="strip-head">
         <strong>Recipe</strong>
         <span className={`strip-hint${drag ? " drag-hint" : ""}`} aria-live="polite">
-          {drag ? drag.hint : `${steps} ${steps === 1 ? "step" : "steps"} · click a box to see that step and its settings, drag it to move it, + to add a step`}
+          {drag ? `${drag.hint} Or drop it on the sidebar to pin it.` : `${steps} ${steps === 1 ? "step" : "steps"} · click a box to see that step and its settings, drag it to move it, + to add a step`}
         </span>
         <span className="legend" aria-label="Stage colours">
           {STAGES.map((k) => (
@@ -128,6 +131,7 @@ export function Strip(props: {
         {props.boxes.map((b) => {
           const changes = b.input !== b.output;
           const selected = props.selected === b.key;
+          const pinned = b.index >= 0 && props.pins.includes(b.key);
           const name = b.index < 0 ? "the source" : b.title;
           const gap = b.index + 1;
           const drop = drag?.gaps.get(gap);
@@ -135,7 +139,7 @@ export function Strip(props: {
             <Fragment key={b.key}>
               <div
                 data-key={b.key}
-                className={["box", selected ? "sel" : "", b.enabled ? "" : "off", b.index < 0 ? "source" : "", drag?.from === b.index ? "dragging" : ""].join(" ")}
+                className={["box", selected ? "sel" : "", pinned ? "pinned" : "", b.enabled ? "" : "off", b.index < 0 ? "source" : "", drag?.from === b.index ? "dragging" : ""].join(" ")}
                 style={{ "--in": stageVar(b.input), "--out": stageVar(b.output) } as CSSProperties}
                 onClick={() => props.onSelect(b.key)}
                 draggable={b.index >= 0}
@@ -143,11 +147,12 @@ export function Strip(props: {
                   if (b.index < 0) return;
                   e.dataTransfer.effectAllowed = "move";
                   e.dataTransfer.setData("text/plain", b.key);
+                  e.dataTransfer.setData(STEP_DRAG, b.key);
                   startDrag(b.index);
                 }}
                 onDragEnd={endDrag}
               >
-                <button className="pick" aria-pressed={selected} aria-label={`Show ${name}`} title={`Show ${name} on the canvas, with its settings`}>
+                <button className="pick" aria-pressed={selected} aria-label={`Show ${name}${pinned ? " (pinned)" : ""}`} title={`Show ${name} on the canvas, with its settings`}>
                   <span className={`band${changes ? "" : " same"}`} title={changes ? `${STAGE_NAMES[b.input]} in, ${STAGE_NAMES[b.output]} out` : STAGE_NAMES[b.output]}>
                     {changes ? `→ ${STAGE_NAMES[b.output]}` : STAGE_NAMES[b.output]}
                   </span>
@@ -159,6 +164,7 @@ export function Strip(props: {
                       {b.icon}
                     </span>
                     <span className="name">{b.title}</span>
+                    {pinned && <span className="pin-mark" title="Pinned: its settings stay in the sidebar" aria-hidden="true" />}
                   </span>
                   {b.status === "waiting" && <span className="box-note">Not run yet: traced order</span>}
                   {b.status === "off" && <span className="box-note">Switched off</span>}

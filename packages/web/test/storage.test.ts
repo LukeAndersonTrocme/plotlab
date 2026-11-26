@@ -18,6 +18,7 @@ const cp = (id: string, sourceHash: string, createdAt = 1): Checkpoint => ({ id,
  *   ProjectStore                <project>/
  *     getSource                 source.<ext> (type ↔ extension)
  *     get/setRecipe             recipe.json (savedAt ↔ the file's modified time)
+ *     get/setView               view.json: the view block (pins, later the comparison)
  *     put/get/list/deleteCheckpoint   checkpoints/<id>.json (holds the source hash)
  *     getThumbnail              checkpoints/<id>.png
  */
@@ -68,6 +69,26 @@ describe.each(adapters)("storage contract: %s adapter", (_name, open) => {
     expect(await fresh.listCheckpoints()).toEqual([]);
     expect(await fresh.getRecipe()).toBeUndefined();
     expect(await fresh.getThumbnail("c1")).toBeUndefined();
+  });
+
+  it("keeps each project's view block beside its recipe, apart from it", async () => {
+    const lib = await open();
+    const a = (await lib.openProject((await lib.createProject(src("a.png", 1))).id))!;
+    const b = (await lib.openProject((await lib.createProject(src("b.png", 2))).id))!;
+    expect(await a.getView()).toBeUndefined();
+    await a.setRecipe({ recipe: { r: 1 }, savedAt: 1 });
+    await a.setView({ version: 1, pins: ["fill"] });
+    expect(await a.getView()).toEqual({ version: 1, pins: ["fill"] });
+    expect(await b.getView()).toBeUndefined();
+    // Saving the view is not a recipe edit and makes no checkpoint.
+    expect(await a.getRecipe()).toEqual({ recipe: { r: 1 }, savedAt: 1 });
+    expect(await a.listCheckpoints()).toEqual([]);
+    await a.setView({ version: 1, pins: [] });
+    expect(await (await lib.openProject(a.id))!.getView()).toEqual({ version: 1, pins: [] });
+    // It goes with the project.
+    await lib.deleteProject(a.id);
+    await lib.createProject(src("a.png", 1));
+    expect(await (await lib.openProject(a.id))!.getView()).toBeUndefined();
   });
 
   it("remembers the last opened project", async () => {
@@ -124,6 +145,12 @@ describe.each(adapters)("storage contract: %s adapter", (_name, open) => {
     (await p.getThumbnail("k"))![0] = 0;
     expect(await p.getCheckpoint("k")).toEqual(cp("k", p.id));
     expect([...(await p.getThumbnail("k"))!]).toEqual([5]);
+
+    const view = { version: 1, pins: ["a"] };
+    await p.setView(view);
+    view.pins.push("b");
+    ((await p.getView()) as { pins: string[] }).pins.push("c");
+    expect(await p.getView()).toEqual({ version: 1, pins: ["a"] });
   });
 });
 
@@ -155,6 +182,44 @@ describe("indexeddb adapter", () => {
     expect(await p.getRecipe()).toEqual({ recipe: { r: 1 }, savedAt: 2 });
     expect([...(await p.getSource()).bytes]).toEqual([5, 6]);
     expect(lib2.persistent).toBe(true);
+  });
+
+  it("survives a reload with the view block", async () => {
+    const factory = new IDBFactory();
+    const lib1 = await indexedDbLibrary({ factory });
+    const { id } = await lib1.createProject(src("p.png", 5, 6));
+    await (await lib1.openProject(id))!.setView({ version: 1, pins: ["order"] });
+    const lib2 = await indexedDbLibrary({ factory });
+    expect(await (await lib2.openProject(id))!.getView()).toEqual({ version: 1, pins: ["order"] });
+  });
+
+  it("upgrades a database from before view blocks, keeping everything in it", async () => {
+    const factory = new IDBFactory();
+    // The version-1 layout, as the previous build made it.
+    const open1 = factory.open("plotlab", 1);
+    open1.onupgradeneeded = () => {
+      const d = open1.result;
+      d.createObjectStore("projects", { keyPath: "id" });
+      d.createObjectStore("sources");
+      d.createObjectStore("recipes");
+      d.createObjectStore("checkpoints", { keyPath: "id" }).createIndex("byProject", "sourceHash");
+      d.createObjectStore("thumbnails");
+      d.createObjectStore("kv");
+    };
+    const db = await new Promise<IDBDatabase>((r) => (open1.onsuccess = () => r(open1.result)));
+    const t = db.transaction(["projects", "sources", "recipes"], "readwrite");
+    t.objectStore("projects").put({ id: "p1", name: "old.png", type: "image/png" });
+    t.objectStore("sources").put(bytes(1), "p1");
+    t.objectStore("recipes").put({ recipe: { old: true }, savedAt: 3 }, "p1");
+    await new Promise((r) => (t.oncomplete = r));
+    db.close();
+
+    const lib = await indexedDbLibrary({ factory });
+    const p = (await lib.openProject("p1"))!;
+    expect(await p.getRecipe()).toEqual({ recipe: { old: true }, savedAt: 3 });
+    expect(await p.getView()).toBeUndefined();
+    await p.setView({ version: 1, pins: ["x"] });
+    expect(await p.getView()).toEqual({ version: 1, pins: ["x"] });
   });
 
   it("rejects with an Error when IndexedDB isn't there", async () => {

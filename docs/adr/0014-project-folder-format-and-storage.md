@@ -14,6 +14,7 @@ the project will go.
 <project>/
   source.<ext>          the source image (optional in a share; see below)
   recipe.json           current state
+  view.json             the view block: pinned steps (later the comparison); not the recipe
   checkpoints/
     <timestamp>-<slug>.json   recipe + name + note + source hash
     <timestamp>-<slug>.png    thumbnail (~160 px capture of the main view)
@@ -37,6 +38,14 @@ workflow: checkpoints, Library, bundle import/export. Chrome-family browsers add
 connected folder and WebSerial plotter control. Capabilities are feature-checked; where
 one is missing the UI shows a short note ("Connect a folder: available in Chrome"),
 never a broken button. Chrome is the assumed desktop browser for now.
+
+**The view block** (2026-11-26, #71): `view.json` holds what the screen keeps per project:
+pinned steps now, the comparison next. It's `{ "version": 1, "pins": [<step id>…] }`, has its
+own version, and isn't in `recipe.json` or in checkpoints, so changing it is not a recipe
+edit (no Back step, no checkpoint), and a recipe shared alone doesn't carry anyone's
+workspace. A reader ignores what it can't read and keeps fields it doesn't know. Device
+preferences (the thumbnail size) stay in the browser. The IndexedDB adapter keeps it in a
+`views` store (database version 2).
 
 ## Consequences
 - The source image now survives a reload (IndexedDB), fixing the recipe-only autosave.

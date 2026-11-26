@@ -1,4 +1,4 @@
-import { checkChain, STAGE_WORDS, type ChainResult, type Recipe, type StageKind, type StepRegistry } from "@plotlab/engine";
+import { checkChain, removeStep, STAGE_WORDS, type ChainResult, type Recipe, type StageKind, type StepRegistry } from "@plotlab/engine";
 
 /**
  * The step strip (#66): one box per step plus the source, each showing a thumbnail of that
@@ -25,6 +25,9 @@ const ICONS: Record<string, string> = {
   fill: "▤",
   order: "↝",
 };
+/** The drag data a strip box carries: its step id. The sidebar takes it to pin that step. */
+export const STEP_DRAG = "application/x-plotlab-step";
+
 export const SOURCE_ICON = "▣";
 export const stepIcon = (step: string) => ICONS[step] ?? "•";
 
@@ -46,7 +49,10 @@ export interface StripBox {
   output: StageKind;
   enabled: boolean;
   status: BoxStatus;
-  /** Whether the bypass toggle works here, and why not; null for the source (it has none). */
+  /**
+   * Whether the bypass toggle works here, and why not; null for the source (it has none).
+   * A stage-changing step can't be switched off, but one that is off can be tried back on.
+   */
   bypass: { ok: true } | { ok: false; reason: string } | null;
 }
 
@@ -64,7 +70,7 @@ export function stripBoxes(recipe: Recipe, registry: StepRegistry, run: { steps:
     const enabled = rs.enabled !== false;
     const status: BoxStatus = !enabled ? "off" : ran.has(index) ? "ran" : index >= firstStale ? "waiting" : "none";
     const bypass =
-      input === output
+      input === output || !enabled
         ? { ok: true as const }
         : {
             ok: false as const,
@@ -75,7 +81,10 @@ export function stripBoxes(recipe: Recipe, registry: StepRegistry, run: { steps:
   return boxes;
 }
 
-/** Switch a step off (bypass) or back on. Steps that change stage can't be; nor can a step go on where it doesn't fit. */
+/**
+ * Switch a step off (bypass) or back on: the strip's toggle and the sidebar's Switch off both
+ * use this. Steps that change stage can't be switched off; nor can a step go on where it doesn't fit.
+ */
 export function toggleBypass(recipe: Recipe, index: number, registry: StepRegistry): ChainResult {
   const rs = recipe.steps[index];
   const def = rs && registry.get(rs.step);
@@ -87,6 +96,12 @@ export function toggleBypass(recipe: Recipe, index: number, registry: StepRegist
   const issue = checkChain(recipe.input, steps, registry)[0];
   if (issue) return { reason: `${on ? "Turning on" : "Switching off"} ${def.title} would break the chain: ${issue.reason}` };
   return { recipe: { ...recipe, steps } };
+}
+
+/** Whether Remove works on the step at `index`, and why not (it would break the chain). */
+export function removeCheck(recipe: Recipe, index: number, registry: StepRegistry): { ok: true } | { ok: false; reason: string } {
+  const res = removeStep(recipe, index, registry);
+  return "reason" in res ? { ok: false, reason: res.reason } : { ok: true };
 }
 
 /**

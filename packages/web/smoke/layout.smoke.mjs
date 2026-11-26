@@ -216,6 +216,81 @@ try {
     await page.close();
   }
 
+  // Pinned steps: pin by button and by dragging a box onto the sidebar; the step being
+  // looked at stays on top; pins are marked in the strip, come back after a reload, aren't
+  // a Back step, and go when their step is removed.
+  {
+    const page = await open(1280);
+    const cards = () => page.$$eval("aside.side .card.step", (els) => els.map((e) => e.dataset.step + (e.classList.contains("focus") ? "*" : "")));
+    const backOff = () => page.$eval("header.top button[aria-label=Back]", (b) => b.disabled);
+    const pick = async (key) => {
+      await page.click(`.strip .box[data-key="${key}"] .pic`);
+      await page.waitForSelector(`aside.side .card.step.focus[data-step="${key}"]`, { timeout: 10_000 });
+    };
+    check(await backOff(), "pins: a fresh page has nothing to go Back to");
+
+    await pick("threshold");
+    await page.click('aside.side .card.focus .pin-btn');
+    await page.waitForSelector('.strip .box[data-key="threshold"].pinned .pin-mark', { timeout: 5_000 });
+    check((await page.getAttribute("aside.side .card.focus .pin-btn", "aria-pressed")) === "true", "the Pin button pins the step and its box gets a mark in the strip");
+    check((await cards()).join(",") === "threshold*" && /pinned too/.test(await page.textContent("aside.side .steps")), `the selected step stays on top when pinned, shown once (${(await cards()).join(",")})`);
+
+    await pick("centerline");
+    check((await cards()).join(",") === "centerline*,threshold", `looking at another step: it on top, the pinned one below (${(await cards()).join(",")})`);
+
+    // Drag the Stroke order box onto the sidebar.
+    const b0 = await (await page.$('.strip .box[data-key="order"] .pic')).boundingBox();
+    // Anywhere on the sidebar takes it (its drop note may be scrolled out of sight).
+    const side = await (await page.$("aside.side")).boundingBox();
+    const drop = { x: side.x, y: side.y + 60, width: side.width, height: 100 };
+    await page.mouse.move(b0.x + b0.width / 2, b0.y + b0.height / 2);
+    await page.mouse.down();
+    await page.mouse.move(b0.x + b0.width / 2 + 10, b0.y + b0.height / 2, { steps: 4 });
+    await page.mouse.move(drop.x + drop.width / 2, drop.y + drop.height / 2, { steps: 8 });
+    await page.mouse.up();
+    await page.waitForSelector('.strip .box[data-key="order"].pinned', { timeout: 5_000 }).catch(() => {});
+    check((await cards()).join(",") === "centerline*,threshold,order", `dragging a box onto the sidebar pins it; pinned steps in recipe order (${(await cards()).join(",")})`);
+    check(await backOff(), "pinning is not a Back step");
+
+    // Story 26: Remove is off, with a reason, where it would break the chain; Switch off agrees with the strip.
+    const actions = await page.$eval("aside.side .card.focus", (c) => ({
+      remove: c.querySelector(".step-actions button:nth-child(3)").disabled,
+      reason: c.querySelector(".reason")?.textContent ?? "",
+      off: c.querySelector(".step-actions button:nth-child(1)").disabled,
+    }));
+    const strip = await page.getAttribute('.strip .box[data-key="centerline"] .byp', "aria-disabled");
+    check(actions.remove && /Removing Centerline would break the chain/.test(actions.reason), `Remove is off with a reason when it would break the chain ("${actions.reason}")`);
+    check(actions.off === (strip === "true"), `Switch off in the sidebar agrees with the strip's toggle (both ${actions.off ? "off" : "on"})`);
+
+    // A reload brings the pins back (the selection isn't kept: every step shows).
+    await page.reload();
+    await page.waitForSelector(".stats .big", { timeout: 60_000 });
+    await page.waitForSelector('.strip .box[data-key="order"].pinned', { timeout: 10_000 }).catch(() => {});
+    const marks = await page.$$eval(".strip .box.pinned", (els) => els.map((e) => e.dataset.key));
+    check(marks.join(",") === "threshold,order", `pins come back after a reload (${marks.join(", ")})`);
+    await pick("centerline");
+    check((await cards()).join(",") === "centerline*,threshold,order", "after the reload the pinned steps are in the sidebar again");
+
+    // Unpin from a pinned card.
+    await page.click('aside.side .card.step[data-step="threshold"] .pin-btn');
+    await page.waitForSelector('.strip .box[data-key="threshold"]:not(.pinned)', { timeout: 5_000 });
+    check((await cards()).join(",") === "centerline*,order", "Pinned on a pinned card unpins it");
+
+    // Removing a pinned step removes its pin: the same step added again isn't pinned.
+    await page.click('.strip .gap[data-gap="1"] .plus');
+    await page.click('.add-menu [role=menuitem][data-step="pixelate"]');
+    await page.waitForSelector('aside.side .card.step.focus[data-step="pixelate"]', { timeout: 10_000 });
+    await page.click('aside.side .card.focus .pin-btn');
+    await page.waitForSelector('.strip .box[data-key="pixelate"].pinned', { timeout: 5_000 });
+    await page.click('aside.side .card.focus .step-actions button:has-text("Remove")');
+    await page.waitForSelector('.strip .box[data-key="pixelate"]', { state: "detached", timeout: 5_000 });
+    await page.click('.strip .gap[data-gap="1"] .plus');
+    await page.click('.add-menu [role=menuitem][data-step="pixelate"]');
+    await page.waitForSelector('.strip .box[data-key="pixelate"]', { timeout: 10_000 });
+    check(!(await page.$('.strip .box[data-key="pixelate"].pinned')), "removing a pinned step removes its pin (a new Pixelate, same id, isn't pinned)");
+    await page.close();
+  }
+
   // Presets and checkpoints: the gallery draws each preset on your photo; picking one saves
   // a checkpoint first; Save checkpoint and ⌘S / Ctrl+S save at once with a confirmation;
   // restoring saves where you are first.

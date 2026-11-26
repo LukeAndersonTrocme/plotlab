@@ -3,7 +3,7 @@
  * recipe and its checkpoints, the same thing a project folder or a bundle holds.
  *
  *   Library        all projects: list, create (from a source), open, delete
- *   ProjectStore   one project:  source.<ext>, recipe.json, checkpoints/<id>.json + .png
+ *   ProjectStore   one project:  source.<ext>, recipe.json, view.json, checkpoints/<id>.json + .png
  *
  * Adapters: IndexedDB (every browser) and memory (tests; the fallback when IndexedDB is
  * blocked). A connected folder (#7) and a desktop file system (ADR 0013) come later and
@@ -56,6 +56,12 @@ export interface ProjectStore {
   getSource(): Promise<Source>;
   getRecipe(): Promise<SavedRecipe | undefined>;
   setRecipe(saved: SavedRecipe): Promise<void>;
+  /**
+   * view.json: the project's view block (pinned steps; later the comparison), plain JSON that
+   * `view.ts` reads. Kept beside the recipe, not in it: saving it is not a recipe edit.
+   */
+  getView(): Promise<unknown | undefined>;
+  setView(view: unknown): Promise<void>;
   /** Adds or replaces a checkpoint. Without a thumbnail, any stored one is kept. */
   putCheckpoint(checkpoint: Checkpoint, thumbnail?: Uint8Array): Promise<void>;
   getCheckpoint(id: string): Promise<Checkpoint | undefined>;
@@ -73,7 +79,7 @@ export interface Library {
   /** The project for this source: new, or the existing one if these bytes were opened before. */
   createProject(source: NewSource): Promise<ProjectInfo>;
   openProject(id: ProjectId): Promise<ProjectStore | undefined>;
-  /** Removes the project with its source, recipe and checkpoints. */
+  /** Removes the project with its source, recipe, view block and checkpoints. */
   deleteProject(id: ProjectId): Promise<void>;
   /** Which project to reopen after a reload (a browser preference, not part of the format). */
   getLastOpened(): Promise<ProjectId | undefined>;

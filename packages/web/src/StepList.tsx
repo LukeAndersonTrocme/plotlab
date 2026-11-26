@@ -1,6 +1,5 @@
 import { useState } from "react";
 import {
-  checkChain,
   isChanged,
   isVisible,
   moveStep,
@@ -19,18 +18,33 @@ import { LayerScope } from "./LayerScope.tsx";
 import { ParamControl } from "./ParamControl.tsx";
 import { splitSettings } from "./settings.ts";
 import type { InspectTarget, StepInfo } from "./protocol.ts";
-import { STAGE_NAMES } from "./strip.ts";
+import { removeCheck, STAGE_NAMES, toggleBypass } from "./strip.ts";
+
+/** Which cards the sidebar shows, by chain position (from `sidebarSteps` in view.ts). */
+export interface SidebarCards {
+  /** The step being looked at, on top with its actions; null for the source. */
+  looking: number | null;
+  /** The other pinned steps, in recipe order. */
+  pinned: number[];
+  lookingPinned: boolean;
+}
 
 /**
  * The chain as one ordered list (ADR 0009): stage dividers where the data type changes,
  * drag (or ↑/↓) to reorder within the type rules, remove, disable. Steps are added with the
  * strip's "+" (Strip.tsx), which offers only the steps that fit at that point.
- * With `only`, just that step's card: the step picked in the strip.
+ * With `cards`, the sidebar's working view instead: the step being looked at (with Switch
+ * off, Branch from here and Remove), then the pinned steps and a place to drop more.
  */
 export function StepList(props: {
   recipe: Recipe;
-  /** Show only the step at this chain position. */
-  only?: number;
+  /** Show these cards instead of every step. */
+  cards?: SidebarCards;
+  /** Ids of the pinned steps. */
+  pins: readonly string[];
+  onPin: (id: string) => void;
+  /** Save a checkpoint before trying something else from this step on; null when checkpoints are off. */
+  onBranch: ((index: number) => void) | null;
   registry: StepRegistry;
   steps: StepInfo[];
   stale: number[];
@@ -59,6 +73,11 @@ export function StepList(props: {
     const layer = editing[index] ?? null;
     if (layer === null) patchStep(index, { params: { ...rs.params, [name]: value } }, proxy);
     else patchStep(index, { layerParams: { ...rs.layerParams, [layer]: { ...rs.layerParams?.[layer], [name]: value } } }, proxy);
+  };
+  /** Whether Switch off / on works for the step at `index` (the same rule as the strip's toggle). */
+  const bypassCheck = (index: number): { ok: true } | { ok: false; reason: string } => {
+    const res = toggleBypass(recipe, index, registry);
+    return "reason" in res ? { ok: false, reason: res.reason } : { ok: true };
   };
   /** Layers arriving at step `index`: the output of the last step before it that ran. */
   const inputLayers = (index: number): LayerInfo[] => [...props.steps].reverse().find((s) => s.index < index)?.layers ?? [];
@@ -90,14 +109,20 @@ export function StepList(props: {
       Object.keys(rs.layerParams ?? {}).length > 0 || Object.entries(def.params).some(([n, d]) => isChanged(d as ParamDecl, rs.params[n]));
     const stale = props.stale.includes(index);
     const ran = props.steps.some((s) => s.index === index);
+    const pinned = props.pins.includes(rs.id);
+    const focused = props.cards?.looking === index;
+    const bypass = bypassCheck(index);
+    const remove = removeCheck(recipe, index, registry);
     items.push(
       <div
         key={`s${index}`}
+        data-step={rs.id}
         className={[
           "card step",
           enabled ? "" : "disabled",
           props.error?.index === index ? "has-error" : "",
           props.inspect === index ? "inspected" : "",
+          focused ? "focus" : "",
           dragFrom === index ? "dragging" : "",
         ].join(" ")}
         onDragOver={(e) => dragFrom !== null && e.preventDefault()}
@@ -140,17 +165,16 @@ export function StepList(props: {
             >
               ↓
             </button>
-            <input
-              type="checkbox"
-              title={enabled ? "On (untick to skip this step)" : "Skipped"}
-              checked={enabled}
-              onChange={(e) => {
-                const steps = recipe.steps.map((s, i) => (i === index ? { ...s, enabled: e.target.checked, offForEntry: undefined } : s));
-                const issue = checkChain(recipe.input, steps, registry)[0];
-                if (issue) props.onNotice(`${e.target.checked ? "Turning on" : "Skipping"} ${def.title} would break the chain: ${issue.reason}`);
-                else props.onChange({ ...recipe, steps }, false);
-              }}
-            />
+            {!focused && (
+              <input
+                type="checkbox"
+                aria-label={`${enabled ? "Switch off" : "Switch on"} ${def.title}`}
+                title={bypass.ok ? (enabled ? "On (untick to switch this step off)" : "Switched off") : bypass.reason}
+                checked={enabled}
+                disabled={!bypass.ok}
+                onChange={() => commit(toggleBypass(recipe, index, registry))}
+              />
+            )}
             {stepChanged && (
               <button
                 className="icon"
@@ -164,12 +188,53 @@ export function StepList(props: {
             <button className="help-btn" onClick={() => props.onHelp(def)} aria-label={`Help for ${def.title}`}>
               ?
             </button>
-            <button className="icon" aria-label={`Remove ${def.title}`} onClick={() => commit(removeStep(recipe, index, registry))}>
-              ✕
+            <button
+              className="pin-btn"
+              aria-pressed={pinned}
+              aria-label={`${pinned ? "Unpin" : "Pin"} ${def.title}`}
+              title={pinned ? "Unpin: stop keeping these settings in the sidebar" : "Pin: keep these settings in the sidebar while you look at other steps"}
+              onClick={() => props.onPin(rs.id)}
+            >
+              {pinned ? "Pinned" : "Pin"}
             </button>
+            {!focused && (
+              <button
+                className="icon"
+                aria-label={`Remove ${def.title}`}
+                disabled={!remove.ok}
+                title={remove.ok ? `Remove ${def.title}` : remove.reason}
+                onClick={() => commit(removeStep(recipe, index, registry))}
+              >
+                ✕
+              </button>
+            )}
           </span>
         </div>
         <p className="summary">{def.summary}</p>
+        {focused && (
+          <>
+            <div className="step-actions">
+              <button
+                disabled={!bypass.ok}
+                title={bypass.ok ? (enabled ? "Skip this step and see what the chain does without it" : "Put this step back in the chain") : bypass.reason}
+                onClick={() => commit(toggleBypass(recipe, index, registry))}
+              >
+                {enabled ? "Switch off" : "Switch on"}
+              </button>
+              <button
+                disabled={!props.onBranch}
+                title={props.onBranch ? "Save this version as a checkpoint, then try something else from this step on" : "Checkpoints are off for this image"}
+                onClick={() => props.onBranch?.(index)}
+              >
+                Branch from here
+              </button>
+              <button disabled={!remove.ok} title={remove.ok ? `Take ${def.title} out of the recipe (Back undoes it)` : remove.reason} onClick={() => commit(removeStep(recipe, index, registry))}>
+                Remove
+              </button>
+            </div>
+            {!remove.ok && <p className="reason">{remove.reason}</p>}
+          </>
+        )}
         {enabled && layerStep && (
           <LayerScope
             step={rs}
@@ -223,9 +288,26 @@ export function StepList(props: {
     );
   });
 
-  if (props.only !== undefined) {
-    const card = items.find((el) => el.key === `s${props.only}`);
-    return <div className="steps">{card}</div>;
+  const c = props.cards;
+  if (c) {
+    const card = (i: number) => items.find((el) => el.key === `s${i}`);
+    const lookingTitle = c.looking !== null ? (registry.get(recipe.steps[c.looking]?.step ?? "")?.title ?? "This step") : "";
+    const count = c.pinned.length + (c.lookingPinned ? 1 : 0);
+    return (
+      <div className="steps">
+        {c.looking !== null && card(c.looking)}
+        <div className="side-label pinned-label">
+          Pinned{count > 0 && <span className="num">{count}</span>}
+        </div>
+        {c.lookingPinned && <p className="hint">{lookingTitle} is pinned too; its settings are at the top.</p>}
+        {c.pinned.map(card)}
+        <div className="pin-drop">
+          {c.pinned.length || c.lookingPinned
+            ? "Drop another box from the strip here to pin it."
+            : "Pin steps to keep their settings here while you look at other steps: press Pin on a step, or drag its box from the strip onto this panel."}
+        </div>
+      </div>
+    );
   }
 
   return (
