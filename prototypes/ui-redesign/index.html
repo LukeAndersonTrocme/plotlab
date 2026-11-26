@@ -1,0 +1,1575 @@
+<title>plotlab layout prototype</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<!--
+  PROTOTYPE, throwaway. Question: does the agreed plotlab layout (Design/Page/Plot modes,
+  setup chip, bottom thumbnail strip, phone viewer) feel right on a laptop and a phone?
+  Three variants of where a step's settings open, switchable via #variant-a / #variant-b /
+  #variant-c, plus #phone for the phone viewer. Fake engine on a 160x160 grid; nothing is saved.
+-->
+<style>
+/* Layout: header (modes + setup chip) / canvas + optional sidebar / step strip along the bottom. */
+:root {
+  --bg: #f4f2ee; --panel: #ffffff; --ink: #1d1d1b; --muted: #6b6860; --line: #dedad2;
+  --accent: #2f5d8a; --accent-ink: #ffffff; --warn: #a8361a; --ok: #2f7d4f;
+  --chip: #ebe7df; --canvas-bg: #e6e2da; --shadow: rgba(30, 25, 15, 0.16);
+  --st-image: #b7791f; --st-field: #2a8a7a; --st-geometry: #3b62b0; --st-toolpath: #b0405a;
+  --proto: #1d1d1b; --proto-ink: #fffdf8;
+  --thumb: 96px;
+  --font: system-ui, -apple-system, "Segoe UI", sans-serif;
+  --mono: ui-monospace, "SF Mono", Menlo, monospace;
+}
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) {
+  --bg: #1b1a18; --panel: #24231f; --ink: #ece8df; --muted: #a39e93; --line: #3a3833;
+  --accent: #7fa8d4; --accent-ink: #10151b; --warn: #e2876d; --ok: #6cc08e;
+  --chip: #2e2c28; --canvas-bg: #141311; --shadow: rgba(0, 0, 0, 0.5);
+  --st-image: #d9a24a; --st-field: #4fb8a6; --st-geometry: #7d9be0; --st-toolpath: #e07a92;
+  --proto: #fffdf8; --proto-ink: #1d1d1b; color-scheme: dark;
+} }
+:root[data-theme="dark"] {
+  --bg: #1b1a18; --panel: #24231f; --ink: #ece8df; --muted: #a39e93; --line: #3a3833;
+  --accent: #7fa8d4; --accent-ink: #10151b; --warn: #e2876d; --ok: #6cc08e;
+  --chip: #2e2c28; --canvas-bg: #141311; --shadow: rgba(0, 0, 0, 0.5);
+  --st-image: #d9a24a; --st-field: #4fb8a6; --st-geometry: #7d9be0; --st-toolpath: #e07a92;
+  --proto: #fffdf8; --proto-ink: #1d1d1b; color-scheme: dark;
+}
+html, body { height: 100%; }
+* { box-sizing: border-box; }
+body { margin: 0; background: var(--bg); color: var(--ink); font-family: var(--font); font-size: 14px; overflow: hidden; }
+button, select, input { font: inherit; color: inherit; }
+button { border: 1px solid var(--line); background: var(--panel); border-radius: 6px; padding: 5px 10px; cursor: pointer; }
+button:hover:not(:disabled) { border-color: var(--muted); }
+button:disabled { opacity: 0.45; cursor: not-allowed; }
+button.primary { background: var(--accent); color: var(--accent-ink); border-color: var(--accent); }
+:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+select { border: 1px solid var(--line); background: var(--panel); border-radius: 6px; padding: 4px 6px; }
+.muted { color: var(--muted); }
+.num { font-family: var(--mono); font-variant-numeric: tabular-nums; }
+
+/* ---------- desktop app ---------- */
+#app { display: grid; grid-template-rows: auto minmax(0, 1fr) auto auto; grid-template-columns: minmax(0, 1fr); height: 100%; }
+#app > * { min-width: 0; }
+header.top { display: flex; align-items: center; gap: 14px; padding: 8px max(16px, env(safe-area-inset-right, 0px)) 8px max(16px, env(safe-area-inset-left, 0px)); background: var(--panel); border-bottom: 1px solid var(--line); min-width: 0; }
+.brand { font-size: 17px; letter-spacing: 0.02em; font-weight: 600; }
+.project { display: flex; align-items: center; gap: 6px; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
+.version { font-size: 11px; border: 1px solid var(--line); border-radius: 10px; padding: 1px 7px; color: var(--ink); }
+.modes { display: flex; background: var(--chip); border-radius: 8px; padding: 3px; margin-left: auto; }
+.modes button { border: 0; background: transparent; padding: 5px 16px; border-radius: 6px; color: var(--muted); }
+.modes button[aria-pressed="true"] { background: var(--panel); color: var(--ink); box-shadow: 0 1px 2px var(--shadow); font-weight: 600; }
+.setup-chip { display: inline-flex; gap: 6px; align-items: center; border-radius: 16px; background: var(--chip); border: 1px solid transparent; white-space: nowrap; }
+.setup-chip:hover { border-color: var(--line); }
+.setup-chip .dot { width: 9px; height: 9px; border-radius: 50%; display: inline-block; }
+.top-right { display: flex; gap: 8px; margin-left: auto; align-items: center; }
+.menu-wrap { position: relative; }
+.menu { position: absolute; right: 0; top: calc(100% + 6px); width: 300px; background: var(--panel); border: 1px solid var(--line); border-radius: 10px; box-shadow: 0 8px 24px var(--shadow); padding: 8px; z-index: 30; }
+.menu h4 { margin: 4px 6px 8px; font-size: 12px; text-transform: uppercase; letter-spacing: 0.08em; color: var(--muted); }
+.cp { display: flex; gap: 10px; align-items: center; padding: 6px; border-radius: 8px; cursor: pointer; border: 0; background: none; width: 100%; text-align: left; }
+.cp:hover { background: var(--chip); }
+.cp canvas { width: 44px; height: 44px; border-radius: 4px; border: 1px solid var(--line); flex: none; }
+.cp .t { font-weight: 600; }
+.cp .s { font-size: 12px; color: var(--muted); }
+
+main.work { display: grid; grid-template-columns: minmax(0, 1fr) auto; min-height: 0; }
+.stage-area { position: relative; min-width: 0; min-height: 0; background: var(--canvas-bg); }
+#main-canvas { position: absolute; inset: 0; width: 100%; height: 100%; touch-action: none; }
+.overlay { position: absolute; display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+.overlay.tl { top: 12px; left: 12px; right: 12px; }
+.overlay.tr { bottom: 12px; right: 12px; justify-content: flex-end; }
+.viewing { background: var(--panel); border: 1px solid var(--line); border-radius: 8px; padding: 5px 10px; display: flex; gap: 8px; align-items: center; }
+.stats { background: var(--panel); border: 1px solid var(--line); border-radius: 8px; padding: 5px 10px; display: flex; gap: 14px; align-items: baseline; }
+.stats .big { font-size: 18px; }
+.pill { font-size: 11px; padding: 1px 7px; border-radius: 9px; color: var(--panel); background: var(--st, var(--muted)); font-weight: 600; letter-spacing: 0.02em; white-space: nowrap; }
+.toggle-btn[aria-pressed="true"] { background: var(--ink); color: var(--panel); border-color: var(--ink); }
+
+aside.side { width: 320px; overflow-y: auto; background: var(--panel); border-left: 1px solid var(--line); padding: 14px 16px; }
+aside.side[hidden] { display: none; }
+
+/* settings panel (shared between the three variants) */
+.settings h3 { margin: 0; font-size: 16px; display: flex; align-items: center; gap: 8px; }
+.settings .sub { color: var(--muted); font-size: 12px; margin: 4px 0 10px; display: flex; gap: 6px; align-items: center; flex-wrap: wrap; }
+.settings .row-actions { display: flex; gap: 6px; flex-wrap: wrap; margin: 10px 0 4px; }
+.settings .row-actions button { font-size: 12px; padding: 4px 8px; }
+.settings .blurb { font-size: 13px; color: var(--muted); background: var(--chip); border-radius: 8px; padding: 8px 10px; margin: 8px 0; }
+.param { margin: 12px 0; }
+.param label { display: flex; justify-content: space-between; font-size: 13px; margin-bottom: 4px; gap: 8px; }
+.param input[type="range"] { width: 100%; accent-color: var(--accent); }
+.param.bool label { justify-content: flex-start; gap: 8px; cursor: pointer; }
+.seed-row { display: flex; gap: 6px; align-items: center; }
+.seed-row input { width: 90px; border: 1px solid var(--line); border-radius: 6px; padding: 4px 6px; background: var(--panel); }
+details.more { border-top: 1px solid var(--line); margin-top: 12px; padding-top: 8px; }
+details.more summary { cursor: pointer; color: var(--accent); font-size: 13px; }
+.reason { font-size: 12px; color: var(--muted); }
+.settings.horizontal .params { display: flex; gap: 24px; flex-wrap: wrap; align-items: flex-start; }
+.settings.horizontal .param { width: 220px; margin: 4px 0; }
+.settings.horizontal details.more { border: 0; margin: 0; padding: 0; }
+.settings.horizontal details.more[open] { flex-basis: 100%; }
+.settings.horizontal details.more .inner { display: flex; gap: 24px; flex-wrap: wrap; }
+
+/* sidebar cards + pinning */
+.side-label { font-size: 12px; text-transform: uppercase; letter-spacing: 0.08em; color: var(--muted); margin: 4px 0 8px; display: flex; gap: 6px; }
+.side-label.pinned-label { margin-top: 18px; padding-top: 12px; border-top: 1px solid var(--line); }
+.card { border: 1px solid var(--line); border-radius: 10px; padding: 10px 12px; margin-bottom: 10px; background: var(--panel); }
+.card.focus { outline: 2px solid var(--accent); outline-offset: -1px; }
+.card.off { opacity: 0.6; }
+.card-head { display: flex; align-items: center; gap: 6px; }
+.card-title { border: 0; background: none; padding: 0; font-weight: 600; font-size: 15px; display: flex; gap: 6px; align-items: center; margin-right: auto; text-align: left; }
+.card-title:hover { color: var(--accent); }
+.card-title .ic { color: var(--muted); }
+.icon-btn { padding: 2px 8px; font-size: 12px; border-radius: 12px; }
+.icon-btn[aria-pressed="true"] { background: var(--ink); color: var(--panel); border-color: var(--ink); }
+.card .param { margin: 8px 0; }
+.pin-drop { border: 1px dashed var(--line); border-radius: 10px; padding: 14px; font-size: 13px; color: var(--muted); text-align: center; }
+body.dragging aside.side { background: color-mix(in srgb, var(--ok) 8%, var(--panel)); }
+body.dragging aside.side .pin-drop { border-color: var(--ok); color: var(--ok); }
+aside.side.over .pin-drop, aside.side.over { outline: 2px dashed var(--ok); outline-offset: -6px; }
+.pin-dot { width: 7px; height: 7px; border-radius: 50%; background: var(--accent); display: inline-block; }
+/* compare bar */
+.cmpbar { flex-basis: 100%; display: flex; gap: 6px; align-items: center; flex-wrap: wrap; background: var(--panel); border: 1px solid var(--line); border-radius: 8px; padding: 5px 8px; font-size: 13px; }
+.band-chip { display: inline-flex; align-items: center; gap: 2px; border-radius: 6px; padding: 1px 2px 1px 8px; background: color-mix(in srgb, var(--st) 22%, var(--panel)); border: 1px solid var(--st); }
+.band-chip select { border: 0; background: transparent; padding: 2px; }
+.band-chip button { border: 0; background: none; padding: 0 5px; color: var(--muted); }
+.cmpbar .sep { color: var(--muted); }
+.cmpbar .quick { margin-left: auto; display: flex; gap: 6px; }
+.cmpbar .quick button { font-size: 12px; padding: 3px 8px; }
+/* strip resize */
+.strip-grip { height: 10px; margin: -8px 0 2px; cursor: ns-resize; display: flex; justify-content: center; align-items: center; touch-action: none; }
+.strip-grip::before { content: ""; width: 44px; height: 4px; border-radius: 2px; background: var(--line); }
+.strip-grip:hover::before { background: var(--muted); }
+.size-btns { display: inline-flex; gap: 2px; align-items: center; }
+.size-btns button { padding: 1px 8px; font-size: 13px; }
+.cp-group { display: inline-flex; }
+.cp-group button:first-child { border-radius: 6px 0 0 6px; }
+.cp-group button:last-child { border-radius: 0 6px 6px 0; border-left: 0; }
+.menu .explain { font-size: 12px; color: var(--muted); margin: -4px 6px 8px; }
+
+/* CMYK lanes */
+.lanes { display: flex; align-items: center; gap: 10px; overflow-x: auto; padding: 4px 2px 6px; }
+.trunk { display: flex; align-items: center; gap: 6px; flex: none; }
+.trunk .arrow { color: var(--muted); font-size: 18px; }
+.lane-rows { display: flex; flex-direction: column; gap: 4px; flex: none; border-left: 2px solid var(--line); border-right: 2px solid var(--line); padding: 0 8px; }
+.lane { display: flex; align-items: center; border-radius: 8px; padding: 2px 4px; }
+.lane.over { outline: 2px dashed var(--ok); }
+.lane.hidden-lane { opacity: 0.4; }
+.lane-head { display: flex; align-items: center; gap: 4px; cursor: grab; margin-right: 4px; }
+.lane-head .grip { color: var(--muted); letter-spacing: -2px; }
+.lane-head .ink { width: 24px; height: 24px; border-radius: 50%; display: grid; place-items: center; font-weight: 700; font-size: 12px; }
+.box.small { width: calc(var(--thumb) * 0.5 + 12px); padding-bottom: 4px; }
+.box.small canvas { width: calc(var(--thumb) * 0.5); height: calc(var(--thumb) * 0.5); margin: 4px auto 0; }
+.box.small .band { font-size: 10px; height: 16px; padding: 1px 5px; letter-spacing: 0.01em; text-transform: none; white-space: nowrap; overflow: hidden; }
+.box.small .byp { top: 18px; width: 20px; height: 20px; font-size: 10px; }
+.lane .gap { width: 16px; }
+.lane .gap .plus { width: 18px; height: 18px; font-size: 12px; }
+.add-menu { max-height: 60vh; overflow-y: auto; }
+.proto-bar button[aria-pressed="true"] { background: color-mix(in srgb, var(--proto-ink) 22%, transparent); font-weight: 600; }
+.cmpbar .seg button { padding: 3px 9px; font-size: 12px; }
+
+.lane-head .inks4 { display: grid; grid-template-columns: 10px 10px; gap: 2px; }
+.lane-head .inks4 i { width: 10px; height: 10px; border-radius: 50%; }
+.box.wide .band { text-transform: none; font-size: 11px; letter-spacing: 0.01em; }
+.strip-head .seg button { font-size: 12px; padding: 2px 9px; }
+
+/* variant B popover, variant C drawer */
+#popover { position: fixed; width: 320px; max-height: 60vh; overflow-y: auto; background: var(--panel); border: 1px solid var(--line); border-radius: 12px; box-shadow: 0 12px 32px var(--shadow); padding: 14px 16px; z-index: 20; }
+#popover .x { position: absolute; top: 8px; right: 8px; border: 0; background: none; font-size: 18px; color: var(--muted); }
+#drawer { background: var(--panel); border-top: 1px solid var(--line); padding: 12px max(16px, env(safe-area-inset-right, 0px)) calc(12px + env(safe-area-inset-bottom, 0px)) max(16px, env(safe-area-inset-left, 0px)); max-height: 34vh; overflow-y: auto; }
+#drawer .settings { display: grid; grid-template-columns: 260px 1fr; gap: 24px; }
+
+/* ---------- the strip ---------- */
+.strip-wrap { background: var(--panel); border-top: 1px solid var(--line); padding: 8px max(16px, env(safe-area-inset-right, 0px)) 10px max(16px, env(safe-area-inset-left, 0px)); }
+.strip-head { display: flex; gap: 14px; align-items: center; font-size: 12px; color: var(--muted); margin-bottom: 6px; flex-wrap: wrap; }
+.strip-head strong { color: var(--ink); font-size: 13px; }
+.legend { display: flex; gap: 10px; }
+.legend span { display: inline-flex; align-items: center; gap: 4px; }
+.legend i { width: 10px; height: 10px; border-radius: 3px; background: var(--st); display: inline-block; }
+.hint { color: var(--accent); }
+.strip-head .end { margin-left: auto; display: flex; gap: 6px; }
+.strip { display: flex; align-items: stretch; overflow-x: auto; padding: 4px 2px 6px; scrollbar-width: thin; }
+.box { position: relative; flex: none; width: calc(var(--thumb) + 16px); border: 1px solid var(--line); border-radius: 8px; background: var(--panel); cursor: pointer; padding: 0 0 6px; user-select: none; transition: transform 0.12s; }
+.box:hover { border-color: var(--muted); }
+.box.sel { outline: 2px solid var(--accent); outline-offset: 1px; }
+.box .band { height: 18px; border-radius: 7px 7px 0 0; background: linear-gradient(90deg, var(--in) 0 50%, var(--out) 50% 100%); color: #fff; font-size: 10px; font-weight: 600; letter-spacing: 0.05em; text-transform: uppercase; padding: 2px 7px; display: flex; justify-content: space-between; }
+.box .band.same { background: var(--out); }
+.box canvas { display: block; width: var(--thumb); height: var(--thumb); margin: 6px auto 4px; border-radius: 3px; }
+.box .lbl { font-size: 12px; text-align: center; display: flex; gap: 5px; justify-content: center; align-items: center; padding: 0 4px; }
+.box .ic { font-size: 14px; color: var(--muted); }
+.box .byp { position: absolute; top: 22px; right: 4px; width: 24px; height: 24px; padding: 0; border-radius: 50%; font-size: 12px; line-height: 1; opacity: 0; transition: opacity 0.12s; background: var(--panel); }
+.box:hover .byp, .box.off .byp, .box .byp:focus-visible { opacity: 1; }
+.box.off canvas { opacity: 0.25; filter: grayscale(1); }
+.box.off .lbl { text-decoration: line-through; color: var(--muted); }
+.box.dragging { opacity: 0.4; }
+.box.source { cursor: pointer; }
+.gap { flex: none; width: 24px; display: flex; align-items: center; justify-content: center; transition: width 0.12s, background 0.12s; border-radius: 6px; }
+.gap .plus { width: 22px; height: 22px; padding: 0; border-radius: 50%; font-size: 14px; line-height: 1; opacity: 0.35; }
+.gap:hover .plus, .gap .plus:focus-visible { opacity: 1; }
+body.dragging .gap .plus { visibility: hidden; }
+body.dragging .gap.drop-ok { width: 46px; background: color-mix(in srgb, var(--ok) 18%, transparent); outline: 2px dashed var(--ok); outline-offset: -4px; }
+body.dragging .gap.drop-ok.over { background: color-mix(in srgb, var(--ok) 40%, transparent); }
+body.dragging .gap.drop-no { opacity: 0.3; }
+.add-menu { position: fixed; width: 260px; background: var(--panel); border: 1px solid var(--line); border-radius: 10px; box-shadow: 0 10px 28px var(--shadow); padding: 6px; z-index: 40; }
+.add-menu .h { font-size: 12px; color: var(--muted); padding: 6px 8px; }
+.add-menu button { display: flex; width: 100%; text-align: left; border: 0; gap: 10px; align-items: flex-start; padding: 7px 8px; background: none; }
+.add-menu button:hover { background: var(--chip); }
+.add-menu .ic { width: 20px; font-size: 16px; text-align: center; }
+.add-menu small { display: block; color: var(--muted); font-size: 12px; }
+
+/* pen strip (Plot mode) */
+.penbox { flex: none; width: 150px; border: 1px solid var(--line); border-radius: 8px; padding: 6px; display: flex; gap: 8px; align-items: center; background: var(--panel); cursor: pointer; margin-right: 8px; }
+.penbox.sel { outline: 2px solid var(--accent); }
+.penbox canvas { width: 56px; height: 56px; border-radius: 3px; border: 1px solid var(--line); flex: none; }
+.penbox .t { font-size: 12px; font-weight: 600; }
+.penbox .s { font-size: 11px; color: var(--muted); }
+.swatch { width: 12px; height: 12px; border-radius: 50%; display: inline-block; border: 1px solid var(--line); vertical-align: -1px; }
+
+/* side panels for Page / Plot */
+.panel-sec { margin-bottom: 18px; }
+.panel-sec h4 { margin: 0 0 8px; font-size: 12px; text-transform: uppercase; letter-spacing: 0.08em; color: var(--muted); }
+.seg { display: inline-flex; border: 1px solid var(--line); border-radius: 6px; overflow: hidden; }
+.seg button { border: 0; border-radius: 0; }
+.seg button[aria-pressed="true"] { background: var(--ink); color: var(--panel); }
+.field-row { display: flex; justify-content: space-between; align-items: center; gap: 10px; margin: 8px 0; }
+.pen-row { display: flex; align-items: center; gap: 8px; padding: 6px 0; border-bottom: 1px solid var(--line); }
+.pen-row .n { flex: 1; font-size: 13px; }
+.pen-row button { padding: 2px 7px; font-size: 12px; }
+.bigtime { font-size: 34px; font-weight: 600; }
+.breakdown { display: grid; grid-template-columns: 1fr auto; gap: 4px 12px; font-size: 13px; margin-top: 8px; }
+.breakdown span:nth-child(even) { text-align: right; }
+.play-row { display: flex; gap: 8px; align-items: center; }
+.play-row input { flex: 1; accent-color: var(--accent); }
+.export { display: grid; gap: 8px; }
+
+/* gallery */
+.modal-bg { position: fixed; inset: 0; background: rgba(20, 18, 15, 0.45); z-index: 50; display: grid; place-items: center; padding: 16px; }
+.modal { background: var(--panel); border-radius: 14px; width: min(860px, 100%); max-height: 90vh; overflow-y: auto; padding: 18px 20px; box-shadow: 0 20px 48px var(--shadow); }
+.modal h2 { margin: 0 0 4px; font-size: 18px; }
+.gallery { display: grid; grid-template-columns: repeat(auto-fill, minmax(180px, 1fr)); gap: 14px; margin-top: 14px; }
+.look { border: 1px solid var(--line); border-radius: 10px; padding: 8px; background: var(--panel); text-align: left; display: flex; flex-direction: column; gap: 6px; }
+.look canvas { width: 100%; aspect-ratio: 1; border-radius: 4px; max-width: 100%; }
+.look .t { font-weight: 600; }
+.look .s { font-size: 12px; color: var(--muted); }
+.look .chain { display: flex; gap: 3px; flex-wrap: wrap; }
+.look .chain i { width: 14px; height: 6px; border-radius: 2px; background: var(--st); }
+
+.toast { position: fixed; left: 50%; bottom: calc(24px + env(safe-area-inset-bottom, 0px)); transform: translateX(-50%); background: var(--ink); color: var(--panel); padding: 8px 14px; border-radius: 8px; z-index: 80; max-width: min(520px, calc(100% - 32px)); font-size: 13px; box-shadow: 0 6px 18px var(--shadow); }
+
+/* prototype switcher (not part of the design) */
+.proto-bar { position: fixed; top: 34%; left: calc(12px + env(safe-area-inset-left, 0px)); flex-direction: column; z-index: 60; background: var(--proto); color: var(--proto-ink); border-radius: 999px; display: flex; align-items: center; gap: 4px; padding: 4px; box-shadow: 0 6px 20px var(--shadow); font-size: 12px; }
+.proto-bar button { background: transparent; color: inherit; border: 0; padding: 4px 9px; border-radius: 999px; }
+.proto-bar button:hover { background: color-mix(in srgb, var(--proto-ink) 15%, transparent); }
+.proto-bar .lab { padding: 0 6px; white-space: nowrap; }
+.proto-bar .tag { opacity: 0.6; padding-left: 8px; }
+
+/* ---------- phone viewer ---------- */
+#phone { display: none; height: 100%; }
+body.phone #app { display: none; }
+body.phone #phone { display: block; }
+body.phone-preview { background: var(--canvas-bg); }
+body.phone-preview #phone { display: grid; place-items: center; padding-block: 20px; }
+.ph { height: 100%; width: 100%; display: flex; flex-direction: column; background: var(--bg); overflow: hidden; }
+body.phone-preview .ph { width: 390px; height: min(800px, 100%); border-radius: 36px; border: 10px solid #111; box-shadow: 0 20px 48px var(--shadow); }
+.ph-head { display: flex; align-items: center; gap: 10px; padding: 12px max(16px, env(safe-area-inset-right, 0px)) 10px max(16px, env(safe-area-inset-left, 0px)); background: var(--panel); border-bottom: 1px solid var(--line); }
+.ph-head .t { font-weight: 600; flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.ph-body { flex: 1; overflow-y: auto; padding: 14px max(16px, env(safe-area-inset-right, 0px)) 20px max(16px, env(safe-area-inset-left, 0px)); }
+.ph-note { font-size: 12px; color: var(--muted); margin: 0 0 12px; }
+.ph-card { display: flex; gap: 12px; align-items: center; width: 100%; text-align: left; padding: 10px; border-radius: 12px; margin-bottom: 10px; background: var(--panel); }
+.ph-card canvas { width: 72px; height: 72px; border-radius: 6px; border: 1px solid var(--line); flex: none; }
+.ph-card .t { font-weight: 600; }
+.ph-card .s { font-size: 12px; color: var(--muted); }
+.ph-view { position: relative; background: var(--canvas-bg); border-radius: 12px; overflow: hidden; aspect-ratio: 3 / 4; max-width: 100%; }
+.ph-view canvas { width: 100%; height: 100%; display: block; touch-action: pan-y; }
+.ph-ctrl { display: flex; gap: 8px; align-items: center; margin: 10px 0; }
+.ph-ctrl input { flex: 1; accent-color: var(--accent); }
+.ph-strip { display: flex; gap: 8px; overflow-x: auto; padding: 4px 0 8px; scroll-snap-type: x mandatory; }
+.ph-strip .box { width: 84px; scroll-snap-align: start; }
+.ph-strip .box canvas { width: 70px; height: 70px; }
+.ph-sec { font-size: 12px; text-transform: uppercase; letter-spacing: 0.08em; color: var(--muted); margin: 16px 0 6px; }
+.ph-cps { display: flex; flex-direction: column; gap: 6px; }
+
+@media (max-width: 1180px) {
+  aside.side { width: 280px; }
+  .strip-head .legend { display: none; }
+  .modes button { padding: 5px 10px; }
+  .top-right .setup-chip { max-width: 260px; overflow: hidden; white-space: nowrap; }
+}
+@media (max-width: 960px) {
+  header.top .project, header.top .setup-chip { display: none; }
+  #cp-quick { font-size: 0; } #cp-quick::before { content: "+ Save"; font-size: 14px; }
+}
+header.top { overflow: hidden; }
+.strip-head > span:nth-child(2) { min-width: 0; }
+@media (max-width: 700px) {
+  .proto-bar .tag { display: none; }
+  .proto-bar { flex-direction: row; top: auto; left: 50%; transform: translateX(-50%); bottom: calc(12px + env(safe-area-inset-bottom, 0px)); }
+  .ph-body { padding-bottom: 70px; }
+}
+@media (prefers-reduced-motion: reduce) { * { transition: none !important; } }
+</style>
+
+<div id="app">
+  <header class="top">
+    <span class="brand">plotlab</span>
+    <span class="project"><span id="proj-name">Mona Lisa · topo hatch</span><span class="version" id="version-tag" hidden></span></span>
+    <button id="presets-btn" title="Start from a preset recipe, shown on your photo">Presets</button>
+    <nav class="modes" aria-label="Mode">
+      <button data-mode="design" aria-pressed="true">Design</button>
+      <button data-mode="page" aria-pressed="false">Page</button>
+      <button data-mode="plot" aria-pressed="false">Plot</button>
+    </nav>
+    <div class="top-right">
+      <button class="setup-chip" id="setup-chip" title="Paper, pens and machine. Click to change."></button>
+      <div class="menu-wrap">
+        <span class="cp-group"><button id="cp-quick" title="Save a checkpoint now (⌘S)">+ Save checkpoint</button><button id="cp-btn" aria-label="Show checkpoints">Checkpoints ▾</button></span>
+        <div class="menu" id="cp-menu" hidden></div>
+      </div>
+    </div>
+  </header>
+  <main class="work">
+    <div class="stage-area" id="stage-area">
+      <canvas id="main-canvas"></canvas>
+      <div class="overlay tl" id="ov-left"></div>
+      <div class="overlay tr" id="ov-right"></div>
+    </div>
+    <aside class="side" id="side"></aside>
+  </main>
+  <section class="strip-wrap" id="strip-wrap"></section>
+  <section id="drawer" hidden></section>
+</div>
+<div id="popover" hidden><button class="x" id="pop-x" aria-label="Close settings">×</button><div id="pop-inner"></div></div>
+
+<div id="phone"></div>
+
+<div class="proto-bar" id="proto-bar">
+  <button data-view="editor">Editor</button>
+  <button data-view="phone">Phone</button>
+  <span class="tag">prototype</span>
+</div>
+
+<script>
+"use strict";
+const IMG_SRC = "data:image/jpeg;base64,/9j/4AAQSkZJRgABAQAASABIAAD/4QEARXhpZgAATU0AKgAAAAgACAEGAAMAAAABAAIAAAESAAMAAAABAAEAAAEaAAUAAAABAAAAbgEbAAUAAAABAAAAdgEoAAMAAAABAAIAAAExAAIAAAAcAAAAfgEyAAIAAAAUAAAAmodpAAQAAAABAAAArgAAAAAAAABIAAAAAQAAAEgAAAABQWRvYmUgUGhvdG9zaG9wIENTNSBXaW5kb3dzADIwMTE6MDY6MDcgMjI6MDk6MzAAAASQBAACAAAAFAAAAOSgAQADAAAAAQABAACgAgAEAAAAAQAAAPCgAwAEAAAAAQAAAPAAAAAAMjAxMTowNjowNiAxMjo0MDowOAD/7QBkUGhvdG9zaG9wIDMuMAA4QklNBAQAAAAAACwcAVoAAxslRxwCAAACAAIcAj4ACDIwMTEwNjA2HAI/AAsxMjQwMDgtMDcwMDhCSU0EJQAAAAAAEOggBZCWBuSBD9Ogpgy8Wkf/wAARCADwAPADASIAAhEBAxEB/8QAHwAAAQUBAQEBAQEAAAAAAAAAAAECAwQFBgcICQoL/8QAtRAAAgEDAwIEAwUFBAQAAAF9AQIDAAQRBRIhMUEGE1FhByJxFDKBkaEII0KxwRVS0fAkM2JyggkKFhcYGRolJicoKSo0NTY3ODk6Q0RFRkdISUpTVFVWV1hZWmNkZWZnaGlqc3R1dnd4eXqDhIWGh4iJipKTlJWWl5iZmqKjpKWmp6ipqrKztLW2t7i5usLDxMXGx8jJytLT1NXW19jZ2uHi4+Tl5ufo6erx8vP09fb3+Pn6/8QAHwEAAwEBAQEBAQEBAQAAAAAAAAECAwQFBgcICQoL/8QAtREAAgECBAQDBAcFBAQAAQJ3AAECAxEEBSExBhJBUQdhcRMiMoEIFEKRobHBCSMzUvAVYnLRChYkNOEl8RcYGRomJygpKjU2Nzg5OkNERUZHSElKU1RVVldYWVpjZGVmZ2hpanN0dXZ3eHl6goOEhYaHiImKkpOUlZaXmJmaoqOkpaanqKmqsrO0tba3uLm6wsPExcbHyMnK0tPU1dbX2Nna4uPk5ebn6Onq8vP09fb3+Pn6/9sAQwACAgICAgIDAgIDBAMDAwQFBAQEBAUGBQUFBQUGCAYGBgYGBggICAgICAgICQkJCQkJCwsLCwsMDAwMDAwMDAwM/9sAQwECAgIDAwMFAwMFDAgHCAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwM/90ABAAP/9oADAMBAAIRAxEAPwDBe08mSOPfCm3OMYwQx+h//VUfzCPcpUkLlsLkbiOg4/Xn0ro2tY5lIYiVlKghSM98demKqCwVcyDaVGGXIA454wDkfWvyDmlF6kJKS0Ocnt43hDSAYxnJGRkHGSB+X9KatrGVUSpzuwnHTj+H/OccV0DaahAZtpcD7yrhhzz/AI0kcaBvvgjGME/NjOScnNV7b3rSQOm7aHKPZRMpUhfnc5zzxg4ypHQDv/jVk2Z2s0aKuepC/wAXXHHX8a22tvMRWAXPO8Z5AweATjjHHTim/Z/kIBOW54Jbnp361KfVlNWVjF+yoJD8o54OFweB1qyICoGdpJIC8Djjp2q8LVVCbvmJzjPNXEsw+QOQck57fhWkqiUWY8jbRm29rFI4VlAIxjgfj+tS3NnCEX5FHXjHfvitSK2EZBk+UY9OuDxUVwgYtkZUYx7D/PpXNGVryub8t3Y5v7PthlAjBD+WOVztweDnH1FSQwRIDgDI46Z5/wAKv+WXjlUEbX2Bs+zAj9amghVlZccj8uKqEnJq/Y2qQshYbVHQNHsAXIKkdM1O0MTLny1OMEEDpxipPLMAwv0wDjjpUsIfA3gEDGc4xkcda1hTnqkc81F6shjsl37nUKrLnAA5/rSvpvm4xwB+VWZ5wyhVXGBk/nxj61Yt5XKKyrw3ABGMVtHR2vqT7GXLzJaGUdGMS5IUAdB7YrFltEccL8p9QMn3rvWlEi+X2bg1mG2izuAGM8ED0z/nBq1zW95kqKvocqLRIxnAz/8AW9areW2QDgduACP/AK9dRdRCSVmhUBcDnof/AKwqisIyQV7jBOcfjWcZJ6Mtqy0KccCZ2fKxOOGHJ9evNSJFnoi8k8cfyqz9lDMzA9QOR0z34q3FaF1VQSQCOcnn0HviqS1ujGSK9pZrtbIUk5HTjr9O/vUhsvn3BQTzgY7Dv09vStu3tViRRxuyfbv7VHN5fJIHHXJxnP8AnJq6lNJK25lCT5tTAkjDLjbjcScDnGOep5qolqPJxJjJXPYZ9SB2rdnjAhVgCV9AOT3qkIl/fOA3lnaODjoOR9eRj681itNEdUdVqZKWaKVUAE4PzHGSKsRWu3KKFJwBgL0Uc45HvWjFGm/BwSeoB6n2PU44qxKoERIwOVIznk59hSWurL12M1YCH8t0BXpgDGT27VXdPm+VEYrkY4IwMjnj8K0kAYMMfMeccH8cjpz+JqSKMAmRwoVAcZOR17446dyfWib1SWw4w0uf/9C0qSbjhhycKc4zzk9fpipmlWHKjJX5QOOfl7c1WVG3fKWCgjr0+9k4yeO1T+Qrna+Qy/wZznnJOT0r8hdRX91j9k7e8h4liEWUGdwJxkcY+vOD9KqCMynj5VJzuUHqOSB0wCfxrQtrNJV3gn5RnC9Bk469OKspbyPGokPJPPQdfboM/nWVV8+iKS5XcyJLAKGjYnBGTjOVwMjoefypHjjkxHkljk49h7jA9+v/ANbblh/duGHRW6YDZJPQ9axfJNtKWRdpZe+cA454J7/zrDlmlqVo9SmYnUp/Dyc9PX6+1X/L8gDaeDnJNMMc0jAdzjHGCRyOM4qwIN4xK+Qc9c454rJcz0bKlFFWXaw2YHzcBvTPfnHXtUktsDHhGyQBn6AYwM1aaEBAFOR1PHPf1pYYw5Zj82SAFHr6+nFaTpt3sOnoYv2YL5icEMAw55xnnPrVkWiwjzOmd3HU846/lVtrcGdZBghlxzxgVa1C5sbCAteSLGFGSSwHA5OSelS5OkuW+x0wpOdmluZYSL77DP16896njVB8xUAAcH1x714trvxx8Pwu9l4fga9nTgOQViO7r8xGcDivHtZ+Kvj6dJJA4sowc/uFCnBxxkgmu6jUqSVkreuh6FPIK9TWWh9fSyQM3mbuikE461ANRtVDguAUxgHtmvz9vvFPiC+kWe+1G7mZmO0GZlxyP7uBWPJqsssys08x3bSQZ5GxnI7tk9a7qWArS1UrfL/gnQ8jgl78z9I47632E+aNrfjjHpQ9xBsxEyg/l17da/Nc61qscW6xv7iHnbmOdwB3xjJrdsvir8QNOCqNSa7Veq3ChiOf7/U/ia0lllZr3ZK/ndGM8ltrGVz9BHjdVyOgAPXHTnpVUqpkypxnkDJ5wOa+TNH/AGg9Qt9lvrloD2aSFs8HvtP9P0r3Xwp8SfCPittljfRi6OAIJSUk59mxnr2zzXHLDVqbvUjp/XY8/E5bUpR2PQ4ZVTO8EgjHv16/j/Kr8UkTYjT5DxyeTz0qhHJFKCSc7uBtHfjj2rRgTe25s/n9ccDipVTszy5UrbokWREBZ39scgYH+c0rJE2CwzuPH/16dGp8xRuBUBic/wA8f5zVp44kUlk4yM8+/U+lZTq1G0lsSqcVqZF0wG0BB16k9fyB/Ws9iDBs27hkEgHGT06/06eprYuo2YrgbkBIO7nBxnkg+vc1mrHD0UBwAM88Ac9AOKmaaSSZpTgt2RoMvkYA3fKWw2c9eh/z7d3xh7hH2hvQtjnPYAHt070jxOZtxA55G3tjrjj3PP8AhV61OR8iFRnk43H0GOeh7Z+tRSbTszacVa6M7GGCyK3QDa3XI68jgAe/86WAjbiLA3lQePxHyryeP8av7Ekc7iBCMKSSeSME8YyQDwOR70/yi3muFL4+8D6tj92MdWbjdjtgZ610UYcz3IqSsf/R3I4CiIRk5P3guOM4zxweafHAHIBJYlMEEcjPTGPfIrVKxSnB5EeCD1xjHGBwOg5HrVwxB1JbA3egHIx6jivxyME9jolJrcowxKlswO0FcKSRnpzgZI/yas/IUEbAjnknnnOcf5/OrAjR4sRhScbgP69OKgjttzZcknPzYHUfTjFQ4W2C99ym3lqr7DywJ9eOf8aSZIZYNzrtY9Tx0DcDqKGgMbu3YBhk9iB27detXI4d+S2Dg9T0znt7VhJ2XvalcvVEUdoGjDOpyuMdTjgf561UntlZQZBhVIwuCeM+x/D/APVWvNlpTxhMgHjsPakfb5mIxlQQMdDjnnGPz5rmjzykm0VZJaGe1ojwlFQA5H1OBz+H41DGgjATAUnHcev+FbCRSO4bgIGIA9eSM+5OK4Hx54otPCumyX12wV2+WGP1YDk/hx7Zx3rsqwcdh4Wm6k1FdSj4u8V6X4ZtfMmkAf52KqQWbaM7VHTd+nevj/xX4t8Q+N70tKTb2hyEiBPTPVieSTgZ7e1Wb7WL/wAR3wu75gwkZtiD7qjBwMdjxknqasW1rGwYgqrgccHv0FZNeytOavLX5H3GX5fCn6nLaR4dC3CiTMmffqScc45rd8Q6bHbxrZogUcbgOT7D6Zru/D+kTLM10IjIsYyxxx2OOaztbt0lmDlMOshBU54XqO1cdPGzniVd6I9yUFGnyxPEr3SUzwNpHHI79656TStjqyDCgoST2Accn2Fet3duCwDJt9fzrlL1yytFtVRg54HPfk19XgsdNux5degkeT3VlIkW0MwOflIyMNisdb6/s8gkuCTkHkdM4/Gu8vLZmJ6D36/56VyN9DDhlKgue/0H0r6jC11NWkrnkV6TTvHQji1bTr8GC83I4x16ZHTHeobn7VA6XGlXEoZACkit80ZXrz+gxXNXNvAS5c89RwT+FVI72W0OBtMRwCAORjqK7PqWvNSfyexnDG6clVfM+nfhv+0RqOjTRaN42Z7mHeIxedXQYx8+B8w7k9Rz1r7w0PVLHW7CG+0+5juLaUbkkicMrAdwR6dDnn1r8b5YvtSlkww5IRQefXGBxXrXwX+Ll/8ADnWEtdQkeTR7mTE0ROTGWx+9QHuM/MO4968XM+HrxeIwitJbx6P08/I87FUIVNNuzP1XtYiG8sHB+YgkcH2P0qR4JHjEm/Oc9MAAgnOM/wCe9Zeg6nY6xY2+o6TKs0dxGGjdTkNn8OPf9a6qK1K535JBz83C85/X0r4+NS80pnh1KThdHMSWxcLubcrZPJyDnGehxj8KjNn5EbSRDHAPXjt164rpnhyymLhHIye/0/8A1/l64t2GXehUMvONx6+o/Tqa0dNXuRGbtYziBlV5xtHAOSeg69MdqtW8T8sD83AyRzz2GOfypfKEo8tODjqRj8Ohz+XFSxZgfJ+ZeOSMnp7ev/1qa01HLYk8spJvAUMMH7v5Dnj6D+lWbazQp+8QbAcnALZ9cH19alixIWbcMJnI4APvzjp0q3GscERQn8B3OOpNdiko2OfV6H//0u/+bkMT82BgYz19ueavrCWQsGwwYA89Mnkd+/51YNuIVxIACPmwOeOOCB09KurGqR7vvH6fyPbNfiUajtaTO+UV0RTWAQxHJAJAGOg69Rx/SqrmMbnBySR24x2AJ/rWoyM0YX5QMn5iefy4xjp3qgyKxKpjlgFwc9ueAcdOMmjnu7piUe6MyaMbGAxkhguOeRnn15qzAGMaRpnezAD1/wA81big3LIGztyd30GeQB7+v+FWBBDG8bIMEOuT+Iz61NSsr2Y1TdiqUkJ8tAOpyTz/ABdqsC2EfzMmARjnvz2rRjij8tcYLEjPPrioLxQDkMAqKc4PPt/OuvCR53eZhVdtImRLLFZQGeZgiICxz0wuST9K+D/iZ4ql8ZeISIWY20b7Io1yS20nBx+JI+pr3f4zeNhpGiHS7OXF1dgrndjbFj5+TyMjgH0zXi/wd8KnVtU/tHyWmYk7GfiMY6YPJP4UYmtChTniXtHRebPqchwLa9pJav8AI2vBvwl8QaqIZ3QW6E9G5fH0H+NfQ+gfAeziWN7wvLwCcHbnjGOPw/PrXr/hHwhdO8TPcmJW+UrGu3r6Mfm/WvabTwraQn7OFeR9rkbmYkluTySfVRX51jM7r1teayv0PtIUlF2PCLf4YaXpyKtvCEC7tykgjHGCcnuAe9ZmsfDTw/cuW+zRNvyPMBycnjt+VfUR0m3ikXyYo1j+UHIHTdgY6dm71VvNEgUPiMfeJGMAfeyAMevNeB9eqX5k2b+z7nwxqnwo8NsgIhGWAw28g9D7+1eP+Lfg5amMvp5ZGIzgcjgZ5PTpX6Fax4fs5eGjzkHGOgGTjBP1rybxH4WsvJIVPmC9DzyfpXp4PPsRTmrVGRKjHqj8ttf8K3mnyFAfM2k4I9un/wBevN76zkIYSL0PJPHP1r7k8Z+E4jvkZNgbIHYj1457V81eKtBMAlIYlU6Ajk5754FfreQcQKvFKb1PHxmC6xR4FNF9mlyAW+9+mOnrXM3A3StKMjJPHau81G0CZyOATnPH5Vw16Vgc5B2E9O/XnBr9NwdVT1R8xiKViFDPakbVbDjJU8HJB+YZHfNZ8jrPIHU43A7sdm7H29DVlHHmgZJx0Oc8fWopFQv5kfynJ34/nXqU4rnucsn7vKfV37Nnxgk0XVIfBPiC4Is7ni1kc8RSscAEn+FvfgHFfpdNPLPgx8Q7RggDnjByPr2r8F1mdHW5icrNEAwYccjnqK/WD9nb4kN458GwQ30pkvLMCGbccswH3HJ75HBPcg1+f8U5SqGIWMpLSWj8nvf5nJiIudNtbr8u59ERxLuQcnqWPQZx1GOmfWmzadCjmUnacZJPA/Hj271pbE8kIg/e4DZHUAEEfhQ4eVRtxnGcA8n/AA/z+HztON4u6PHk2pKxnGzwQY1OAcnI6knJAqn9nZpQIV+YnGPTI6n/ACeK3vMVm8pQGcEnqMD+n45qT7GmN44bOCRyc/0rGd1flNIu+5jGy8otxluOT16Y4GOatJb7M5XnGeM5z34XjA4wK0Y0U7omzuAGTjr6Hnrj9TVtLZRIsmPm5Bzz0yOn+c+tUq6elxuFj//T9okQyQs7g/LyMAr6c/rVrycLhFG0YxnrgD29RXQXkKYxgqcZIHbBFY8oJXEaj234+9yfx/lX4ZNtO8dT0o6rUohUMROc7Rk7hxjPToDT7WJZWbCZ3NwTx0HPU/pUcb5R1VQC2e2eh6nt+NX7ZG7ZJzzgcYPQe2OgrenGKSbM5t30Kc0GYZBET8u7PJGMZ9/zqnDHuJTbz/CRwMYBJx69quujCOYnAPzDBHAPPOBUVtHIZUHVSh3sScZ+bpj/ABqG4OW25STS1LKwjyGVflwSR271yfibVLfRdNur+6fEEKFnZugx6evOMYruZI1Vfmwq4x6gYHT3r5d+JXjCxu4pfPkxpttxHkBfPkHJbBwSAeF4I6n0r0pVKMKaUP8AgsrB4Wderr1Ph3x54t1Xxr4xn3M0duLgQQQnGQi8Zb3PJIzxX3h8GNLXT9KtkKjcVXBXAznPWvzqtpP7V8aPcW4Ko94zp2znPb9a/Tv4VxyHSIC4JIXAHIHP1/KvO43kqWFo0YK2l7H6Hl1Llbt00Prnw+EjtolQY+cErweMEjPU12gXazSrx8yHjt82Dg5A568jtXA6JcNBp/nSEFVIGOvByOAM8itn+0G+z+eqkYAcgEr0fIPcHA6g+or8mnJp2R7EIrc6pZVZY4jywwDk/eUmP049RxUTOZMFvmwQ2T1JGOfyJ6YrnoL+VJEaU4Hyqcc45C56+qkVYm1DeCE+6oB9MHbg/wD164XBpaI1e+pW1BIpQdxI27hjvwen9a8y1a0t/Jfe2W5UA88Anqa7XUrzZC67SrknIHTOcjntXlmuX8kpkWLKgBxnjA4Uj+dVTpu7uQeIeOLVCr+Wu444wPwr5U8Vab5rSEL2A+g7V9ga9btNESTkDIxjHQdM9a8L1/RC++UJtG3GMd8+9fX5FifYyVzCtHmR8Y69p4geRRggOcD15PIxXmF5YmaUREbt/C5xgH8TX034k8PXEiTER/e6Af5968B161fT5DGUAYKc55x1GR/Kv3DJcbGrFKL1PmcXRad2tDzq6spLNiMYJPGDxweQMVnn5MsQQMHrjmtaed3mUuCwyQc9Bn0NZ8pITBGVY5HvX3lBuyU9z5uukneGxUIKSiQMPKOFOemTz35xXv8A+zn4+fwd8QrGwuJClhqDCzmwcD95zE3XHEmB+Jr52mYiMoQcnnB9RVqwu3t7qK8iyrxlSvc5BBB/SssdhI4mhOlLqv8AhmYp2du5+/VjP9oMaoNodGJweRgetUPPjtoXAyMAswJ6gHIHr7V5P4P+IltrfhXS9VtnJnvLNXdVGCrbAH4OBy2eO1dHo+rjU4mYb2APlszYAOR8wHrhuAa/IKtKpC1SStbQ8d8qm6XU9Atx5oZ1fkNz9T0B5/KtaMGKNn3b+QcAcfT9fSuQsdUjhEiSpswuGOQf3gAHb1GetUrbWLidvKchIWYMMgAnv6dfTNY1pz5rJGlOMeXmZ6PaozHe4APHGMEcZz9KuQrHKHbgkfMcnr05x/WuU027LSeaxZ95JPPDdgPpitFbxrnU5owQqwQhDjjJbHpWdpX1FKcbqx//1Ppa5liuLfcr53dcZPIYVVuoRIoUNyPbP17f0rzjw34stI7WdtZmihtlQlMnrzuPy89h2rp9K8S2WssNkmzAL4JGSvY+or8Up4ed3e9lbXodyqwaXd9AeMqmUDnYdwVtoXrxuz9PWt2NHaNWOC7sOnbv1zx+RrQt7eOdcJjJ+YYyQBnjgkcZ/DNXIY4hHmNQyhsHPTPfv+db1Eotcrug330OYGnSXLTAhiW3AseOzEnvx261qJYC2VdxwCm0Dn5T3/StGAeZ52zGSzD36HkZ6/5FaRhh+zPM+WZIwQOcjpzmvMrSlC7N4K6PKPiJqcmnaCy2wPnXDiJWHBx1bHvtBHtX5pfFTXnvteTSUk3W9giqFBwu7A3Zx+QPtX3j8XNWWK4hspiFKxNJxyA0hCrjB64Br8x/Fsrx+L9TS7kLhpmCuxwNuCyrnOBxgV7eQ4dV6zn2Vz6TJ4KmryHfDQDUvHEEX3wC7EY+8cYFfqV4JsU05UUhxx0HzAEnttB9a/Lf4RIkfjqyeT5UZGz1+8Djpnk1+tXgzZb28CSq33QQTnOOM55459ea83xCg44ynBbcqPeyx3pSb3ueoWN+sMWzghuGDZXA4HfnkHrXTWyRNGqbiV8xidhyPvYXB98Ht2rhjr9hGipkBWG1ssTkY4IyTz9a6HTtWt7oeZC4Zi24kHPK8c+2TX5bWcLttHrxi0jopUSQjawD/MVJ6ZVgRjH4YPSmOpEDByRnA4zk8Y/XioILncuVckkqeT2JLdP19ayta1yy0hN9zKDhuPmx3PauWFlotRtOQ+/MDBUw5H3vTkkDt9fSvPNQsASsi8ENtYYI6jI/n+lYV98T7A3HkW+w4O0E+wxyfwFJH40iuIQxkjUk4BxjHNdEKFS7lKLJat1KWo6RGUjjkyMr13cAnnkZ/wD11w2q+HlmVn2KF2nJH4c8ZFd5f+ILKeLL3C7geCfY+9cFqniS2S3/ANcG28qQBgcZ4xjI4+ld+HpVG9CZSseNeJ9EjghcqMlc8DtgYr4g+IlqHuZtp+ZT1Hv619u+Ktbgmhdc7iQe30xnmvizx1I3nyOcDLEj86/U+EFUjUXMePj7OmzxTNr9nzMpyMZI6fX86x2eMho2zy4VW9PXj8u/Fa99AXjLISOTx9CCD16cmsa4DkEZ45yOPb/AV+14eldXvufG15vZoqXcLJLtJzg5yP1qvEqxu6SZwvII6j0rXCGa2Ejj+Dg+pHY89aqSRnzsIM5Tn8Bmt0t4s5Jr7SPub9nzWZb7wMttJM6+TPLHn0GS+AP+BcV73oXiABbyKBvLG4LEpGDhRgsDx/F15r48+AF75Wja1aMw/cuk5BH3RsYE5z3wBXtMOtRtq0UcYzGx5GD8q7DgbQcZJ5Pb8K/NM7wHNiasOl7/AKnmzap1W1/Vz3AeI4ItszSh5id28jCnA5wGJJGRjjr2rY0rU2vm88tnzFGOPuqTgkZ6ntx3rze0t0v3iljUYO0jIwQV46j9K62xjfT7hj2dV29SSc8kjPHOOTxgGvEp4dXf83mZ153jZntsN7BbWqMygNtBGR0AGefbpUWjTPFHJNM257pjICB91QPlB+o5ryQ6nfXNyLN5DwvJ9s8Z+vSuuk1MwfaJ4CCtras6gk4J2navtzxUTwskvNnC66cl5H//1fNbvXEvbplWLbbpGwYHGQVxjI/2snp6V0trqEsEENxCSGaMKQOc5+bPTjO2vMIpIo4pVcgvtwx6cYxgMMcn26V6PcXdva6CrfcOyMDkE/MR1Iye5r8txV7Rp9Dpp0oRvUW57H4C8ZTvqa6Benc00RKMfmKvGoJ6/wB7J7V66szorrGh3bhkICG+YDJzz27V8z/DGyvdT8RWviaEA2Nm8sUzk4yzKy8Z69uMV9GQ6raQmXJVUDhtxOcYA9j/AJ7Vw14UIzjFPZa+uun3fmTTlVfM7bmvbElpUGE8s54B549z3zWZqOqy2yyFJADj7ox2x1/p0rz2x+JOiXGpzWcshQM8oV+iM0YZh83qVAIH4VJcatFqhl+zYAi27xnqWBIP0IrKWFWja0v/AJ/8MdEqzUeTqfNnxX1l5tfvVmlw4iiYlicKoXgKeMZ79a+LfFlj/atx9tMi7nU73zjJzwx7HK9OBX1f8corawMWqNIY7ieNowOu5QS2Tz/CT+uK+Nr66uriJ7m4Y7V6YIA6/wB31Ir6nKaPKlUpu3Q+myem5005K6SOl8HD7B4rt7uP5ijGQDjnAzkgfmelfaul/F66mjh0nTbcy3EmVVYjxkdSS3Qd+TxXxn8OYh4i8aWFvI5UTcuQPuAJjivra1+EF7F4g+y6ffiKORdz7MiQIWyy78/LnNePxZ9UlXjHFP3lG6PocApKDcFpc7K+m8XyI019f6VYbgCsUl4u8g9OAP61o+FfGeveGdTjh1J1lgmYIsiOJI25/hYf1xXHfEj4BXNxa2b+GkjXarLcPJMgc5xhiztzg54HNVPAXw11XRme0vr2OSzACugk3/Ng/MgH3SCcDHXvXwdWOBnhXL2ibf2eWz/NnrJS5r209T7b/tKQoLq3bKnDDAHTA9PQfrXyl8YfHV1FIbSKTLLkkg9M+uPevqXw3p3k+Bo2lZmlWMj5hz8uR1r4Y8a6bPqXie9RsNHKNgJ5xyMn614XDuFhPESdTVQKrzstOpzXhZfEXia8Mdn8qn5jIxwqjrkmvULrS7LSrbytT8YWFtcLg7O2eehz/Su88B/D7Q7mKL7ddGK1dRthQ7N+B0Zhya5z4rfA231u4tbrwwkFvCsflTRqwV9wbIkO4855HNetWzPDVMZ7KU+SPflX43JhRfJe12eIazrXiDTUa50nUbfV7dS2WhbBwOe+fevN7n4i6tNkzKQcbevPOR04r1sfBefT2LzXqw4AUKjbnJxjnGF59K6bw78BdLvyLvUruSU/e2Adgc5J4r6Ojj8ro0+ao+bzSs/8jjnTqt+7oeLWN3qGqWhm2FhkjPTAI6g14/450+cqdyAYznJGRkV+hmr+BtH8OaUbW3iAaNcdOwGeT+NfFPxKhjiaQHaMZwPeu/IczhXxKdKNl0OfFUrU3dnyy9uGcIgUPjaRnOTzgnP4celYkscgQl1UdO/zHPQYHpj0/nXQsym8ZAFGWHznORk1lXuNp2t82SpI6Dpjp61+4YSWiR8biIRabM2GZ0UiI/KrHoRyRkA9PeiJiJYmIBxncT6HPNQxEPIshATzN2UHGOnQfhVqZFVTIrYU9PbnvXZUjHmt3PPhJ2v2PX/hFfXEV/q2nQHYt5beYWyFYeU24AE57HnHNe7aRMtq0rvG/wBoI2gfeHfPPfk185/DGST/AISu2SHBMkcw2+oCZx+IFfQvm3sk3lueTz5a53Ec8HA6Z/Gvks2pL6w0uqTPIx9lO9/61Otg1W9toI7e2n2AEqoHXnsce/SvQ7PU5r6xG5x9tiby23NwyjndyQPyFeJQLMk7SKVJBKsuCOScnHcY/Kuw07VpVhkt0hKjGSwOQD6liO2TivHeBTs4LXueZVrcqdz1K1uZBeMJ4wwCDcAeSSTgZH0qWTxLZWVhNYzlnuLkiNV5ztHXPT3rgbTWbi2uFLFmQqM5+bkHPrx71Bq066lKLi1YR54UDkkDnkcD68iksKm7TRy33nE//9b5oi1eGFnM5AgwflcnPHH/ANety68QQ3WjXUTLuZQuzPoDuyPyrznV5I5n2l8ksxDbeep/yaSK8VIJ0Q7wyhGI5O49Pz/Cvg3goztK2paqvZHtXg/4gf8ACP6BpduHDhryWS4XdtO3cBk8e5x716F4q8aSrBPbWMxCIPvKep4PbqOgr5GtrlrZTKHBEJZsHkAk45HPfmt6O91VLIfaCfJmbdu44PUfhzXBi8p56qlHu3663/A9DCyjG9/I7+6aa70yC9f5NrlgAdpDHJbv+ArufAnjN5xqqXrBQqxyB24Xy4socnOOB/KvIr7UZk0WBVYqMHI4OTnaSQfrXL6dqIsdJ1OQMFM0Ma434LZkUtyc8bTg4zXRToOpQkmra6fer/kY1KS9rHu7HS/E3UX8TQ3F3cEbxDiCPcB5MIJKggHq2QzHrnjtXyRd3IniaPIxG+ccgHHUZ/AY+tfRepa1Yvb3Mkkxd1hUBFQAvuPTJBxnA5J/nXzdqFlG5eWKTHmFmVSMYJbgAfTvXo5VFJcsz7XL+eFGUYrQ9f8A2byt18SdPimTKtHMBk9cjHGfTNfrxY+FdPvLdEBZHKADDsxTk8biOTn8Opr8Y/ghqJ0T4jae7sBuOzknqew+tfsp4Wubq5hikVyylVz7AknIGfbj61+ZeJPtI5lCcXaLiv1PosrSdBp7pszfEHw0nv1KxancGJiAUU4GOuM9vepdK8BWHhuzcEPKy9M5OT9e/PHNevQbBCmW2q+MMeBkOSQd3uR6VjXbefMiWwDKHHoeRlsd+T/Svz91K0rQUtDsem5nQs0WiTwkgoqMOMg4blT265P618m6loDzazNc+WCrvwOO59R/hX2Rq8EUegNkgu6Dn0AHAPHqDXztKI/twDkpyFzgYLA85P48fnXXlinBzaZE5LSx2fhHwn9p06OOPJlCgrjsWAyc/nXSv8M9Tu3k26i0YUkBSASxGPx7jt61a8GTi2i8xVyA3PI9OOT0716da3hzG7nIdi2TyoJ+XoAuT0Oea8utUrKq22bKKtoeKt8HbGC5FxqV5LdOAH2bdigDjovarE2madoURWBR6Y7EdeuK9Q1HUCJZYvMxyQDgYHfbjB6GvEvF2rKjS4bCDgZ47dv0oVevVahJ3RapqKuea+OtXTy5juUYU8Ajp+HtX54fFHUX86VNwYHJ655/oK+sfGuuB4pFickkcHnJ/wA5r4X8eXZnuJFQttJbj6cnn8a/WuC8C1WTkeJmVRKm7HkEjlpsKpJOGUk8HnDZ/Cq0oLW5ww4Izk5IPzEDkdv8KtNAfKco+HDYAyOc4H4AnB/D3p7WyxRySA5KHJAxnqxx6cEfrX7zRmopWPhqt5NnPDcHMxwQhIJB/vDKD/PbOK0bU718t1wr9c9cZxnvU09tG8JSPcN0sa7eCQ24jIPfnIH1qKyCbo0DBATu3HgquSSSMenNb1Xzq6OOHuOz6nQ+EribTPFthHFgSCYpuBPIdCnT9a+hjJqPmq0OB8o5GSzDJB6cGvmvThI+u6VdIFc/aIUkUNtOd4UfQV9wjwpqcNuY1hgjkwVdjOivk8gE5J7cj9K+czipCM4Tk9bHnY6lKWyuctawXEcuJpMuuc9Q2ccZH1r0HS4meE7S8fr1JP1J9azx4S143Ia0EQO5cbJIM8nnG4hj+P0rYi8L+JApjkgZy54KSEkLjjKqQPX1r5uVeLfLzr7zzqlB8t0ilcWlxFK85kjdCRlTjJAyc9senWs6aQyRJDGyqVbkEjucg7vbNX28IeI3J/0WUswJQMd3A9u/A9PzqvqPhXxBcQbRbyoyq2QqZ/QkA+3T2ruh7NtK6PPnzbyR/9f4wntDbxKEJYgMGzzjgkAdufrxVBGuZkEc2AVXjd0AJ7A1091CTfrG7AnGzGccBSeQB+VVJ2WKWORBu2YwSoIzjp05H1r5GnJ/MNrFGO2kFvMJ1CYUfuyeeBnO38Qe1Ui15bt9pdvkKqgweUC/Lggex6jpW07vc3E1wIiSygkJGzDPTnjA4yc8/Sswzx4xIwVmOMHKg84A9B06Gp5pau2+/U7aasrFa5vpUjW1kZQgBCZLsG5zjpz9fzrm9T1ONFjVwVR5FK71yAqDedwG4HPTGeldDfMhmEOPMYZwGdwB78KAc+xrh9WZ1gkkjZECxLwqAZzj5T1PHufrXXh6S5VdDhJe0VyvealJdOJFcMoJUJyAMnH3SewHH6Vycl0AskkyrkfIPTeGJPH41eu4pkje6EgQknbnC9dr/wDsx5rAurzzV/s9FDSozjC8k7j09zzxit/YJtKOqPt8tnCNJ3dpF3w5qoTxZp14AodJV3qnyjdngj8P1r9oPhh4hS50eASS5kKAg/hmvw5jY2rW08f31+ZsdQdxHPpmv03+DHi3fpti5PWJec9sYH9a+E8SMt9pClVj0uj1snq354v1PveK5dkDXb7QPu42jg4PH+Peucl1AyaktqjKy7SdvGSR/n0rnbPWjeBIUk5I4JqDXdM8TafNa+IdBQXa25LXVuThmj6lk9xk8V+NfDV5G7dEey4pq56L4kxBovzEEeUMBMY6Z5AwRyeeM1836rPcSXbyRBPlJ5JA4x+BrH+I3x3j+xGz0x8TMCr7lIKnoAR16jpXyevxa8SzXEnmZKuTlt2ST6EAd/rX1OV5JiqsHU5bepyVJRjoz9FPBd3c32krc7wMOEOD0I49O+a9Ctrh1bd5illznk87jzx3zgfSvnH9nrVr280G7fVTtNxLvVW7ArjkHrXuep6nb25kEMgy3cHGM9sAe1fO5hR5MTKm9WmdNOXukGpasYyxbAyDjn19Oa8C8Y66vzqxJIJBH+HXtXY+ItWXaWDcngf5/nivnXxVqUsiyMW5OQOv9K78rwXNJNmdWoeW+LtXby3ORv8AmyB256/lXyN4ouGed2ByCfp1r6I8SXc6JIG5A3AZ5AY++PevnHXcjezHdt5x2JFfsnDdCNOSsfP5hJuNjjZVi34LnbjkYJyCFJGfx/TirSQuzthmRUZhwABkqeRjucdu1V2keMDyfvOxJY9sMAAT7c8/jTYQpQSyrgMxYJnn5UyAPTrx2Gc81+lU7tXPlKjSdrEFwxxJsJBMm5COTkDcuPTGM+9ZhcQxqytubar/AHgTjA449citC53ySkqSjoGKseVzErAgAdeQfyqG9by1mVdvlqF2nABHzdOPocdeK76adrM82tJc2hd2SEyPgF1AfceApzkEfX1r6d0Px/q8NvaqLu4jgmjQMC+5QCpAC78KuSOW3eucV8y6eX/cIckSQjqcA/Mc5z0/DivSdIkeKJYVUgR3e1hsU5XgkZA3evXivFzLDQqO01cwxV3CMkz3bT/G2p2Nyb5P3xkVAwdg+4HDHaN3XjsPpXolj8STchXa3Kkbi3znseuB0+p59a+draa1kuVZVEZKbm2R53HbuwpGOD6k9627eZ7Zo5FQx5Khgp5Ubup3Z47Eg49u9eFUwVOW8TznFctrnv0fxChjkyInZyjEYJ5xzjtmtCH4g2UQJjtHDbc5J6D35NeBWesqwJkIPmlhuOTtH8XHYHGK0Zr1AxuEMbLgJiMgdQOp45z6jimsvpLoeXVjK+kj/9D49uJZZ79rsHCt93ADEH6Z/wA+1QecjYVmAbn5m+U5xx8pBzyPoKoG9inVN7bC7YAXfu2+24gEdOuOtWRLObaORGYsMgKVPGBwcbiGJ5PH4nPFfJpW0SOr2d92X4FZ42jkKkogIWN2bpyP9VhSSTzn3rKe4O54jcLFGzEsj8IQpwGPQlueM9uM1XkvbyHzEmWQpJg4YkHOM/cRgGx3HvUV3NGIyhk+Xrgq6EDquFOSMZ7ZHes3F69bmziur2ILsJ5glc4bggHBx0JO1mGP1x9a57VLYzabM8ABjjILsQFIJxkNjrjsMHjvW0LWRyYtmQ7/ADKMjcAcg8L7DBzzVe7gK20sgVgvltvbJLY2nPX2rqpy5dLmMZpT2PKJJpdym6IcIJEKZOCcEcH6fjWXJZST3D3cSsrSM5yp6EMMY/DFdpqFsYhHLh2VXVmJGD864bOB3A71jzKkNuZ5CyMob7gCglcrnn1IyPTnrXdKslDmgtT7LLqPM7y26nMNbiM4nG59oweRnDf0/WvsL4CX6X2mrD5n722zGfp2HavkNLoXkhnZsFUwEJwMBSSMnqcgGvV/gv4vi0DxK1tJIBFcyHGeeMnp+leVxNgp4jL5NL3o6nq4OpGliOVbM/SrR7y4spI5JWIAyeuQcV7l4d8V2Oo25aK4jATCPucDHbvzXiejSafqtlHHv3pIgIbpjvxW7Y/Bvw29pNqM9xdRTSEMpimZBwfQZB/Kv56xlOlKT9pdPppf/I+jT6dDjPjD8NtP8Tap/adnHDEMAvNEQoYjHXsa8O0rwFpGnXGZ9sm1+cnrX0pq/geEWQtrPxLKEJ+ZLhVcj6kEH868O13wAtqXWPWvP25OVAGeep617WU5jL2XsHW09GTXwy+JI7+x8W6X4atRDavHEO+MevH862NN8S3mtvvQYiOTuPTFeN6J8NdF1GVZtVuJrmNDkJvKqSOxA6/nivf9ItrCxgWOJFSGNNqqvoOnvUY2NBO0Pel1exgrrdmPq8btAdxJ4I59R+FeG68vlrI7YIOcZOev19q9v8Q39vGjBTkZH5d6+c/FGpQs3UkcA4yMDqf1rryyEm0kjKbXU8t8WvGYpCTu3ct0PYc9PU18164213GSQCeM/wCFe3+LL7eHQEkBQOcZHH/1q8K1Plt7KQVJzz71+sZHR5bNnhY6d0cof3kpTGcD/gQ4Pfrjnn2qdXR3dDlPvhCoxgHp26cY59famuBBIXyRklMYxnjn64+lWvKURmNsM7qTuzyVz0z+eB3r7qm+W1z5yor7GcqwkPtQ5PJVuNpGSRt+nPYDArOcr5afxvmMENkEY3Z9PQDPbmr0qRQqRKzs5wN2MksxxkZxkY/Wsjcijy0D5B25PUqenToP8a9Gg7u551eNtGjb0xmdYX/iVpVHbIWJDj36n869Y8NLa3BnjcCSR7gOoUZyCgY884z1rzOziiS4s3RChEjN3I/5Z4/Paa9B8KHy7wbl3RSbMCQfLhYuh29unSvMzJJrmuZVIt0ZI9GihtJLmKMWxn6j5FVyPlycBCCTgHv0qxJb20UMTIjoeCCzKMfxHHfg/jV23litJVuQJAEjBLKShHYfMBgcfw4z05NWrYRyxb4yxJ3EDJV8YAGTjaeew755rwI1Hzb6Hjzh7rKcX2YDEkSsZY2Hmc4Bxwx6g9OhxyaiuY7eDJRXZjjZyDgL1wB7Ed62I7aRAPOV3PlfdPOSASNzADH4mmxxTSKDPESi5G1RGF4GWyzE8k55ro1a0OWTinZn/9H4gWzS55XKq5AwYzxnOM7T1PPANV4bEki3lUIxbr5b5PPAx0H544/NY3iim+V0jVmZPMZFUtux8qoeQDjBPXGea29N1VLRMzQGXAYNuycYYAnB6YYnDHrivmoy7KxvUjJarUz4oJpSzhiXLFWLAEkAcfLjI6YwMcVZhGcRsrHbjoCSxHJBOTwcDHFXoNbgV54o5Y5Nx+TPyjgnI6jnAHU8/wArsGr2wQySRA9E+YcMx6hRkE/564rGop7cpHvJ6lO3TCZOB8xJJI3LzwpyOcZH9ap6rb3c3h+4IjBVIwWIXkLnLc9OBnpiukTVLCCRwLRH5CkDg4PbIOOPpV1r/TNQ0y4jtoFRmgZVTCcsykDjdxz61y1Jyi+a3U2otOSbPBLxnuIprmOPKKF4yNpCgfXJ4P4cV5zf3TxSyQTqWQuwPbkE+3qc167f3qtaNL8iMX2LtUYYkHBHA78GvMNSg+03MYUjYzAkkc42g/mQ2P0r1sBO699af5H2WH5l7sHucrEx2sGClWzg9uecDjg+nFTeVc2UsVzGpRgFeNxwMj0xxWqbWAW6Y4DyggH2yOPzqK9glgtlIY5Zwqj26n/9XvXfHERb5V1OyrhpLV9D61+D/wAYXAj0zVJikiYUbumDwD7fQ1+gvhnWW1TT0RG3hmQ9jkEkHocV+HtrLLDKLyNip3uVIPbdwCB6H86+3fgF8bXs7qDQ9cmwo27JGzn5f4SfrX5Zxlwm43xWEV1u1+J6WX49VP3dTfp5n234n+Fuo64fPt5HQHkKrbc5A6815xdfCnU9Ocy3JMijBOXznPrzX01pPi7Tbq1jlR1kGwHI5wD6/SuR8X+JLW5jaKJl5wODj19jX5ZhcbiYS9mtj15QTR4Fc6TJpjqoY8qCMdPakW8ltY33MMDpg03xFr1rajzJJAXyCPQAdhXi2veOVDSJbksDx69P8mvpMNhqtfZHLNpHReJ/E+BIQc+mP1rwTXNclkZmHRs4/kcVX1jW5riQc43H7o5x6Vys9xHt8y5faQM89u3T/P419ll+WqklpqcVWrcy9fnDKCrcbQcdemTzXkWqXAkmbaDkHPHqeR1rtNcvmmjVFJwmRx3ycjv9RXANvYuzDJDZBbBbA4x/I19/luHcUpM8HFVU/dRWEqxyKRltpfOc8Y5UD61BcS7m3RltnzrH2YAdOO+T0/zmR5FS5BiJG8546nqPfGc4qJDFcSm3kypUYyw+Yngd+hyOnpX0sJK1zx5xfcpzSTeYVkDKFkBHAODn8QQPrWaqyGTaoJ3P3XGR0H6VtSJKGjOxgqvIoPJXAydoA+pz9R2qpFFvuQiPweG78McEnqOOK66dTVo4qsNOY14JJTJb+YArbsErg8rjoPoe1eqeHGt5JI42zHtdUU9CApUZ6dCAK8rjm2GPcGwSCCR9DwM9cgflXoOj3qRXSzYU+bMvooOXHQdsc15WZKThZbmlOK5ZXPb72OO3Vkso3BBAVkBJ3Y/21x0HBHFRWXmN5kTwyBidx8zAbAII549+fy9Tr2k7y2RaeONJCzMob5mK5OOQfyBGP51LDDBFuaPKLvLHIBywGCd2Mj19h3r5vmcI2kjwo2lKwlvZS7BGyusnmLgbyvGOQAc7jz2+nXip5rGa1ijaWN3kmYBFVYmPGMHoAB3OT7118EFqkKz8uVUAAOB15+YZ/T86zZ90bvdsmDDuwAckbht5P5dO1c/12q5fu19/cl4eK+Jo/9L4MGZAxL7gNpYYAOckZGM5Az17cZ4roLWEtHN5ZcRRoDNgjmPGQMEkjpx+PIzXUxafpcPyursMnP3gemOjHaOffNaFk2i2yTXCQjYyskhZFI2EYIZQpDHPQ8+1fMzhU5WoR1BYiN9XocbYQwySyTMI2UqMhZCp5BycjOPXkit21h0UyAeT97GRKd3ruXp0yePUV0Wmabodw26O13o6hwDbpkgrnAGQeh6EZrrYvD+ix2/7mz/fO3ykw5zznI5IJxxjis61WUemhmpKTtfX5mFpem6NdAgCMAkcmPOMAdNy59ehH4V0MOkafaxERCPGSMLCo6YGclef8mrMVrZ2itviEeOflj2HPQ9iPXrUazwCA7wSD0CqpBHc+ufwrzqvNJ3RpCZ8m+M7dLLULzTY4ykcM8kyE4G5WPmfKAO27t6cCvP72RTFKsYQyIvyHk7W3jkcdMADHvXvXxGs7YalFqKKWVoTA/qGXndgbsAqSOec9a+cNVgK39wYnIAQYyD8wBCt6AAnNe3gkppeR9jl2JXs03rcw57lrdDOAXdvkVedq5wRUF9dTSRrIvOwAKD0yOcfpWgsZinC8gK3G45wcghgcepqqQbqVmcAMSASBg5JxnA/XtXqxSjPbY9CUm4aMzbW8MkHmHaGJJYAYBLEZOOnUdK6TSrqa3mjuYm2uMBdvBzwev6ZrnJLKOGQyqe+DjoSSBkema01hKTCVGLAN7nBq6yhLbqec3KOp9X+Dfjnr2mQiwlm8wNmMk8cEtjPp90c+4rprv4x6jf5USgZySc9gM/rXx7aCSQorvgqT34LAjrx0PA+te+WPgS5vNEt9UhBVZoRjGRkkd/p+tfBZvkeWUKiqzgouX3XPbweOr1IuLd7G3qHjCe9Li5nyo4Cjd9Pzrjp72JGBMhDOfqTn0AHX60688LX8WSFkYLhj1yNgx+Paudu9PuPMVJzjBUsRkZIbkjHsx/yKvD4TDqKVNqwqmIlfVE91rlqiOYAS6/Mfpgnv3zXK3N1d3kuegIPGOmRgex9K1f7LYu2MAEOCAepbIz9OnHTir9tpDxuVkBGB8vH8j7mvSg8PR1irvzOSbqT0exy8WnxNEBI2VAZXUf3uD39uawdQsk5WP7xwxH15OcfpXqkGhTTWpCRnaJThskAZUAfyNTyeGYoyXkG0spB3duTzjj2pvM4xle5n9WurHgNxYBG8yQc4xnBGT2qB1hMxIyoIUFQOucAjJ9+a7vxBaKjbVA6denX+uOlcE0YZVRSd/IwM5AABDDtmvosFifaR5jhr0OV6hcSBLY2xbLIcBs5yTg4X3Knn6D8MtstO/zHfIuF2jHBwSTjgcZyKluGd2UKxAUbmXng428/h9KDHF9qMiybhhuVBHLKT3xgZ4r2KbSPJrJs0GZWihJIBdgWHoS/A9uD/KujsZv39lBE207y/OVCkcjOccEEk89q5toc2xkB2sCpxxyTkt+WARVmyhkmkjMJJfKDb2IJKkk+vIwPes58stZeZhU5lCXL2Pqi0k80xLboblpPv7mIUfxYGONoABGfx60y61W485LbaoXcxXHBHzDO3nHPPUdBxXJ6PaXkdkjbU2hdysDlwMAnAPA/2uOw55NdbHY7VSVrp1UL93aJCVJJ5LDnk85r5isqanrqeLCShqzat7+6HmBZDvAysWQWbb1GWAbGTjIAFatxePYwM/nKBGFOFO4swx90L9eB14rn0SyCmOGOVQD8zGRsMcDnjJ9RjJH8q1YbPT5FmmnWQIEJO3J6YwCzDPJ4GB+dTWlThrJHKoSnLQ//0/n+PSLHOTbS4OQN7uT68EkYHXsRWtaw24QiGONSr8+dnnI754P1IxmuAvfFi2s0uY2e3hZVMqsA2T3wM/L3PBIH69DpPiDS76/GnJL/AKRIx2q6/KylSwKkL3AJyRzjivlIV+Z7mdXCTjG9tNzoBeXsV9BZoAyy52mJWZfbDAY5PYAc1pwXE63JQ7iy5ODv4IyT39u1YN3C6zWuyTftlOfKXABPJ+bd/TNS+a0EzguC6/wyqm5hnBJZgMY98k0OVNtqTsRytRi4rWxsMLiRZS5ZlfliqYTHGCM//qqgoSOALsdeGxhdo4z97BIGCe4qtOfNcsGyRtYAAc5xnA8tgR7g1QM3l2DyTeSwhV8pG6sw2Md2c45z2I/OuKrorwlob01p7y7GNr9tFd232WZmKSEnDpzkZwcsy9D+dfIWqxzi4uUY7mS4kgY4+8QxYjjleMEAetfTNrqS6jaT3U4CvE7qw8xwSqHhsYHHPNfMvnieK8DENIZ5JepywcEFgfUdPWvVyuTak462sfQZRH3pRehGRaNbLGp33UoXacEhFIGfrjgYNZh8kxbox+8mZdpwSBGWyev5VJDc2i3IyhRDbMqFskLKRx/Ic++aqmU/Y4VZcYUqDnuGbkH0Ga9F02n17/15H0rqXT2KsNtctcZmbbGoYLnHzEd/zHetFUAYRngEHJP8Pyg5+uKrpGu5XBAIZv1OAwz+daZTc8ZJZzIzhizEknHXn8Kuc3fU8mpu0WLIfvznjbtxgZOc8j6193/CK3/t/wAFwW5AJtmkTHc4Y7T+Rr4otbDcSVj+YtuVVJOCSMn/ACK+zPgBJLp/n2c6lI5GDRk5weMHrXw/F0oywuj1Tuenl91I6TWPBZiZ1PII5/8A1V5DqvhWWZmCptUA49wRj+lfa95Yx3bK6oHGduQcdvX25rz/AFjw2rKwhtz5gJAPbH+Ffn+GzqpT0ues6Ke58h/8IrJEAsgPPO/B59qtW+jzJIpClRwPbgAdvWvdpvDary0KMwI564/DnvxmpV8N7nXC4PRP4fwP+elelPPG1qxKikzzPTtG3QgKjJtxksTkncR6cVS1nQDtDqGQZwFPXOeCciveIfDCRQ/MvzHABLZXORxzWfregog3GFTtw20tncf7uB+fWvPeb2mncaops+HfFmlyLcvGiH5AXY8k5ycD8cV5NIDbyYbiJeuePyPU8/4GvrH4heHDDBPc20fDJhmCMPvZOQT+PvjHpXzbqVhbyptUfvFG1eMY24B/AHNfpGQZkqtJdtjjxeHtY88mjeNhcR7kXOT+fy/rnPHFOndnkJ5Hzc9hnn/H1rTmsJpHa1ViQwLAZH8Jznr2qT+zTFbRkk7WkTaCeuMgnI9sV93Trx0d9T5mtQleXYhuU2W6hVO0/Nzknpj0FQw38dpcLOBlRsYpk/wsOn0Hf3rqdUsRa2sF2sXy7M5wSpII456+prz+88lpt0KqrEsxJOOGYkDB4HHYU8DVjXi/mc+LpOm0mfTeiX8Nz9ia2UPCyD5ckF8jGDjJGD7Gu9g0d5jHHsIVgV+bjg8j5nPX6Cvmbwdri2TJDwMfNEd33ecN16gEZxmvVNO+I16B5u4BwxKkyA9ychdpxnPQY6V4mLw9SnN+yjt3+88Orh3s9T3bTfBst026Ofyj0LY3cAccjaM1RuvC95Z3BRL0zYUlxgnbxx3PX864eH4lXb2otWdnV1GcscfkuPXvU9l48SWaL7QMxBdhTB3MOD1JI+gx+deIliZTcqr07KwvZKEeWmtfM//U+NtG0+fUL+4bUZfOM6b5JDkkkucEY7ACuW8SpNpt59us3Ns1lLHtYEfKF3gYzyRggc+tdVaSSabeXaxMQiL5f5OQO3Q/zrlfHUsDWMsjFPMljjLDHKsF5zyOwB/SvzrBzm8VFvZ2PrqkEotWItN+IFxqdvHe+IWMkf3Y5nGBn5lAOAMZ29R69q39W8XaZsW6iWO4vrgsFbe+1MZ2DBHI5yR9K8bFy1zoP2OEGTYo2oRkiNWJGB6DJFSRa61oqLbshQxkOkoDqSOQcHkZ6cV7mIwMKr0js2rXtdX0ucvNy2UdEer6N4y1SPT7nTpromOK0KL0LbiAxbOM4XJHJwM/THHy+K9Vsb+7gjnkeyeUK0DPlW4Iz9QfwzUGh3MeoakAsexZ0IZVGQEljO8n2znHvWLrdkFjdwMSSKq7SdoLfJzz0zyfes4YeDquE1utjJxSvZaM6G8vZDbyXlvJJtlDLvyAhQlW2hcZOCCD714/E7R20DNljuZ94OD1OR0HHOR+VX9T1O6gsDbM4w0scvX0UOcegyOcdzWXsKPd26gMPMITGRgK3QEnHTr+Fe7l+DdClK/fT0/q5vQjecYorXSqwZ4dxLFUU8EEMcEnkY4GelSCJkcRhjkxnIzkbh0/PFWYozdokSqYkhkMrLg9B+PYAe5rbgsEkm+UBoxnackEg9Mgd81rVrqO/Q9VU9G0yvbadcSRqHywbogx0A6nHTFdromgzXJUQoZpGYnAHOXBU8/hmuy8H+BNW1+aO3s7dmXjzHI45xzn8QK+uvCPwvXQYVAtElumCF5twIz93GeV59K+Fzviqhhm6ad5dv8AM7KOXSl70tjxvwV8Jrq9dJrlSHY7toHA5zyf85r6k0bwFPpHkyLGAVXgjjBx+A9a9N8MeGEsoQ9yEjIGWznjvgeucHp2r1iPTbe+tHQodyAp93HzL26YHYj8M+/5VmPENXEycpvQ9WGHUFaKPJrTSZ4FBJ5I3naMjAOM+vX1qO60zzpXDD7n3ugye55xj616f/ZXDRzkjCgsoOWyeRlR17kccZrLl0S5EjAE4XG0MPTP86+ejjveZ0unZXPJ7jw5D5QRQAM5wOuOvsenc1Yg8OR7Vm2bjgkqB83T8evSvV4tFllOTyADnA4GOp9T3HStdNISEeZsJI+foTt4wTn6jtVvF32IaPGJdEZhIUjIjXHHPzfjkHJ9Kxte0LzbEYjO/cAenTaM45yMc9a93vNOU27DDE/fYNgZ54YBT0ycg8dq5i9tLWO3Mc8xIjyXK/MFXnJxuJwe4we46c1zyxTurMuCPivx5ojCzS7B3R78Fe7vtYL68Zz/ADFfGGtaZJaXk8UQ25OGO3IzuGRg9ulfpv8AEKwtZLBpL5gIo8MpkIA5JCqV47Y47fjXwT4wtbBWuVg3tcKpbKOr5JbPORjJGfpX6PwZmDbcH1JxVJShfseRR6dDMXuMlJIWCsfutgnG4A4/If40+90oR2MbuPulCCeud4GPbip/syfYI2XmdnLujA84PI4713XiWyt4NOtI4CobzU67iWIcbu2BjqK/S54xwqQjfdtfceLVoJwl7vS/3nC6+8DaLDbr96BAQTu75554NeVyW6tAztjO1hyMnPbgV614rRY7Z7RipbZDk/N1PPf0rgUtvKhLoCAVwSDnHy5/p0r3smqRjSuurueHj4OUlfsc/bQi0e1uljV0xJG2QQMk8Nnjpu/Suv0eGNis+B5cgyAuScBioGenbrWARGLGKN8sSznuOWKdQPTrzXVeGZbaD/Qr5xEkjAwuV42k/MAeecn1ruxjvFy6/oeY6DtZHaWM2kRBIjGIyoLsQdxY56ZPTAxxS3kdpfi3Fi/lb1AJJUcDrjA4OM9a1rXw5p2pJGbO9jXnawmYhsqTk7dvTHvXb6Z8P7iJ4mEwcSAHcAUBUDGFJBB9Pavl61WlCSnKTv2Zy+xs3ZH/1fluaCxtYrmTYXmj+duvzyk5Geex4xXiPiQNNLNCzB2jDKQASNwPzcntyetegXl9NO9yDkeWFbkjlA+Tj36fhXH3FhcXeoXN0zIFneRsggAY6Y4wOtfmmVP2Tc6jPvK1Bv3UjnvD0JMjTs2GaFkjUgZy2Oc9gOn41yviPybLVZljj2QOwRR1wBgE/mCfxr0nRwtlcrbSICIAclfugN8oOfrXP+JtLWW1F4Au7DMTvznkAD36172GxdsXeWz0PPqUXyu3QXwbIYJJnXKf6MU3Yx8zZwBn+nWsjVI7g3Edwu5gSr9M5IjGQB75/OtnwrazI8fm5VGESoSANy7+p/AAVWv3FshkYKMHBLfljrgZNXKuo4qTjq9EOnh1OCb0PJb+RpJiCCzbgig8gMvHofXpnvV0SFblnVmkO47mAwSWAzkc4IPBqg0jPJ5rZBYs2DxjJI7n16+1aULRh5WH3TID1AOH5/TOa+wqe7SUUYYeN53RoWHmR74gvZT0ycqDwe/TNen+EtDbUb23twhaR2ICg4AGOMnsMZrm/D+mxBxfXXEZKrsJyAFAySRyOCDX1H8KfDEF7q51HYfKQlYtv8TkDAUZyAOSTX57xTnMcLSnydnr5n2OW4LmtKex9PeAPh22k2duqLtOwAug7kZznGSTnt/hX0ZpXhlEZIpYVHTk8c+/fpnFP8L6RHY2sSFVUFOMtznoccjvXoNikcbNvZSAAoAP3vbOR9P85r+e6uKnUm6k3ds9Gpq9CO20mNoxuUlOSMAt6qSDnse5/GrVpYxIREyKr7PLSSPdkqAcoB93G7nJHJOegro7a3gkBdHRg2QChU9eMfL/AHcYP9ankWCGUzzONxyAu7nHTH4c81w1KkrWQ1FHLPpxibazFtw3YOeSepHK7SPoevFZP9nqZOU4cgAADGem0YHp+VdrJdwvKVjdGPORkHbkc5PP+eeKxmPnzuQ6ouT91lBPAII/Dv0rmnUs0aJXM5LSKEgOcuCdwXHTHrnJHIPerz2yC3BdclVwDxgEdSMcAgHJJxWnBBF/qh5T8E4AB3HpuY9eh6+49KdcCFFZCw2LgkKVLEN1ztPB45B6jtXRGT5XYzcVc4q8hBimVdgBJbcHARQrZBPPy5yfXOfeuC1khY2RFKAruAGc4Y4+YDOcDGcnp+del3JjZGO4ITgrwM8bWDe+eAePTvXm/iFobedUDxqJUOCXyeMgHk5I9M1kpNouyR83fEuOQWVtcTqVhJlcLlFUlc7M+pHXnj0r4Q1OK8u72eV3VjLI7PtIO7rhcg5PTH4V+g3ju70+4sTZSuqo/wArFcMFUE7s4JIwBj8z1r4g1FbXTb9tGuk3xozNHvyCoOT8wGTwea/ReEMU4xnaN3+hVWkpKN2ec6bb2FkyvMfMmYjaqcAfNgg8g9ex44rp/GU1ut/HEpUMJQVUEHJLDrkk55J5x6Yrkrpoob1IkAJkmGHXO7afvAD0yeuBWv4vLC8jk+basqH52A+6u/Hr1zX6Ko8+IpzfW55OKlywcUeaeJr9vtUpfZtdkXoB0zgjp61z6O/2STcAcsoxn0BxjHfHNVNVlmupVkYAhmduCOuRwf1qxCwUo0gAjGDuJ68EEZ9etfcUKSpUIr+tD5iVTnqv7gmghiRYHwzAupHBw0gQZPPtx7iqTrITGrcFFBX0I5yfx610OmWcl7fJOIRhneRlJAIUcAfmKNQtGe5yFVCGVAM4GMDPP1JraGKSmoPdGjw94trY6fw9rluvliEhHIUycj05xkdzXpml+I7yynRvtUh28keY3Y7j+B9a+dWeSzuw0J+7kEA92GPcccHFemaZdJJDGHxJGvA3MAxVgPoOpOec14+aYBcvOtUzz6lNJux//9k=";
+const N = 160;
+
+/* ---------------- fake engine ---------------- */
+const STAGES = {
+  image: { label: "Image", v: "--st-image" },
+  field: { label: "Field", v: "--st-field" },
+  geometry: { label: "Geometry", v: "--st-geometry" },
+  toolpath: { label: "Toolpath", v: "--st-toolpath" },
+};
+const R = (k, label, min, max, step, def, o = {}) => ({ k, label, min, max, step, def, type: "range", ...o });
+const DEFS = {
+  pixelate: { name: "Pixelate", icon: "▦", in: "any", out: "same", blurb: "Averages the picture into square cells. Works on a photo or on a field. The grid starts at the paper corner.",
+    params: [R("cell", "Cell size", 2, 20, 0.5, 6, { unit: "mm", main: true }), R("shift", "Grid shift", 0, 1, 0.05, 0, { unit: "cell" })] },
+  tone: { name: "Tone", icon: "◐", in: "image", out: "field", blurb: "Turns the photo into ink density: dark areas will get more ink.",
+    params: [R("contrast", "Contrast", 0.5, 2.5, 0.05, 1.2, { main: true }), R("bright", "Lighten", -0.3, 0.3, 0.01, 0)] },
+  threshold: { name: "Threshold", icon: "◑", in: "image", out: "field", blurb: "Black or white, nothing in between.",
+    params: [R("cut", "Cut-off", 0.15, 0.85, 0.01, 0.45, { main: true })] },
+  smooth: { name: "Smooth", icon: "≈", in: "field", out: "field", blurb: "Softens the field so bands get rounder edges.",
+    params: [R("radius", "Radius", 0, 5, 1, 1, { unit: "px", main: true })] },
+  levels: { name: "Levels", icon: "≡", in: "field", out: "field", blurb: "Splits the field into a few flat bands, light to dark.",
+    params: [R("count", "Bands", 2, 10, 1, 6, { main: true })] },
+  hatch: { name: "Hatch", icon: "▤", in: "field", out: "geometry", blurb: "Fills each band with parallel lines, turning for each darker band.",
+    params: [R("spacing", "Line spacing", 0.6, 4, 0.1, 1.4, { unit: "mm", main: true }), R("angle", "First angle", 0, 180, 5, 45, { unit: "°" }),
+      R("turn", "Turn per band", 0, 90, 5, 30, { unit: "°" }), { k: "cumulative", label: "Build up (cross-hatch)", type: "bool", def: true }] },
+  contours: { name: "Contours", icon: "◎", in: "field", out: "geometry", blurb: "Draws only the borders between bands, like a topographic map.",
+    params: [{ k: "alt", label: "Alternate pens per band", type: "bool", def: true, main: true }] },
+  wobble: { name: "Wobble", icon: "∿", in: "geometry", out: "geometry", blurb: "Adds a hand-drawn waver. The seed is stored, so the same wobble comes back.",
+    params: [R("amount", "Amount", 0, 2, 0.05, 0.4, { unit: "mm", main: true }), R("seed", "Seed", 1, 9999, 1, 1042, { seed: true })] },
+  stipple: { name: "Stipple", icon: "⁘", in: "field", out: "geometry", blurb: "Scatters dots, more where the field is darker: pointillism for a pen. The seed is stored, so the same dots come back.",
+    params: [R("spacing", "Dot spacing", 0.8, 4, 0.1, 1.6, { unit: "mm", main: true }), R("dot", "Dot size", 0.2, 1.5, 0.05, 0.5, { unit: "mm", main: true }), R("seed", "Seed", 1, 9999, 1, 7, { seed: true })] },
+  order: { name: "Order", icon: "↝", in: "geometry", out: "toolpath", blurb: "Sorts the lines so the pen spends less time in the air.",
+    params: [{ k: "mode", label: "Method", type: "select", options: ["Nearest", "Scan"], def: "Nearest", main: true }] },
+};
+let uidN = 1;
+function mk(step, params = {}, on = true) {
+  const p = {};
+  for (const d of DEFS[step].params) p[d.k] = d.def;
+  return { uid: "s" + uidN++, step, params: { ...p, ...params }, on };
+}
+const clone = (r) => r.map((s) => ({ ...s, uid: "s" + uidN++, params: { ...s.params } }));
+
+const PRESETS = [
+  { id: "topo", title: "Topographic hatching", summary: "Six bands, each hatched in a new direction, building up like cross-hatching.", make: () => [mk("tone"), mk("levels"), mk("hatch"), mk("order")] },
+  { id: "contours", title: "Contour map", summary: "Only the borders between eight bands, like a map.", make: () => [mk("tone"), mk("smooth", { radius: 2 }), mk("levels", { count: 8 }), mk("contours"), mk("order")] },
+  { id: "pixel", title: "Pixel hatching", summary: "Big square cells in five tones, each hatched its own way.", make: () => [mk("pixelate", { cell: 7 }), mk("tone"), mk("levels", { count: 5 }), mk("hatch", { cumulative: false, spacing: 0.9, turn: 45 }), mk("order")] },
+  { id: "trace", title: "Outline trace", summary: "Black and white, then one line around each shape.", make: () => [mk("threshold"), mk("smooth", { radius: 1 }), mk("contours", { alt: false }), mk("order")] },
+  { id: "hand", title: "Hand-drawn hatching", summary: "Looser hatching with a stored wobble.", make: () => [mk("tone"), mk("levels", { count: 5 }), mk("hatch", { spacing: 1.8 }), mk("wobble", { amount: 0.6 }), mk("order")] },
+  { id: "cmyk", cmyk: true, title: "CMYK print", summary: "Four inks, each its own look: hatched cyan, pixelated magenta, stippled yellow, cross-hatched black.", make: () => [] },
+  { id: "dense", title: "Dense cross-hatch", summary: "Four bands, tight lines, square turns.", make: () => [mk("tone", { contrast: 1.6 }), mk("levels", { count: 4 }), mk("hatch", { spacing: 0.9, turn: 45, angle: 0 }), mk("order")] },
+];
+
+const PAPERS = { A4: [210, 297], A3: [297, 420], Letter: [216, 279], "30×40 cm": [300, 400] };
+const MACHINES = ["AxiDraw SE/A3", "AxiDraw V3", "iDraw H", "Digital only"];
+const INKS = [
+  { name: "Black 0.3", color: "#1d1d1b" }, { name: "Prussian blue 0.5", color: "#2f5d8a" },
+  { name: "Vermilion 0.5", color: "#c8441e" }, { name: "Sepia 0.3", color: "#7a5230" }, { name: "Green 0.4", color: "#3d7a4a" },
+];
+const page = { paper: "A3", landscape: false, margin: 20, pens: [0, 1], machine: "AxiDraw SE/A3", regmarks: false };
+const paperMM = () => { const [w, h] = PAPERS[page.paper]; return page.landscape ? [h, w] : [w, h]; };
+const contentMM = () => { const [w, h] = paperMM(); return Math.min(w, h) - 2 * page.margin; };
+const mmpx = () => contentMM() / N;
+
+let SRC = null;
+
+function lum(img, i) { return 0.299 * img.rgb[i * 3] + 0.587 * img.rgb[i * 3 + 1] + 0.114 * img.rgb[i * 3 + 2]; }
+const STEPS = {
+  pixelate(img, p) {
+    const c = Math.max(1, p.cell / mmpx()), sh = p.shift * c;
+    if (img.kind === "field") return pixField(img, c, sh);
+    const nb = Math.ceil((N + c) / c) + 1, sums = new Float32Array(nb * nb * 4);
+    const bi = (x, y) => Math.floor((y + sh) / c) * nb + Math.floor((x + sh) / c);
+    for (let y = 0; y < N; y++) for (let x = 0; x < N; x++) {
+      const b = bi(x, y) * 4, i = (y * N + x) * 3;
+      sums[b] += img.rgb[i]; sums[b + 1] += img.rgb[i + 1]; sums[b + 2] += img.rgb[i + 2]; sums[b + 3]++;
+    }
+    const rgb = new Float32Array(N * N * 3);
+    for (let y = 0; y < N; y++) for (let x = 0; x < N; x++) {
+      const b = bi(x, y) * 4, i = (y * N + x) * 3, n = sums[b + 3];
+      rgb[i] = sums[b] / n; rgb[i + 1] = sums[b + 1] / n; rgb[i + 2] = sums[b + 2] / n;
+    }
+    return { kind: "image", rgb };
+  },
+  tone(img, p) {
+    const v = new Float32Array(N * N);
+    for (let i = 0; i < N * N; i++) v[i] = Math.min(1, Math.max(0, (1 - lum(img, i) - 0.5) * p.contrast + 0.5 - p.bright));
+    return { kind: "field", v };
+  },
+  threshold(img, p) {
+    const v = new Float32Array(N * N);
+    for (let i = 0; i < N * N; i++) v[i] = lum(img, i) < p.cut ? 1 : 0;
+    return { kind: "field", v, levels: 2 };
+  },
+  smooth(f, p) {
+    const r = p.radius | 0; if (!r) return f;
+    const a = f.v, t = new Float32Array(N * N), o = new Float32Array(N * N);
+    for (let y = 0; y < N; y++) for (let x = 0; x < N; x++) { let s = 0, n = 0; for (let d = -r; d <= r; d++) { const xx = x + d; if (xx >= 0 && xx < N) { s += a[y * N + xx]; n++; } } t[y * N + x] = s / n; }
+    for (let y = 0; y < N; y++) for (let x = 0; x < N; x++) { let s = 0, n = 0; for (let d = -r; d <= r; d++) { const yy = y + d; if (yy >= 0 && yy < N) { s += t[yy * N + x]; n++; } } o[y * N + x] = s / n; }
+    return { kind: "field", v: o };
+  },
+  levels(f, p) {
+    const L = p.count, v = new Float32Array(N * N);
+    for (let i = 0; i < N * N; i++) v[i] = Math.min(L - 1, Math.floor(f.v[i] * L)) / (L - 1);
+    return { kind: "field", v, levels: L, raw: f.v };
+  },
+  hatch(f, p) {
+    const L = f.levels || 6, np = lanePens();
+    const q = new Uint8Array(N * N);
+    for (let i = 0; i < N * N; i++) q[i] = f.levels ? Math.round(f.v[i] * (L - 1)) : Math.min(L - 1, Math.floor(f.v[i] * L));
+    const layers = page.pens.map((_, i) => ({ pen: i, paths: [] }));
+    const base = Math.max(0.35, p.spacing / mmpx()), Rr = N * 0.7072, c = N / 2;
+    for (let k = 1; k < L; k++) {
+      const th = ((p.angle + (k - 1) * p.turn) * Math.PI) / 180, ux = Math.cos(th), uy = Math.sin(th), nx = -uy, ny = ux;
+      const s = p.cumulative ? base : base * ((L - 1) / k) * 0.6 + base * 0.4;
+      const out = layers[(k - 1) % np].paths;
+      for (let o = -Rr; o <= Rr; o += s) {
+        let run = null, lx = 0, ly = 0;
+        for (let t = -Rr; t <= Rr; t += 0.5) {
+          const x = c + nx * o + ux * t, y = c + ny * o + uy * t;
+          const inside = x >= 0 && y >= 0 && x < N && y < N;
+          const hit = inside && (p.cumulative ? q[(y | 0) * N + (x | 0)] >= k : q[(y | 0) * N + (x | 0)] === k);
+          if (hit) { if (!run) run = [x, y]; lx = x; ly = y; }
+          else if (run) { if (Math.hypot(lx - run[0], ly - run[1]) > 0.6) out.push([run[0], run[1], lx, ly]); run = null; }
+        }
+        if (run && Math.hypot(lx - run[0], ly - run[1]) > 0.6) out.push([run[0], run[1], lx, ly]);
+      }
+    }
+    return { kind: "geometry", layers };
+  },
+  contours(f, p) {
+    const src = f.raw || f.v, L = f.levels || 6, np = lanePens();
+    const layers = page.pens.map((_, i) => ({ pen: i, paths: [] }));
+    const T = { 1: [["L", "B"]], 2: [["B", "R"]], 3: [["L", "R"]], 4: [["T", "R"]], 5: [["T", "R"], ["L", "B"]], 6: [["T", "B"]], 7: [["T", "L"]], 8: [["T", "L"]], 9: [["T", "B"]], 10: [["T", "L"], ["B", "R"]], 11: [["T", "R"]], 12: [["L", "R"]], 13: [["B", "R"]], 14: [["L", "B"]] };
+    for (let k = 1; k < L; k++) {
+      const t = k / L, out = layers[p.alt ? (k - 1) % np : 0].paths;
+      for (let j = 0; j < N - 1; j++) for (let i = 0; i < N - 1; i++) {
+        const a = src[j * N + i], b = src[j * N + i + 1], cc = src[(j + 1) * N + i + 1], d = src[(j + 1) * N + i];
+        const idx = (a > t ? 8 : 0) | (b > t ? 4 : 0) | (cc > t ? 2 : 0) | (d > t ? 1 : 0);
+        const segs = T[idx]; if (!segs) continue;
+        const it = (va, vb) => (vb === va ? 0.5 : (t - va) / (vb - va));
+        const E = { T: () => [i + it(a, b), j], R: () => [i + 1, j + it(b, cc)], B: () => [i + it(d, cc), j + 1], L: () => [i, j + it(a, d)] };
+        for (const [e1, e2] of segs) { const p1 = E[e1](), p2 = E[e2](); out.push([p1[0] + 0.5, p1[1] + 0.5, p2[0] + 0.5, p2[1] + 0.5]); }
+      }
+    }
+    return { kind: "geometry", layers };
+  },
+  wobble(g, p) {
+    const amp = p.amount / mmpx(), seed = p.seed;
+    const h = (x, y) => { const s = Math.sin(x * 127.1 + y * 311.7 + seed * 74.7) * 43758.5453; return s - Math.floor(s); };
+    const noise = (x, y) => { const xi = Math.floor(x), yi = Math.floor(y), xf = x - xi, yf = y - yi, u = xf * xf * (3 - 2 * xf), v = yf * yf * (3 - 2 * yf);
+      return (h(xi, yi) * (1 - u) + h(xi + 1, yi) * u) * (1 - v) + (h(xi, yi + 1) * (1 - u) + h(xi + 1, yi + 1) * u) * v; };
+    const layers = g.layers.map((l) => ({ pen: l.pen, paths: l.paths.map((pt) => {
+      const out = [];
+      for (let i = 0; i < pt.length - 2; i += 2) {
+        const x0 = pt[i], y0 = pt[i + 1], x1 = pt[i + 2], y1 = pt[i + 3], n = Math.max(1, Math.ceil(Math.hypot(x1 - x0, y1 - y0) / 2));
+        for (let s = i === 0 ? 0 : 1; s <= n; s++) { const x = x0 + ((x1 - x0) * s) / n, y = y0 + ((y1 - y0) * s) / n;
+          out.push(x + (noise(x * 0.12, y * 0.12) - 0.5) * 2 * amp, y + (noise(x * 0.12 + 40, y * 0.12 + 40) - 0.5) * 2 * amp); }
+      }
+      return out;
+    }) }));
+    return { kind: "geometry", layers };
+  },
+  stipple(f, p) {
+    const s = Math.max(0.6, p.spacing / mmpx()), r = Math.max(0.15, p.dot / 2 / mmpx());
+    let seed = p.seed >>> 0; const rnd = () => ((seed = (seed * 1664525 + 1013904223) >>> 0) / 4294967296);
+    const paths = [];
+    for (let y = s / 2; y < N; y += s) for (let x = s / 2; x < N; x += s) {
+      const jx = x + (rnd() - 0.5) * s, jy = y + (rnd() - 0.5) * s;
+      if (jx < 0 || jy < 0 || jx >= N || jy >= N) continue;
+      if (rnd() > f.v[(jy | 0) * N + (jx | 0)]) continue;
+      const pt = []; for (let a = 0; a <= 6; a++) { const t = (a / 6) * Math.PI * 2; pt.push(jx + Math.cos(t) * r, jy + Math.sin(t) * r); }
+      paths.push(pt);
+    }
+    const layers = page.pens.map((_, i) => ({ pen: i, paths: [] })); layers[0].paths = paths;
+    return { kind: "geometry", layers };
+  },
+  order(g, p) {
+    let px = 0, py = 0, travelLen = 0, downLen = 0, lifts = 0;
+    const travel = [], layers = [];
+    for (const l of g.layers) {
+      const paths = l.paths, n = paths.length, used = new Uint8Array(n), out = [];
+      let head = 0;
+      for (let c = 0; c < n; c++) {
+        while (used[head]) head++;
+        let best = head, bd = Infinity, flip = false;
+        const W = p.mode === "Scan" ? 1 : 260;
+        for (let i = head, seen = 0; i < n && seen < W; i++) {
+          if (used[i]) continue; seen++;
+          const pt = paths[i], ds = (pt[0] - px) ** 2 + (pt[1] - py) ** 2, de = (pt[pt.length - 2] - px) ** 2 + (pt[pt.length - 1] - py) ** 2;
+          if (ds < bd) { bd = ds; best = i; flip = false; }
+          if (de < bd) { bd = de; best = i; flip = true; }
+          if (bd < 1e-4) break;
+        }
+        used[best] = 1;
+        let pt = paths[best];
+        if (flip) { const r = []; for (let i = pt.length - 2; i >= 0; i -= 2) r.push(pt[i], pt[i + 1]); pt = r; }
+        const d = Math.sqrt(bd === Infinity ? 0 : bd);
+        if (d > 0.05 || !out.length) { if (out.length || travel.length || c > 0 || layers.length) { travel.push([px, py, pt[0], pt[1]]); travelLen += d; lifts++; } out.push(pt.slice()); }
+        else { const last = out[out.length - 1]; for (let i = 2; i < pt.length; i++) last.push(pt[i]); }
+        for (let i = 0; i < pt.length - 2; i += 2) downLen += Math.hypot(pt[i + 2] - pt[i], pt[i + 3] - pt[i + 1]);
+        px = pt[pt.length - 2]; py = pt[pt.length - 1];
+      }
+      layers.push({ pen: l.pen, paths: out });
+    }
+    return { kind: "toolpath", layers, travel, downLen, travelLen, lifts };
+  },
+};
+
+const cache = new Map();
+const MAIN_START = { stage: "image", key: "src", data: () => SRC };
+let ctxStart = MAIN_START, EVAL_LANE = false;
+const lanePens = () => (EVAL_LANE ? 1 : page.pens.length);
+function evaluate(list, start = MAIN_START) {
+  let cur = start.data(), key = start.key + "|" + page.paper + page.landscape + page.margin + page.pens.length;
+  const outs = []; EVAL_LANE = !!start.lane;
+  for (const s of list) {
+    if (s.on) {
+      const prm = start.angleOffset && s.step === "hatch" ? { ...s.params, angle: s.params.angle + start.angleOffset } : s.params;
+      key += "|" + s.step + JSON.stringify(prm);
+      if (!cache.has(key)) { if (cache.size > 600) cache.clear(); cache.set(key, STEPS[s.step](cur, prm)); }
+      cur = cache.get(key);
+    }
+    outs.push(cur);
+  }
+  EVAL_LANE = false;
+  return outs;
+}
+function chainOK(list, st = ctxStart.stage) {
+  for (const s of list) { if (!s.on) continue; const d = DEFS[s.step]; if (d.in !== "any" && d.in !== st) return false; if (d.out !== "same") st = d.out; }
+  return true;
+}
+const outStage = (list, i, st0 = ctxStart.stage) => { let st = st0; for (let k = 0; k <= i && k < list.length; k++) if (list[k].on) { const o = DEFS[list[k].step].out; if (o !== "same") st = o; } return st; };
+function ioAt(list, i, st0 = ctxStart.stage) {
+  const st = i > 0 ? outStage(list, i - 1, st0) : st0, d = DEFS[list[i].step], inn = d.in === "any" ? st : d.in;
+  return { inn, out: d.out === "same" ? inn : d.out };
+}
+function pixField(f, c, sh) {
+  const nb = Math.ceil((N + c) / c) + 1, sums = new Float32Array(nb * nb * 2);
+  const bi = (x, y) => Math.floor((y + sh) / c) * nb + Math.floor((x + sh) / c);
+  for (let y = 0; y < N; y++) for (let x = 0; x < N; x++) { const b = bi(x, y) * 2; sums[b] += f.v[y * N + x]; sums[b + 1]++; }
+  const v = new Float32Array(N * N);
+  for (let y = 0; y < N; y++) for (let x = 0; x < N; x++) { const b = bi(x, y) * 2; v[y * N + x] = sums[b] / sums[b + 1]; }
+  return { kind: "field", v };
+}
+
+/* CMYK lanes */
+const INKC = { C: { name: "Cyan", color: "#00a0d6", text: "#fff" }, M: { name: "Magenta", color: "#d6127a", text: "#fff" }, Y: { name: "Yellow", color: "#f0c400", text: "#1d1d1b" }, K: { name: "Black", color: "#1d1d1b", text: "#fff" } };
+const cmyk = { linked: true, laneView: "all", panels: false, screenAngles: true, prevRecipe: null, linkArmed: false, gcr: 0.5, order: ["Y", "M", "C", "K"], vis: { C: true, M: true, Y: true, K: true }, blend: "multiply", focus: "stack", lane: "C", context: true, lanes: null, sel: -1 };
+const SCREEN = { C: 15, M: 75, Y: 0, K: 45 };
+function makeLanes() {
+  return {
+    C: [mk("levels", { count: 4 }), mk("hatch", { spacing: 2, angle: 15, turn: 0 }), mk("order")],
+    M: [mk("pixelate", { cell: 6 }), mk("levels", { count: 4 }), mk("hatch", { spacing: 1.8, angle: 75, turn: 0 }), mk("order")],
+    Y: [mk("stipple", { spacing: 2.4 }), mk("order")],
+    K: [mk("levels", { count: 3 }), mk("hatch", { spacing: 2.2, angle: 45, turn: 90 }), mk("order")],
+  };
+}
+let sepCache = { gcr: -1 };
+function seps() {
+  if (sepCache.gcr === cmyk.gcr) return sepCache.f;
+  const f = { C: new Float32Array(N * N), M: new Float32Array(N * N), Y: new Float32Array(N * N), K: new Float32Array(N * N) };
+  for (let i = 0; i < N * N; i++) {
+    const r = SRC.rgb[i * 3], g = SRC.rgb[i * 3 + 1], b = SRC.rgb[i * 3 + 2], k = (1 - Math.max(r, g, b)) * cmyk.gcr, d = 1 - k || 1;
+    f.C[i] = Math.min(1, Math.max(0, (1 - r - k) / d)); f.M[i] = Math.min(1, Math.max(0, (1 - g - k) / d)); f.Y[i] = Math.min(1, Math.max(0, (1 - b - k) / d)); f.K[i] = k;
+  }
+  for (const ink in f) f[ink] = { kind: "field", v: f[ink] };
+  sepCache = { gcr: cmyk.gcr, f };
+  return f;
+}
+const laneStart = (ink, sa) => ({ stage: "field", lane: true, ink, get angleOffset() { return (sa ?? cmyk.screenAngles) ? SCREEN[ink] : 0; }, get key() { return `lane-${ink}-${cmyk.gcr}-${this.angleOffset}`; }, data: () => seps()[ink] });
+function useLane(ink) { cmyk.lane = ink; recipe = cmyk.lanes[ink]; ctxStart = laneStart(ink); }
+function useMain() { recipe = proj.recipe; ctxStart = MAIN_START; }
+function laneFinal(ink, lanes = cmyk.lanes, sa) { const o = evaluate(lanes[ink], laneStart(ink, sa)); return o.length ? o[o.length - 1] : seps()[ink]; }
+function laneAt(ink, i) { const o = evaluate(cmyk.lanes[ink], laneStart(ink)); return i < 0 ? seps()[ink] : o[Math.min(i, o.length - 1)] ?? seps()[ink]; }
+function aggStats(list) { const ss = list.map(pathStats).filter(Boolean); if (!ss.length) return null; return { lines: ss.reduce((a, x) => a + x.lines, 0), downMM: ss.reduce((a, x) => a + x.downMM, 0), seconds: ss.some((x) => x.seconds) ? ss.reduce((a, x) => a + (x.seconds || 0), 0) + (ss.length - 1) * 25 : 0 }; }
+function drawPanels(g, cx, cy, side, pick) {
+  const h = side / 2, pad = side * 0.012, dpr = window.devicePixelRatio || 1;
+  ["C", "M", "Y", "K"].forEach((ink, q) => {
+    const x = cx + (q % 2) * h + pad, y = cy + Math.floor(q / 2) * h + pad, sz = h - 2 * pad;
+    g.save(); g.beginPath(); g.rect(x, y, sz, sz); g.clip(); g.fillStyle = PAPER; g.fillRect(x, y, sz, sz);
+    g.globalCompositeOperation = "multiply"; drawData(g, pick(ink), x, y, sz, { color: INKC[ink].color, tint: INKC[ink].color }); g.restore();
+    const cur = !cmyk.linked && cmyk.focus === "step" && cmyk.lane === ink;
+    g.strokeStyle = cur ? css("--accent") : "rgba(29,29,27,0.18)"; g.lineWidth = (cur ? 2.5 : 1) * dpr; g.strokeRect(x, y, sz, sz);
+    g.font = `600 ${11 * dpr}px system-ui`; g.textBaseline = "middle"; g.textAlign = "left";
+    const t = INKC[ink].name, tw = g.measureText(t).width + 12 * dpr;
+    g.fillStyle = INKC[ink].color; g.beginPath(); g.roundRect(x + 4 * dpr, y + 4 * dpr, tw, 18 * dpr, 9 * dpr); g.fill();
+    g.fillStyle = INKC[ink].text; g.fillText(t, x + 10 * dpr, y + 13.5 * dpr);
+  });
+}
+function lanesDiffer() { const sig = (l) => JSON.stringify(l.map((s) => [s.step, s.params, s.on])); const a = sig(cmyk.lanes.C); return ["M", "Y", "K"].some((k) => sig(cmyk.lanes[k]) !== a); }
+function splitCMYK(fromPreset) {
+  const r = proj.recipe;
+  proj.checkpoints.unshift({ name: "Before splitting into CMYK", ago: "just now", recipe: clone(r) });
+  cmyk.prevRecipe = clone(r);
+  if (fromPreset) { cmyk.lanes = makeLanes(); cmyk.linked = false; cmyk.screenAngles = false; }
+  else {
+    const k = r.findIndex((_, i) => ioAt(r, i, "image").inn === "field");
+    let chain = k >= 0 ? clone(r.slice(k)) : [];
+    if (!chain.length || !chainOK(chain, "field")) chain = [mk("levels", { count: 5 }), mk("hatch"), mk("order")];
+    cmyk.lanes = { C: chain, M: chain, Y: chain, K: chain }; cmyk.linked = true; cmyk.screenAngles = true;
+  }
+  cmyk.focus = "stack"; cmyk.sel = -1; cmyk.laneView = "all"; cmyk.lane = "C"; cmyk.panels = false;
+  proj.isCmyk = true; mainSel = sel; view = "cmyk"; mode = "design"; useLane("C"); sel = -1;
+  renderAll();
+  toast(fromPreset ? "Split into four inks, each with its own steps. Undo the split from the Separate CMYK box." : "Split into four inks. The steps after the photo now drive all four, linked. Switch to Independent to give an ink its own steps.");
+}
+function leaveCmyk() { proj.isCmyk = false; view = "editor"; useMain(); }
+function unsplitCMYK() {
+  leaveCmyk(); proj.recipe = recipe = cmyk.prevRecipe || [mk("tone"), ...clone(cmyk.lanes.C)]; sel = recipe.length - 1;
+  renderAll(); toast("Back to one chain: the recipe you had before the split.");
+}
+function setLinked(on) {
+  if (on === cmyk.linked) return;
+  if (on && lanesDiffer() && !cmyk.linkArmed) { cmyk.linkArmed = true; setTimeout(() => (cmyk.linkArmed = false), 5000); return toast(`The inks have different steps. Linking copies the ${INKC[cmyk.lane].name.toLowerCase()} lane to all four. Click Linked again to do it.`); }
+  cmyk.linkArmed = false;
+  if (on) { const base = clone(cmyk.lanes[cmyk.lane]); for (const k of "CMYK") cmyk.lanes[k] = base; }
+  else { const base = cmyk.lanes.C; for (const k of "CMYK") cmyk.lanes[k] = clone(base); }
+  cmyk.linked = on; useLane(cmyk.lane); if (sel >= recipe.length) sel = recipe.length - 1;
+  renderAll(); toast(on ? `Linked: all four inks use the ${INKC[cmyk.lane].name.toLowerCase()} chain.` : "Independent: each ink has its own copy of the steps now.");
+}
+function stackStats() {
+  let lines = 0, downMM = 0, seconds = 0, n = 0;
+  for (const ink of cmyk.order) { if (!cmyk.vis[ink]) continue; const s = pathStats(laneFinal(ink)); if (!s) continue; n++; lines += s.lines; downMM += s.downMM; seconds += s.seconds || 0; }
+  return { lines, downMM, seconds: seconds + Math.max(0, n - 1) * 25, pens: n };
+}
+function drawStack(g, cx, cy, side, o = {}) {
+  const lanes = o.lanes || cmyk.lanes;
+  g.save(); g.globalCompositeOperation = cmyk.blend === "multiply" ? "multiply" : "source-over";
+  for (const ink of cmyk.order) {
+    if (!cmyk.vis[ink] || o.skip === ink) continue;
+    g.globalAlpha = o.alpha ?? 1;
+    drawData(g, laneFinal(ink, lanes, o.sa), cx, cy, side, { color: INKC[ink].color, tint: INKC[ink].color, minLw: o.minLw });
+  }
+  g.restore();
+}
+function pathStats(data) {
+  if (!data || (data.kind !== "geometry" && data.kind !== "toolpath")) return null;
+  let lines = 0, len = 0;
+  for (const l of data.layers) { lines += l.paths.length; for (const pt of l.paths) for (let i = 0; i < pt.length - 2; i += 2) len += Math.hypot(pt[i + 2] - pt[i], pt[i + 3] - pt[i + 1]); }
+  const mm = mmpx(), r = { lines, downMM: len * mm };
+  if (data.kind === "toolpath") {
+    r.travelMM = data.travelLen * mm; r.lifts = data.lifts;
+    const swaps = Math.max(0, data.layers.filter((l) => l.paths.length).length - 1);
+    r.swaps = swaps; r.drawS = r.downMM / 28; r.travelS = r.travelMM / 80; r.liftS = r.lifts * 0.18; r.swapS = swaps * 25;
+    r.seconds = r.drawS + r.travelS + r.liftS + r.swapS;
+  }
+  return r;
+}
+const fmtMin = (s) => (s < 90 ? Math.round(s) + " s" : "~" + Math.round(s / 60) + " min");
+const fmtM = (mm) => (mm > 1000 ? (mm / 1000).toFixed(1) + " m" : Math.round(mm) + " mm");
+
+/* ---------------- drawing ---------------- */
+const css = (v) => getComputedStyle(document.documentElement).getPropertyValue(v).trim();
+const PAPER = "#fffdf8";
+function bitmap(d, tint) {
+  const key = tint || "_"; d._bmps = d._bmps || {};
+  if (d._bmps[key]) return d._bmps[key];
+  const c = document.createElement("canvas"); c.width = c.height = N;
+  const g = c.getContext("2d"), im = g.createImageData(N, N);
+  const t = tint ? [1, 3, 5].map((o) => parseInt(tint.slice(o, o + 2), 16)) : null;
+  for (let i = 0; i < N * N; i++) {
+    let r, gg, b;
+    if (d.kind === "image") { r = d.rgb[i * 3] * 255; gg = d.rgb[i * 3 + 1] * 255; b = d.rgb[i * 3 + 2] * 255; }
+    else if (t) { const v = d.v[i]; r = 255 + (t[0] - 255) * v; gg = 253 + (t[1] - 253) * v; b = 248 + (t[2] - 248) * v; }
+    else { const v = d.v[i]; r = 255 - v * 226; gg = 253 - v * 224; b = 248 - v * 221; }
+    im.data[i * 4] = r; im.data[i * 4 + 1] = gg; im.data[i * 4 + 2] = b; im.data[i * 4 + 3] = 255;
+  }
+  g.putImageData(im, 0, 0);
+  return (d._bmps[key] = c);
+}
+function penColor(i) { return INKS[page.pens[i] ?? 0]?.color || "#1d1d1b"; }
+function drawData(g, d, x, y, size, o = {}) {
+  if (!d) return;
+  if (d.kind === "image" || d.kind === "field") {
+    g.imageSmoothingEnabled = d.kind === "image" && !o.crisp ? true : false;
+    g.drawImage(bitmap(d, o.tint), x, y, size, size);
+    return;
+  }
+  const k = size / N, lw = Math.max(o.minLw ?? 0.5, (0.3 / mmpx()) * k);
+  let layers = d.layers;
+  if (o.penOrder) layers = o.penOrder.map((pi) => layers.find((l) => l.pen === pi)).filter(Boolean);
+  let budget = Infinity;
+  if (o.progress != null) { const total = layers.reduce((a, l) => a + l.paths.length, 0); budget = Math.floor(total * o.progress); }
+  let last = null;
+  g.lineCap = "round"; g.lineJoin = "round"; g.lineWidth = lw;
+  for (const l of layers) {
+    if (o.solo != null && l.pen !== o.solo) continue;
+    if (budget <= 0) break;
+    g.strokeStyle = o.color || penColor(l.pen); g.beginPath();
+    for (const pt of l.paths) {
+      if (budget-- <= 0) break;
+      g.moveTo(x + pt[0] * k, y + pt[1] * k);
+      for (let i = 2; i < pt.length; i += 2) g.lineTo(x + pt[i] * k, y + pt[i + 1] * k);
+      last = [pt[pt.length - 2], pt[pt.length - 1], l.pen];
+    }
+    g.stroke();
+  }
+  if (o.travel && d.travel) {
+    g.save(); g.strokeStyle = "rgba(208,70,59,0.55)"; g.lineWidth = Math.max(0.5, lw * 0.6); g.setLineDash([3, 3]); g.beginPath();
+    for (const t of d.travel) { g.moveTo(x + t[0] * k, y + t[1] * k); g.lineTo(x + t[2] * k, y + t[3] * k); }
+    g.stroke(); g.restore();
+  }
+  if (o.progress != null && o.progress < 1 && last) {
+    g.fillStyle = penColor(last[2]); g.strokeStyle = "#fff"; g.lineWidth = 2;
+    g.beginPath(); g.arc(x + last[0] * k, y + last[1] * k, 6, 0, Math.PI * 2); g.fill(); g.stroke();
+  }
+}
+function drawThumb(cv, d, o = {}) {
+  const dpr = window.devicePixelRatio || 1, w = cv.clientWidth || 96;
+  cv.width = cv.height = Math.round(w * dpr);
+  const g = cv.getContext("2d");
+  g.fillStyle = PAPER; g.fillRect(0, 0, cv.width, cv.height);
+  if (o.draw) o.draw(g, cv.width); else drawData(g, d, 0, 0, cv.width, { minLw: 0.3 * dpr, ...o });
+}
+function fitCanvas(cv) {
+  const dpr = window.devicePixelRatio || 1, r = cv.getBoundingClientRect();
+  cv.width = Math.max(1, Math.round(r.width * dpr)); cv.height = Math.max(1, Math.round(r.height * dpr));
+  return { g: cv.getContext("2d"), w: cv.width, h: cv.height, dpr };
+}
+// draws the paper with content; returns the content square in canvas px (for compare dragging)
+function drawPaperScene(cv, opts) {
+  const { g, w, h, dpr } = fitCanvas(cv);
+  g.fillStyle = css("--canvas-bg"); g.fillRect(0, 0, w, h);
+  const [pw, ph] = paperMM(), padT = (opts.padTop ?? 64) * dpr, pad = 24 * dpr;
+  const sc = Math.min((w - 2 * pad) / pw, (h - padT - pad) / ph);
+  const px = (w - pw * sc) / 2, py = padT + (h - padT - pad - ph * sc) / 2;
+  g.save(); g.shadowColor = "rgba(0,0,0,0.18)"; g.shadowBlur = 10 * dpr; g.shadowOffsetY = 2 * dpr;
+  g.fillStyle = PAPER; g.fillRect(px, py, pw * sc, ph * sc); g.restore();
+  const side = contentMM() * sc, cx = px + (pw * sc - side) / 2, cy = py + (ph * sc - side) / 2;
+  if (opts.draw) opts.draw(g, cx, cy, side);
+  else if (opts.cmp) drawCompare(g, opts.cmp, cx, cy, side, dpr, opts);
+  else if (opts.compare != null && opts.before) drawCompare(g, { layout: "cols", bands: [{ data: opts.before, label: "Before" }, { data: opts.data, label: "After" }], splits: [opts.compare] }, cx, cy, side, dpr, opts);
+  else drawData(g, opts.data, cx, cy, side, opts);
+  if (opts.pageGuides) {
+    g.save(); g.strokeStyle = css("--accent"); g.setLineDash([5 * dpr, 4 * dpr]); g.lineWidth = dpr;
+    const m = page.margin * sc; g.strokeRect(px + m, py + m, pw * sc - 2 * m, ph * sc - 2 * m); g.restore();
+    g.fillStyle = css("--muted"); g.font = `${12 * dpr}px system-ui`; g.textAlign = "center"; g.textBaseline = "top";
+    g.fillText(`${page.paper} · ${pw} × ${ph} mm · margin ${page.margin} mm`, px + (pw * sc) / 2, py + ph * sc + 6 * dpr);
+  }
+  if (page.regmarks) {
+    g.strokeStyle = "#1d1d1b"; g.lineWidth = dpr; const L = 6 * sc, o = 8 * sc;
+    for (const [ax, ay] of [[px + o, py + o], [px + pw * sc - o, py + o], [px + o, py + ph * sc - o], [px + pw * sc - o, py + ph * sc - o]]) {
+      g.beginPath(); g.moveTo(ax - L / 2, ay); g.lineTo(ax + L / 2, ay); g.moveTo(ax, ay - L / 2); g.lineTo(ax, ay + L / 2); g.stroke();
+      g.beginPath(); g.arc(ax, ay, L / 4, 0, Math.PI * 2); g.stroke();
+    }
+  }
+  return { cx: cx / dpr, cy: cy / dpr, side: side / dpr };
+}
+
+function drawCompare(g, c, cx, cy, side, dpr, opts) {
+  const fill = (x0, y0, w, h, data) => { g.save(); g.beginPath(); g.rect(x0, y0, w, h); g.clip(); g.fillStyle = PAPER; g.fillRect(x0, y0, w, h); drawData(g, data, cx, cy, side, opts); g.restore(); };
+  const pill = (b, x, y, avail, align = "center") => {
+    g.font = `600 ${11 * dpr}px system-ui`; g.textBaseline = "middle"; g.textAlign = "left";
+    let label = b.label, tw = g.measureText(label).width + 12 * dpr;
+    if (avail < tw + 4 * dpr) { label = b.short || label; tw = g.measureText(label).width + 12 * dpr; }
+    if (avail < tw) return;
+    const lx = align === "center" ? x - tw / 2 : x, h = 18 * dpr;
+    g.fillStyle = b.color || "rgba(29,29,27,0.75)"; g.beginPath(); g.roundRect(lx, y, tw, h, 9 * dpr); g.fill();
+    if (b.uid && b.uid === c.selUid) { g.strokeStyle = css("--ink"); g.lineWidth = 2 * dpr; g.stroke(); }
+    g.fillStyle = "#fff"; g.fillText(label, lx + 6 * dpr, y + h / 2 + 0.5 * dpr);
+  };
+  const handle = (x, y, glyph) => { g.fillStyle = css("--accent"); g.beginPath(); g.arc(x, y, 11 * dpr, 0, Math.PI * 2); g.fill(); g.fillStyle = "#fff"; g.font = `${11 * dpr}px system-ui`; g.textAlign = "center"; g.textBaseline = "middle"; g.fillText(glyph, x, y + dpr); };
+  if (c.layout === "cols" || c.layout === "rows") {
+    const rows = c.layout === "rows", e = [0, ...c.splits, 1];
+    c.bands.forEach((b, k) => { const a = side * e[k], z = side * e[k + 1]; rows ? fill(cx, cy + a, side, z - a, b.data) : fill(cx + a, cy, z - a, side, b.data); });
+    c.bands.forEach((b, k) => { const a = side * e[k], z = side * e[k + 1];
+      if (rows) { if (z - a >= 26 * dpr) pill(b, cx + 6 * dpr, cy + a + 4 * dpr, side, "left"); } else pill(b, cx + (a + z) / 2, cy - 22 * dpr, z - a); });
+    c.splits.forEach((sp, k) => { const off = (k - (c.splits.length - 1) / 2) * 0.1; g.fillStyle = css("--accent");
+      if (rows) { const y = cy + side * sp; g.fillRect(cx, y - dpr, side, 2 * dpr); handle(cx + side * (0.5 + off), y, "⇕"); }
+      else { const x = cx + side * sp; g.fillRect(x - dpr, cy, 2 * dpr, side); handle(x, cy + side * (0.5 + off), "⇔"); } });
+    return;
+  }
+  const base = c.bands[0];
+  drawData(g, base.data, cx, cy, side, opts);
+  pill({ ...base, label: "Under: " + base.label }, cx, cy - 22 * dpr, side, "left");
+  if (c.layout === "lens") {
+    const b = c.bands[1] || base, L = c.lens, x = cx + side * L.x, y = cy + side * L.y, r = side * L.r;
+    g.save(); g.beginPath(); g.arc(x, y, r, 0, Math.PI * 2); g.clip(); g.fillStyle = PAPER; g.fillRect(x - r, y - r, 2 * r, 2 * r); drawData(g, b.data, cx, cy, side, opts); g.restore();
+    g.strokeStyle = b.color; g.lineWidth = 3 * dpr; g.beginPath(); g.arc(x, y, r, 0, Math.PI * 2); g.stroke();
+    pill(b, x, y + r + 6 * dpr, side);
+  } else {
+    for (const b of c.boxes) {
+      const x = cx + side * b.x, y = cy + side * b.y, w = side * b.w, h = side * b.h;
+      fill(x, y, w, h, b.data);
+      g.strokeStyle = b.color; g.lineWidth = 2 * dpr; g.strokeRect(x, y, w, h);
+      g.fillStyle = b.color; g.fillRect(x + w - 9 * dpr, y + h - 9 * dpr, 9 * dpr, 9 * dpr);
+      pill(b, x + 4 * dpr, y + 4 * dpr, w - 8 * dpr, "left");
+    }
+  }
+}
+
+/* ---------------- state ---------------- */
+const projects = [];
+let proj, recipe, outs = [];
+let sel = 0, mode = "design", variant = "a", compare = null, showTravel = false, helpOpen = false, popClosed = false;
+let cmp = null, cmpLayout = "cols"; // { layout, bands: ["photo" | uid], splits, lens: {x,y,r}, boxes: [{x,y,w,h,uid}] }
+let view = "editor", mainSel = 0;
+const pinned = new Set(), helpSet = new Set();
+let plotT = 1, playing = false, solo = null, penOrder = [0, 1], version = null;
+const VARIANTS = { a: "Sidebar", b: "Popover", c: "Drawer" };
+
+function makeProjects() {
+  const mkp = (name, pid, cps) => {
+    const r = PRESETS.find((p) => p.id === pid).make();
+    return { name, recipe: r, checkpoints: cps.map(([n, ago, f]) => ({ name: n, ago, recipe: f(clone(r)) })) };
+  };
+  projects.push(mkp("Mona Lisa · topo hatch", "topo", [
+    ["Before wobble test", "today 09:40", (r) => r],
+    ["Four bands, wide lines", "yesterday", (r) => { r[1].params.count = 4; r[2].params.spacing = 2.2; return r; }],
+    ["First try", "Nov 21", (r) => { r[2].params.turn = 90; r[2].params.cumulative = false; return r; }],
+  ]));
+  projects.push(mkp("Mona Lisa · contours", "contours", [["Eight bands", "Nov 24", (r) => r], ["Twelve bands", "Nov 23", (r) => { r[2].params.count = 10; return r; }]]));
+  projects.push(mkp("Mona Lisa · pixel hatch", "pixel", [["Big cells", "Nov 20", (r) => { r[0].params.cell = 11; return r; }]]));
+  proj = projects[0]; recipe = proj.recipe; sel = recipe.length - 1;
+}
+
+/* ---------------- desktop render ---------------- */
+const $ = (s, r = document) => r.querySelector(s);
+const esc = (s) => String(s).replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" })[c]);
+const stv = (st) => `var(${STAGES[st].v})`;
+let toastT;
+function toast(msg) {
+  let t = $(".toast"); if (!t) { t = document.createElement("div"); t.className = "toast"; t.setAttribute("role", "status"); document.body.appendChild(t); }
+  t.textContent = msg; t.hidden = false; clearTimeout(toastT); toastT = setTimeout(() => (t.hidden = true), 3200);
+}
+
+function current() { return sel < 0 ? SRC : outs[sel]; }
+function selStage() { return sel < 0 ? "image" : outStage(recipe, sel); }
+function finalOut() { return outs[outs.length - 1] || SRC; }
+
+let rafPending = false;
+function schedule() { if (rafPending) return; rafPending = true; requestAnimationFrame(() => { rafPending = false; refresh(); }); }
+function refresh() {
+  outs = evaluate(recipe, ctxStart);
+  drawMain(); drawThumbs(); renderOverlays(); renderChip();
+  if (mode === "plot") renderPlotPanelLive();
+}
+
+function renderAll() {
+  outs = evaluate(recipe, ctxStart);
+  document.querySelectorAll(".modes button").forEach((b) => b.setAttribute("aria-pressed", String(b.dataset.mode === mode)));
+  $("#proj-name").textContent = view === "cmyk" ? proj.name + " · CMYK" : proj.name;
+  const vt = $("#version-tag"); vt.hidden = !version; vt.textContent = version || "";
+  renderStrip(); renderPanels(); renderOverlays(); renderChip(); drawMain(); drawThumbs();
+}
+
+function renderChip() {
+  const cm = view === "cmyk", st = cm ? stackStats() : pathStats(outs[outs.length - 1]);
+  const cols = cm ? cmyk.order.filter((k) => cmyk.vis[k]).map((k) => INKC[k].color) : page.pens.map((p) => INKS[p].color);
+  const dots = cols.map((c) => `<span class="dot" style="background:${c}"></span>`).join("");
+  const t = page.machine === "Digital only" ? "screen + SVG" : st?.seconds ? fmtMin(st.seconds) : "no toolpath yet";
+  $("#setup-chip").innerHTML = `${page.paper} · ${dots} ${cols.length} pen${cols.length > 1 ? "s" : ""} · ${esc(page.machine)} · <span class="num">${t}</span>`;
+}
+
+function renderOverlays() {
+  const L = $("#ov-left"), Rt = $("#ov-right");
+  let s;
+  if (view === "cmyk") {
+    const f = cmyk.focus; let name, st;
+    if (f === "stack") { name = "Stack · all inks"; st = "toolpath"; }
+    else if (f === "photo") { name = "Source photo"; st = "image"; }
+    else if (f === "sep") { name = cmyk.panels ? "Separations" : "Separations, recombined"; st = "field"; }
+    else { name = `${cmyk.linked ? "All inks" : INKC[cmyk.lane].name} · ${DEFS[recipe[sel].step].name}`; st = selStage(); }
+    L.innerHTML = `<div class="viewing"><span class="pill" style="--st:${stv(st)}">${STAGES[st].label}</span> Viewing <strong>${esc(name)}</strong></div>
+      ${f !== "photo" ? `<span class="seg"><button data-panels="0" aria-pressed="${!cmyk.panels}">Stacked</button><button data-panels="1" aria-pressed="${cmyk.panels}">Four panels</button></span>` : ""}
+      ${f === "step" && !cmyk.linked && !cmyk.panels ? `<button class="toggle-btn" id="ctx-btn" aria-pressed="${cmyk.context}" title="Show the other inks faintly underneath">Show other inks</button>` : ""}
+      ${f !== "stack" ? `<button id="show-stack">Show stack</button>` : ""}`;
+    s = f === "stack" ? stackStats() : f === "step" ? (cmyk.linked ? aggStats(["C", "M", "Y", "K"].map((k) => laneAt(k, sel))) : pathStats(current())) : null;
+  } else if (mode === "design") {
+    const st = selStage(), name = sel < 0 ? "Source photo" : DEFS[recipe[sel].step].name;
+    const off = sel >= 0 && !recipe[sel].on;
+    L.innerHTML = `<div class="viewing"><span class="pill" style="--st:${stv(st)}">${STAGES[st].label}</span> ${cmp ? "Sliders for" : "Viewing"} <strong>${esc(name)}</strong>${off ? ' <span class="muted">(switched off)</span>' : ""}
+      <span class="muted">${sel < 0 ? "" : `step ${sel + 1} of ${recipe.length}`}</span></div>
+      <button class="toggle-btn" id="cmp-btn" aria-pressed="${cmp != null}" title="Compare several steps on the same image">Compare stages</button>
+      ${st === "toolpath" ? `<button class="toggle-btn" id="trv-btn" aria-pressed="${showTravel}">Pen travel</button>` : ""}
+      ${sel !== recipe.length - 1 && !cmp ? `<button id="jump-end">Show final</button>` : ""}${cmp ? cmpBarHTML() : ""}`;
+    s = pathStats(current());
+  } else {
+    if (mode === "page") L.innerHTML = `<div class="viewing">Page setup: use the panel on the right</div>`;
+    else L.innerHTML = `<div class="viewing"><span class="pill" style="--st:var(--st-toolpath)">Toolpath</span> Plot preview ${solo != null ? `· only <strong>${esc(INKS[page.pens[solo]].name)}</strong>` : "· all pens"}</div>`;
+    s = pathStats(finalOut());
+  }
+  if (s) Rt.innerHTML = `<div class="stats"><span><span class="big num">${s.lines.toLocaleString()}</span> lines</span><span class="num">${fmtM(s.downMM)} ink</span>${s.seconds ? `<span class="num">${fmtMin(s.seconds)}</span>` : ""}</div>`;
+  else Rt.innerHTML = `<div class="stats"><span class="muted">${selStage() === "image" || (view === "cmyk" && cmyk.focus === "photo") ? "Image: no lines yet" : "Field: no lines yet"}</span></div>`;
+}
+
+function drawMain() {
+  const cv = $("#main-canvas");
+  let r;
+  const padTop = Math.max(56, ($("#ov-left").offsetHeight || 40) + 24 + (cmp && view === "editor" && mode === "design" ? 24 : 0));
+  if (view === "cmyk") {
+    const f = cmyk.focus, P = cmyk.panels; let draw;
+    const atStep = (ink) => (cmyk.linked ? laneAt(ink, sel) : ink === cmyk.lane ? current() : laneFinal(ink));
+    const stackOf = (pick) => (g, cx, cy, side) => { g.save(); g.globalCompositeOperation = cmyk.blend === "multiply" ? "multiply" : "source-over";
+      for (const ink of cmyk.order) if (cmyk.vis[ink]) drawData(g, pick(ink), cx, cy, side, { color: INKC[ink].color, tint: INKC[ink].color }); g.restore(); };
+    const panels = (pick) => (g, cx, cy, side) => drawPanels(g, cx, cy, side, pick);
+    if (f === "photo") draw = (g, cx, cy, side) => drawData(g, SRC, cx, cy, side);
+    else if (f === "sep") draw = P ? panels((k) => seps()[k]) : (g, cx, cy, side) => { g.save(); g.globalCompositeOperation = "multiply"; for (const ink of ["C", "M", "Y", "K"]) drawData(g, seps()[ink], cx, cy, side, { tint: INKC[ink].color }); g.restore(); };
+    else if (f === "stack") draw = P ? panels((k) => laneFinal(k)) : (g, cx, cy, side) => drawStack(g, cx, cy, side);
+    else if (P) draw = panels(atStep);
+    else if (cmyk.linked) draw = stackOf(atStep);
+    else draw = (g, cx, cy, side) => { if (cmyk.context) drawStack(g, cx, cy, side, { skip: cmyk.lane, alpha: 0.32 }); g.save(); g.globalCompositeOperation = "multiply"; drawData(g, current(), cx, cy, side, { color: INKC[cmyk.lane].color, tint: INKC[cmyk.lane].color }); g.restore(); };
+    cv._content = drawPaperScene(cv, { draw, padTop }); cv.style.cursor = ""; return;
+  }
+  if (mode === "design" && cmp) {
+    const c = { layout: cmp.layout, bands: cmp.bands.map(bandInfo), splits: cmp.splits, lens: cmp.lens, boxes: cmp.boxes.map((b) => ({ ...b, ...bandInfo(b.uid) })), selUid: selUid() };
+    r = drawPaperScene(cv, { cmp: c, travel: showTravel, padTop });
+  }
+  else if (mode === "design") r = drawPaperScene(cv, { data: current(), travel: showTravel, padTop });
+  else if (mode === "page") r = drawPaperScene(cv, { data: finalOut(), pageGuides: true, padTop });
+  else r = drawPaperScene(cv, { data: finalOut(), progress: plotT, solo, penOrder, padTop });
+  cv._content = r;
+  cv.style.cursor = mode === "design" && cmp ? { cols: "ew-resize", rows: "ns-resize", lens: "move", boxes: "crosshair" }[cmp.layout] : "";
+}
+const selUid = () => (sel >= 0 && recipe[sel] ? recipe[sel].uid : "photo");
+function bandInfo(u) {
+  const i = recipe.findIndex((s) => s.uid === u);
+  if (u === "photo" || i < 0) return { uid: "photo", data: SRC, label: "Photo", short: "▣", color: css("--st-image") };
+  const st = outStage(recipe, i);
+  return { uid: u, data: outs[i], label: `${i + 1} · ${DEFS[recipe[i].step].name}`, short: String(i + 1), color: css(STAGES[st].v) };
+}
+const evenSplits = (n) => Array.from({ length: Math.max(0, n - 1) }, (_, k) => (k + 1) / n);
+const newCmp = (bands) => ({ layout: cmpLayout, bands, splits: evenSplits(bands.length), lens: cmp?.lens || { x: 0.5, y: 0.42, r: 0.18 }, boxes: cmp?.boxes || [] });
+function cmpDefault() {
+  if (sel < 0) return newCmp(["photo", recipe[recipe.length - 1].uid]);
+  return newCmp([sel > 0 ? recipe[sel - 1].uid : "photo", recipe[sel].uid]);
+}
+function cmpAll() {
+  let b = recipe.filter((s) => s.on).map((s) => s.uid);
+  if (b.length > 5) b = b.slice(-5);
+  return newCmp(["photo", ...b]);
+}
+function addToCompare(u) {
+  const name = u === "photo" ? "Photo" : DEFS[recipe.find((s) => s.uid === u).step].name;
+  if (cmp.layout === "lens") cmp.bands[1] = u;
+  else if (cmp.layout === "boxes") cmp.boxes.push({ x: 0.36, y: 0.36, w: 0.28, h: 0.28, uid: u });
+  else { if (cmp.bands.length >= 6) return toast("Six strips is the most."); cmp.bands.push(u); cmp.splits = evenSplits(cmp.bands.length); }
+  renderOverlays(); drawMain(); toast(`Added ${name} to the comparison.`);
+}
+function cmpBarHTML() {
+  const opt = (cur) => `<option value="photo" ${cur === "photo" ? "selected" : ""}>Photo</option>` +
+    recipe.map((s, i) => `<option value="${s.uid}" ${cur === s.uid ? "selected" : ""}>${i + 1} · ${DEFS[s.step].name}${s.on ? "" : " (off)"}</option>`).join("");
+  const chip = (u, attrs, rm = "") => { const i = recipe.findIndex((s) => s.uid === u), st = i < 0 ? "image" : outStage(recipe, i);
+    return `<span class="band-chip" style="--st:${stv(st)}"><select ${attrs}>${opt(u)}</select>${rm}</span>`; };
+  const L = cmp.layout;
+  const seg = `<span class="seg">${[["cols", "▥ Side by side"], ["rows", "▤ Top to bottom"], ["lens", "◯ Lens"], ["boxes", "▢ Boxes"]].map(([k, l]) => `<button data-cmp-layout="${k}" aria-pressed="${L === k}">${l}</button>`).join("")}</span>`;
+  let body;
+  if (L === "cols" || L === "rows") body = `<span class="muted">${L === "rows" ? "Top to bottom" : "Left to right"}:</span>` +
+    cmp.bands.map((u, k) => chip(u, `data-band="${k}" aria-label="Strip ${k + 1}"`, cmp.bands.length > 2 ? `<button data-band-rm="${k}" aria-label="Remove this strip">×</button>` : "") + (k < cmp.bands.length - 1 ? '<span class="sep">┃</span>' : "")).join("") +
+    `<button data-cmp-add ${cmp.bands.length >= 6 ? "disabled" : ""}>+ Strip</button>`;
+  else if (L === "lens") body = `<span class="muted">Under:</span>${chip(cmp.bands[0], 'data-band="0" aria-label="Under the lens"')}<span class="muted">In the lens:</span>${chip(cmp.bands[1] ?? cmp.bands[0], 'data-band="1" aria-label="In the lens"')}
+    <label class="muted" for="cmp-r">Size</label><input type="range" id="cmp-r" min="0.05" max="0.5" step="0.01" value="${cmp.lens.r}" style="width:90px">`;
+  else body = `<span class="muted">Under:</span>${chip(cmp.bands[0], 'data-band="0" aria-label="Under the boxes"')}` +
+    cmp.boxes.map((b, k) => `<span class="muted">Box ${k + 1}:</span>` + chip(b.uid, `data-box="${k}" aria-label="Box ${k + 1}"`, `<button data-box-rm="${k}" aria-label="Remove box ${k + 1}">×</button>`)).join("") +
+    `<span class="hint">Drag on the image to draw a box. It shows the step you're looking at.</span>`;
+  return `<div class="cmpbar">${seg}${body}<span class="quick"><button data-cmp-preset="prev">This step vs the one before</button>${L === "cols" || L === "rows" ? '<button data-cmp-preset="all">Every step</button>' : ""}</span>
+    <span class="muted" style="flex-basis:100%;font-size:12px">Click a thumbnail to get its sliders. Shift-click a thumbnail to add it to the comparison.</span></div>`;
+}
+
+/* strip */
+function boxHTML(i, extra = "") {
+  const isSrc = i < 0, s = recipe[i], d = isSrc ? null : DEFS[s.step];
+  const io = isSrc ? { inn: "image", out: "image" } : ioAt(recipe, i), inn = io.inn, out = io.out;
+  const canBypass = !isSrc && inn === out;
+  const bypassTitle = canBypass ? (s.on ? "Switch this step off" : "Switch this step on")
+    : !isSrc ? `Can't switch off ${d.name}: it turns ${STAGES[inn].label.toLowerCase()} into ${STAGES[out].label.toLowerCase()}, and the next steps need that.` : "";
+  return `<div class="box ${isSrc ? "source" : ""} ${sel === i ? "sel" : ""} ${!isSrc && !s.on ? "off" : ""} ${extra}" data-i="${i}" ${isSrc ? "" : 'draggable="true"'}
+     style="--in:${stv(inn)};--out:${stv(out)}" tabindex="0" role="button" aria-label="${isSrc ? "Source image" : d.name}">
+    <div class="band ${inn === out ? "same" : ""}" title="${STAGES[inn].label} in, ${STAGES[out].label} out"><span>${inn !== out ? "→ " : ""}${STAGES[out].label}</span></div>
+    <canvas data-thumb="${i}"></canvas>
+    <div class="lbl"><span class="ic">${isSrc ? "▣" : d.icon}</span>${isSrc ? "Photo" : d.name}${!isSrc && pinned.has(s.uid) ? '<span class="pin-dot" title="Pinned in the sidebar"></span>' : ""}</div>
+    ${isSrc ? "" : `<button class="byp" data-byp="${i}" title="${esc(bypassTitle)}" aria-label="${esc(bypassTitle)}" ${canBypass ? "" : "disabled"}>${s.on ? "●" : "○"}</button>`}
+  </div>`;
+}
+function renderStrip() {
+  const wrap = $("#strip-wrap");
+  if (mode === "page") { wrap.hidden = true; return; }
+  wrap.hidden = false;
+  if (mode === "plot") return renderPenStrip(wrap);
+  if (view === "cmyk") return renderLaneStrip(wrap);
+  const legend = Object.values(STAGES).map((s) => `<span style="--st:var(${s.v})"><i></i>${s.label}</span>`).join("");
+  let h = `<div class="strip-grip" id="strip-grip" title="Drag to make the thumbnails bigger or smaller" role="separator" aria-label="Resize thumbnails"></div>
+    <div class="strip-head"><strong>Recipe</strong><span>${recipe.length} steps · click a box to see it and get its sliders · drag a box onto the sidebar to pin it</span>
+    <span class="legend">${legend}</span><span class="hint" id="strip-hint"></span>
+    <span class="end size-btns"><span>Thumbnails</span><button data-thumb-size="-1" aria-label="Smaller thumbnails">−</button><button data-thumb-size="1" aria-label="Bigger thumbnails">+</button></span></div><div class="strip strip-row" id="strip">`;
+  h += boxHTML(-1);
+  for (let i = 0; i < recipe.length; i++) h += `<div class="gap" data-g="${i}"><button class="plus" data-g="${i}" aria-label="Add a step here">+</button></div>` + boxHTML(i);
+  h += `<div class="gap" data-g="${recipe.length}"><button class="plus" data-g="${recipe.length}" aria-label="Add a step at the end">+</button></div></div>`;
+  wrap.innerHTML = h;
+  if (outStage(recipe, recipe.length - 1) !== "toolpath") $("#strip-hint").textContent = "This recipe stops before the toolpath, so there is nothing to plot yet.";
+}
+function specialBoxHTML(kind) {
+  const m = { photo: ["image", "image", "▣ Photo"], sep: ["image", "field", "◧ Separate CMYK"], stack: ["toolpath", "toolpath", "▦ Stack"] }[kind];
+  const selc = cmyk.focus === kind;
+  return `<div class="box ${selc ? "sel" : ""}" data-special="${kind}" style="--in:${stv(m[0])};--out:${stv(m[1])}" tabindex="0" role="button" aria-label="${m[2]}">
+    <div class="band ${m[0] === m[1] ? "same" : ""}"><span>${m[0] !== m[1] ? "→ " : ""}${STAGES[m[1]].label}</span></div><canvas data-sth="${kind}"></canvas><div class="lbl">${m[2]}</div></div>`;
+}
+function laneBoxHTML(ink, i, o = {}) {
+  const list = cmyk.lanes[ink], s = list[i], d = DEFS[s.step], io = ioAt(list, i, "field");
+  const selc = cmyk.focus === "step" && (cmyk.linked || cmyk.lane === ink) && sel === i, canByp = io.inn === io.out;
+  return `<div class="box ${o.small ? "small" : "wide"} ${selc ? "sel" : ""} ${s.on ? "" : "off"}" data-lane="${ink}" data-i="${i}" draggable="true" style="--in:${stv(io.inn)};--out:${stv(io.out)}" tabindex="0" role="button" aria-label="${cmyk.linked ? "All inks" : INKC[ink].name} ${d.name}">
+    <div class="band ${canByp ? "same" : ""}"><span>${d.icon} ${d.name}</span></div><canvas ${o.quad ? `data-qthumb="${i}"` : `data-lthumb="${ink}:${i}"`}></canvas>
+    ${canByp ? `<button class="byp" data-byp="${i}" data-lane="${ink}" aria-label="${s.on ? "Switch off" : "Switch on"}">${s.on ? "●" : "○"}</button>` : ""}</div>`;
+}
+function laneRowHTML(ink, o) {
+  const list = cmyk.lanes[ink];
+  const head = o.quad ? `<div class="lane-head" title="Linked: one chain for all four inks"><span class="inks4">${"CMYK".split("").map((k) => `<i style="background:${INKC[k].color}"></i>`).join("")}</span></div>`
+    : `<div class="lane-head" ${o.small ? `draggable="true" data-lane-drag="${ink}" title="Drag to change the plot order"` : ""}>${o.small ? '<span class="grip">⋮⋮</span>' : ""}<span class="ink" style="background:${INKC[ink].color};color:${INKC[ink].text}">${ink}</span></div>`;
+  let h = `<div class="lane strip-row ${cmyk.vis[ink] || o.quad ? "" : "hidden-lane"}" ${o.small ? `data-lane-row="${ink}"` : ""}>${head}`;
+  for (let i = 0; i < list.length; i++) h += `<div class="gap" data-g="${i}" data-lane="${ink}"><button class="plus" data-g="${i}" data-lane="${ink}" aria-label="Add a step here">+</button></div>` + laneBoxHTML(ink, i, o);
+  return h + `<div class="gap" data-g="${list.length}" data-lane="${ink}"><button class="plus" data-g="${list.length}" data-lane="${ink}" aria-label="Add a step at the end">+</button></div></div>`;
+}
+function renderLaneStrip(wrap) {
+  const legend = Object.values(STAGES).map((s) => `<span style="--st:var(${s.v})"><i></i>${s.label}</span>`).join("");
+  const linkSeg = `<span class="seg"><button data-link="1" aria-pressed="${cmyk.linked}" title="One chain of steps drives all four inks">Linked</button><button data-link="0" aria-pressed="${!cmyk.linked}" title="Each ink gets its own chain of steps">Independent</button></span>`;
+  const viewSeg = cmyk.linked ? "" : `<span class="seg">${["all", ...cmyk.order].map((v) => `<button data-laneview="${v}" aria-pressed="${cmyk.laneView === v}">${v === "all" ? "All lanes" : v}</button>`).join("")}</span>`;
+  const desc = cmyk.linked ? "One chain drives all four inks; each thumbnail shows C, M, Y and K." : cmyk.laneView === "all" ? "Lanes plot top to bottom: drag a lane's ⋮⋮ to reorder." : `Only the ${INKC[cmyk.laneView].name.toLowerCase()} lane.`;
+  let h = `<div class="strip-grip" id="strip-grip" title="Drag to make the thumbnails bigger or smaller" role="separator" aria-label="Resize thumbnails"></div>
+    <div class="strip-head"><strong>Recipe</strong><span>Inks:</span>${linkSeg}${viewSeg}<span>${desc}</span>
+    <span class="legend">${legend}</span><span class="hint" id="strip-hint"></span>
+    <span class="end size-btns"><span>Thumbnails</span><button data-thumb-size="-1" aria-label="Smaller thumbnails">−</button><button data-thumb-size="1" aria-label="Bigger thumbnails">+</button></span></div>
+    <div class="lanes" id="strip"><div class="trunk">${specialBoxHTML("photo")}<span class="arrow">→</span>${specialBoxHTML("sep")}<span class="arrow">⇉</span></div><div class="lane-rows">`;
+  if (cmyk.linked) h += laneRowHTML(cmyk.lane, { quad: true });
+  else if (cmyk.laneView === "all") for (const ink of cmyk.order) h += laneRowHTML(ink, { small: true });
+  else h += laneRowHTML(cmyk.laneView, {});
+  wrap.innerHTML = h + `</div><div class="trunk"><span class="arrow">⇉</span>${specialBoxHTML("stack")}</div></div>`;
+}
+function renderPenStrip(wrap) {
+  const tp = finalOut();
+  let h = `<div class="strip-head"><strong>Pens</strong><span>in plot order · click a pen to see only its lines</span></div><div class="strip">`;
+  for (const pi of penOrder) {
+    if (pi >= page.pens.length) continue;
+    const l = tp.layers?.find((x) => x.pen === pi), n = l ? l.paths.length : 0;
+    h += `<div class="penbox ${solo === pi ? "sel" : ""}" data-pen="${pi}" tabindex="0" role="button"><canvas data-pthumb="${pi}"></canvas><div><div class="t"><span class="swatch" style="background:${INKS[page.pens[pi]].color}"></span> ${esc(INKS[page.pens[pi]].name)}</div><div class="s num">${n.toLocaleString()} lines</div></div></div>`;
+  }
+  wrap.innerHTML = h + "</div>";
+}
+function drawThumbs() {
+  if (view === "cmyk" && mode === "design") {
+    document.querySelectorAll("canvas[data-qthumb]").forEach((cv) => { const i = +cv.dataset.qthumb;
+      drawThumb(cv, null, { draw: (g, w) => ["C", "M", "Y", "K"].forEach((ink, q) => { g.save(); g.globalCompositeOperation = "multiply"; drawData(g, laneAt(ink, i), (q % 2) * (w / 2), Math.floor(q / 2) * (w / 2), w / 2, { color: INKC[ink].color, tint: INKC[ink].color, minLw: 0.3 }); g.restore(); }) }); });
+    document.querySelectorAll("canvas[data-lthumb]").forEach((cv) => { const [ink, i] = cv.dataset.lthumb.split(":"); const o = evaluate(cmyk.lanes[ink], laneStart(ink)); drawThumb(cv, o[+i], { color: INKC[ink].color, tint: INKC[ink].color }); });
+    document.querySelectorAll("canvas[data-sth]").forEach((cv) => {
+      const k = cv.dataset.sth, dpr = window.devicePixelRatio || 1;
+      if (k === "photo") drawThumb(cv, SRC);
+      else if (k === "sep") drawThumb(cv, null, { draw: (g, w) => ["C", "M", "Y", "K"].forEach((ink, q) => drawData(g, seps()[ink], (q % 2) * (w / 2), Math.floor(q / 2) * (w / 2), w / 2, { tint: INKC[ink].color })) });
+      else drawThumb(cv, null, { draw: (g, w) => drawStack(g, 0, 0, w, { minLw: 0.3 * dpr }) });
+    });
+    return;
+  }
+  document.querySelectorAll("#strip canvas[data-thumb]").forEach((cv) => { const i = +cv.dataset.thumb; drawThumb(cv, i < 0 ? SRC : outs[i]); });
+  document.querySelectorAll("canvas[data-pthumb]").forEach((cv) => drawThumb(cv, finalOut(), { solo: +cv.dataset.pthumb }));
+}
+
+/* settings panel (design mode) */
+function paramHTML(s, d) {
+  const id = `p-${s.uid}-${d.k}`, v = s.params[d.k];
+  if (d.type === "bool") return `<div class="param bool"><label for="${id}"><input type="checkbox" id="${id}" data-k="${d.k}" ${v ? "checked" : ""}> ${d.label}</label></div>`;
+  if (d.type === "select") return `<div class="param"><label for="${id}">${d.label}</label><select id="${id}" data-k="${d.k}">${d.options.map((o) => `<option ${o === v ? "selected" : ""}>${o}</option>`).join("")}</select></div>`;
+  if (d.seed) return `<div class="param"><label for="${id}">${d.label} <span class="muted">stored with the recipe</span></label><div class="seed-row"><input id="${id}" type="number" data-k="${d.k}" value="${v}" min="1" max="9999"><button data-dice="${d.k}" title="New random seed">🎲 New</button></div></div>`;
+  return `<div class="param"><label for="${id}"><span>${d.label}</span><span class="num muted" data-out="${d.k}">${fmtParam(v, d)}</span></label><input type="range" id="${id}" data-k="${d.k}" min="${d.min}" max="${d.max}" step="${d.step}" value="${v}"></div>`;
+}
+const fmtParam = (v, d) => (d.step < 1 ? (+v).toFixed(d.step < 0.1 ? 2 : 1) : v) + (d.unit ? " " + d.unit : "");
+function canRemove(i) { const r = recipe.filter((_, k) => k !== i); return chainOK(r); }
+function sourceCardHTML() {
+  return `<div class="side-label">Looking at</div><section class="card focus"><div class="card-head"><span class="card-title"><span class="ic">▣</span> Source photo</span><span class="pill" style="--st:var(--st-image)">Image</span></div>
+    <div class="settings"><div class="sub">mona-lisa-600.jpg · 600 × 600 px · placed in a ${Math.round(contentMM())} mm square</div>
+    <div class="row-actions"><button data-act="replace">Replace image…</button><button data-act="presets">Browse presets…</button>${view === "cmyk" ? '<button data-unsplit>Undo the CMYK split</button>' : '<button data-split title="Split the photo into four inks, each in its own lane">Split into CMYK…</button>'}</div>
+    <p class="muted" style="font-size:13px;margin:6px 0 0">Every step after this one works on this photo.</p></div></section>`;
+}
+function cardHTML(i, focused) {
+  const s = recipe[i], d = DEFS[s.step], isPinned = pinned.has(s.uid), help = helpSet.has(s.uid);
+  const main = d.params.filter((p) => p.main), more = d.params.filter((p) => !p.main);
+  const io = ioAt(recipe, i), canByp = io.inn === io.out, rem = canRemove(i);
+  return `<section class="card ${focused ? "focus" : ""} ${s.on ? "" : "off"}" data-uid="${s.uid}"><div class="settings">
+    <div class="card-head"><button class="card-title" data-select="${i}" title="Show this step on the canvas"><span class="ic">${d.icon}</span>${d.name} <span class="muted num" style="font-weight:400">${i + 1}</span></button>
+      <span class="pill" style="--st:${stv(io.out)}">${STAGES[io.out].label}</span>
+      <button class="icon-btn" data-act="help" aria-pressed="${help}" title="What does this step do?">?</button>
+      <button class="icon-btn" data-act="pin" aria-pressed="${isPinned}" title="${isPinned ? "Unpin from the sidebar" : "Keep these sliders in the sidebar"}">${isPinned ? "Pinned" : "Pin"}</button></div>
+    ${focused ? `<div class="sub"><span class="pill" style="--st:${stv(io.inn)}">${STAGES[io.inn].label}</span>${io.inn !== io.out ? `→ <span class="pill" style="--st:${stv(io.out)}">${STAGES[io.out].label}</span>` : "stays"} · step ${i + 1} of ${recipe.length}${s.on ? "" : " · switched off"}</div>` : ""}
+    ${help ? `<div class="blurb">${d.blurb}<br><br><em>Analog history: To be written with Nick</em></div>` : ""}
+    <div class="params">${main.map((p) => paramHTML(s, p)).join("") || '<p class="muted">Nothing to set.</p>'}
+    ${more.length ? `<details class="more" ${s._moreOpen ? "open" : ""}><summary>More settings (${more.length})</summary><div class="inner">${more.map((p) => paramHTML(s, p)).join("")}</div></details>` : ""}</div>
+    ${focused ? `<div class="row-actions">
+      <button data-act="bypass" ${canByp ? "" : "disabled"} title="${canByp ? "" : "Only steps that keep the same stage can be switched off"}">${s.on ? "Switch off" : "Switch on"}</button>
+      ${view === "cmyk" ? "" : '<button data-act="branch" title="Save the current version and try something else from this step on">Branch from here</button>'}
+      <button data-act="remove" ${rem ? "" : "disabled"}>Remove</button></div>
+      ${!rem ? `<div class="reason">Can't remove ${d.name}: the step after it needs ${STAGES[io.out].label.toLowerCase()} input.</div>` : ""}` : ""}
+  </div></section>`;
+}
+function sidebarHTML(where = "") {
+  let h = "";
+  if (sel < 0) h += sourceCardHTML();
+  else h += `<div class="side-label">Looking at ${where}</div>` + cardHTML(sel, true);
+  const selPinned = sel >= 0 && pinned.has(recipe[sel].uid);
+  const pins = recipe.map((_, i) => i).filter((i) => i !== sel && pinned.has(recipe[i].uid));
+  h += `<div class="side-label pinned-label">Pinned <span class="num">${pins.length + (selPinned ? 1 : 0) || ""}</span></div>`;
+  if (selPinned) h += `<p class="muted" style="font-size:12px;margin:0 0 8px">${DEFS[recipe[sel].step].name} is pinned too; its sliders are at the top.</p>`;
+  h += pins.map((i) => cardHTML(i, false)).join("");
+  h += `<div class="pin-drop">${pins.length ? "Drop another step here to pin it." : "Pin steps to keep their sliders here while you look at other steps. Drag a box from the strip onto this panel, or press Pin."}</div>`;
+  return h;
+}
+function cmykSideHTML() {
+  if (cmyk.focus === "photo") return sourceCardHTML();
+  if (cmyk.focus === "sep") return `<div class="side-label">Looking at</div><section class="card focus"><div class="card-head"><span class="card-title"><span class="ic">◧</span> Separate CMYK</span><span class="pill" style="--st:var(--st-field)">4 × Field</span></div>
+    <div class="settings"><div class="sub">Image → four ink fields, one per lane</div>
+    <div class="param"><label for="cm-gcr"><span>Black generation</span><span class="num muted" id="cm-gcr-out">${cmyk.gcr.toFixed(2)}</span></label><input type="range" id="cm-gcr" min="0" max="1" step="0.05" value="${cmyk.gcr}"></div>
+    <p class="muted" style="font-size:13px">Splits the photo into cyan, magenta, yellow and black. More black generation moves shared darkness out of C, M and Y and into the black pen.</p>
+    <div class="param bool"><label for="cm-link"><input type="checkbox" id="cm-link" ${cmyk.linked ? "checked" : ""}> Same steps for every ink (linked)</label></div>
+    <div class="param bool"><label for="cm-sa"><input type="checkbox" id="cm-sa" ${cmyk.screenAngles ? "checked" : ""}> Print screen angles</label></div>
+    <p class="muted" style="font-size:12px;margin-top:-4px">Turns each ink's hatching by its print angle (C 15°, M 75°, Y 0°, K 45°), so linked inks don't all run the same way.</p>
+    <div class="row-actions"><button data-unsplit>Undo the split</button></div></div></section>`;
+  if (cmyk.focus === "stack") {
+    const rows = cmyk.order.map((ink, k) => { const s = pathStats(laneFinal(ink));
+      return `<div class="pen-row"><span class="num muted">${k + 1}</span><input type="checkbox" data-lane-vis="${ink}" ${cmyk.vis[ink] ? "checked" : ""} aria-label="Show ${INKC[ink].name}">
+        <span class="swatch" style="background:${INKC[ink].color}"></span><span class="n">${INKC[ink].name}<br><span class="muted num" style="font-size:11px">${s ? `${s.lines.toLocaleString()} lines · ${s.seconds ? fmtMin(s.seconds) : "no toolpath"}` : "ends as a field"}</span></span>
+        <button data-lane-up="${k}" ${k === 0 ? "disabled" : ""} aria-label="Plot earlier">↑</button><button data-lane-dn="${k}" ${k === cmyk.order.length - 1 ? "disabled" : ""} aria-label="Plot later">↓</button></div>`; }).join("");
+    const t = stackStats();
+    return `<div class="side-label">Looking at</div><section class="card focus"><div class="card-head"><span class="card-title"><span class="ic">▦</span> Stack</span><span class="pill" style="--st:var(--st-toolpath)">Toolpath</span></div>
+      <div class="settings"><div class="sub">All four lanes on one sheet · <span class="num">${fmtMin(t.seconds)}</span> with pen swaps</div>
+      <div class="panel-sec"><h4>Plot order</h4>${rows}<p class="muted" style="font-size:12px">Top plots first. You can also drag the lanes in the strip.</p></div>
+      <div class="panel-sec"><h4>Inks</h4><span class="seg"><button data-blend="multiply" aria-pressed="${cmyk.blend === "multiply"}">See-through</button><button data-blend="over" aria-pressed="${cmyk.blend === "over"}">Opaque</button></span>
+      <p class="muted" style="font-size:12px">With opaque inks the last lane covers the others where they cross, so the order changes the picture.</p></div></div></section>`;
+  }
+  return sidebarHTML(cmyk.linked ? `· ${"CMYK".split("").map((k) => `<span class="swatch" style="background:${INKC[k].color}"></span>`).join("")} all inks, linked` : `· <span class="swatch" style="background:${INKC[cmyk.lane].color}"></span> ${INKC[cmyk.lane].name} lane`);
+}
+const paramDefaults = null;
+
+function renderPanels() {
+  const side = $("#side"), pop = $("#popover"), drawer = $("#drawer");
+  pop.hidden = true; drawer.hidden = true; side.hidden = false;
+  if (mode === "page") side.innerHTML = pagePanelHTML();
+  else if (mode === "plot") side.innerHTML = plotPanelHTML();
+  else side.innerHTML = view === "cmyk" ? cmykSideHTML() : sidebarHTML();
+  requestAnimationFrame(drawMain);
+}
+function positionPopover() {
+  const pop = $("#popover"), box = $(`#strip .box[data-i="${sel}"]`), strip = $("#strip-wrap");
+  if (pop.hidden || !box) return;
+  const r = box.getBoundingClientRect(), sr = strip.getBoundingClientRect();
+  const left = Math.min(window.innerWidth - pop.offsetWidth - 12, Math.max(12, r.left + r.width / 2 - pop.offsetWidth / 2));
+  pop.style.left = left + "px"; pop.style.bottom = window.innerHeight - sr.top + 10 + "px";
+}
+
+/* page + plot panels */
+function pagePanelHTML() {
+  const [pw, ph] = paperMM();
+  return `<div class="panel-sec"><h4>Paper</h4>
+    <div class="field-row"><label for="pg-paper">Size</label><select id="pg-paper">${Object.keys(PAPERS).map((k) => `<option ${k === page.paper ? "selected" : ""}>${k}</option>`).join("")}</select></div>
+    <div class="field-row"><span>Orientation</span><span class="seg"><button data-orient="0" aria-pressed="${!page.landscape}">Portrait</button><button data-orient="1" aria-pressed="${page.landscape}">Landscape</button></span></div>
+    <div class="param"><label for="pg-margin"><span>Margin</span><span class="num muted">${page.margin} mm</span></label><input type="range" id="pg-margin" min="5" max="60" step="1" value="${page.margin}"></div>
+    <div class="muted" style="font-size:12px">${pw} × ${ph} mm. The image fills a ${Math.round(contentMM())} mm square.</div></div>
+  <div class="panel-sec"><h4>Pens</h4>
+    ${page.pens.map((p, i) => `<div class="pen-row"><span class="swatch" style="background:${INKS[p].color}"></span><span class="n">Pen ${i + 1}</span>
+      <select data-pen-ink="${i}" aria-label="Ink for pen ${i + 1}">${INKS.map((k, j) => `<option value="${j}" ${j === p ? "selected" : ""}>${k.name}</option>`).join("")}</select>
+      <button data-pen-rm="${i}" ${page.pens.length < 2 ? "disabled" : ""} aria-label="Remove pen ${i + 1}">×</button></div>`).join("")}
+    <div style="margin-top:8px"><button id="pen-add" ${page.pens.length >= 4 ? "disabled" : ""}>Add a pen</button></div>
+    <div class="muted" style="font-size:12px;margin-top:6px">Hatch and Contours share their bands out between the pens.</div></div>
+  <div class="panel-sec"><h4>Machine</h4>
+    <div class="field-row"><label for="pg-machine">Output</label><select id="pg-machine">${MACHINES.map((m) => `<option ${m === page.machine ? "selected" : ""}>${m}</option>`).join("")}</select></div></div>
+  <details class="more"><summary>Print prep</summary>
+    <div class="param bool" style="margin-top:10px"><label for="pg-reg"><input type="checkbox" id="pg-reg" ${page.regmarks ? "checked" : ""}> Registration marks</label></div>
+    <div class="param bool"><label for="pg-mirror"><input type="checkbox" id="pg-mirror"> Mirror (for screen print)</label></div></details>`;
+}
+function plotPanelHTML() {
+  const digital = page.machine === "Digital only";
+  return `<div class="panel-sec"><h4>Time</h4><div id="plot-live"></div></div>
+  <div class="panel-sec"><h4>Pen order</h4>
+    ${penOrder.filter((p) => p < page.pens.length).map((pi, k, arr) => `<div class="pen-row"><span class="num muted">${k + 1}</span><span class="swatch" style="background:${INKS[page.pens[pi]].color}"></span><span class="n">${esc(INKS[page.pens[pi]].name)}</span>
+      <button data-po-up="${k}" ${k === 0 ? "disabled" : ""} aria-label="Plot earlier">↑</button><button data-po-dn="${k}" ${k === arr.length - 1 ? "disabled" : ""} aria-label="Plot later">↓</button></div>`).join("")}
+    <div class="muted" style="font-size:12px;margin-top:6px">Light inks first usually looks cleaner.</div></div>
+  <div class="panel-sec"><h4>Watch it plot</h4>
+    <div class="play-row"><button id="play" class="primary">${playing ? "Pause" : "Play"}</button><input type="range" id="plot-t" min="0" max="1" step="0.001" value="${plotT}" aria-label="Plot progress"></div></div>
+  <div class="panel-sec"><h4>Output</h4><div class="export">
+    <button class="primary" data-exp="send" ${digital ? "disabled" : ""}>Send to ${esc(page.machine)}</button>
+    <button data-exp="svg">Download SVG (one layer per pen)</button>
+    <button data-exp="png">Download PNG (digital print)</button></div></div>`;
+}
+function renderPlotPanelLive() {
+  const el = $("#plot-live"); if (!el) return;
+  const s = pathStats(finalOut());
+  if (!s?.seconds) { el.innerHTML = `<p class="muted">The recipe has no toolpath yet. Add an Order step in Design.</p>`; return; }
+  el.innerHTML = `<div class="bigtime num">${fmtMin(s.seconds)}</div><div class="breakdown num">
+    <span>Drawing ${fmtM(s.downMM)}</span><span>${fmtMin(s.drawS)}</span><span>Travel ${fmtM(s.travelMM)}</span><span>${fmtMin(s.travelS)}</span>
+    <span>Pen lifts ${s.lifts.toLocaleString()}</span><span>${fmtMin(s.liftS)}</span><span>Pen swaps ${s.swaps}</span><span>${fmtMin(s.swapS)}</span></div>`;
+}
+
+/* ---------------- events (desktop) ---------------- */
+function focusSpecial(kind) { sel = -1; cmyk.focus = kind; renderStrip(); renderPanels(); renderOverlays(); drawMain(); drawThumbs(); }
+function select(i) { if (view === "cmyk") cmyk.focus = i >= 0 ? "step" : "stack"; sel = i; helpOpen = false; popClosed = false; renderStrip(); renderPanels(); renderOverlays(); drawMain(); drawThumbs(); }
+function setMode(m) { mode = m; playing = false; if (m === "plot") plotT = 1; solo = null; closeMenus(); renderAll(); }
+function closeMenus() { document.querySelectorAll(".add-menu").forEach((m) => m.remove()); $("#cp-menu").hidden = true; }
+
+document.addEventListener("click", (e) => {
+  const t = e.target;
+  if (!t.closest(".add-menu") && !t.closest(".plus")) document.querySelectorAll(".add-menu").forEach((m) => m.remove());
+  if (!t.closest(".menu-wrap")) $("#cp-menu").hidden = true;
+  const mb = t.closest("[data-mode]");
+  if ((mb && mb.dataset.mode !== "design" || t.closest("#setup-chip")) && view === "cmyk") return toast("Prototype: Page and Plot belong to the main editor. In the real app the Stack feeds Plot mode, one pen per lane.");
+  if (mb) return setMode(mb.dataset.mode);
+  if (t.closest("#setup-chip")) return setMode("page");
+  if (t.closest("[data-split]")) { closeMenus(); return splitCMYK(false); }
+  if (t.closest("[data-unsplit]")) return unsplitCMYK();
+  const lk = t.closest("[data-link]"); if (lk) return setLinked(lk.dataset.link === "1");
+  const lv = t.closest("[data-laneview]"); if (lv) { cmyk.laneView = lv.dataset.laneview; if (cmyk.laneView !== "all") { useLane(cmyk.laneView); if (cmyk.focus === "step") sel = Math.min(sel, recipe.length - 1); } renderAll(); return; }
+  const pn = t.closest("[data-panels]"); if (pn) { cmyk.panels = pn.dataset.panels === "1"; renderOverlays(); drawMain(); return; }
+  if (t.closest("#ctx-btn")) { cmyk.context = !cmyk.context; renderOverlays(); drawMain(); return; }
+  if (t.closest("#show-stack")) return focusSpecial("stack");
+  const sp = t.closest("[data-special]"); if (sp) return focusSpecial(sp.dataset.special);
+  const lu = t.closest("[data-lane-up]"), ld = t.closest("[data-lane-dn]");
+  if (lu || ld) { const k = +(lu || ld).dataset[lu ? "laneUp" : "laneDn"], j = lu ? k - 1 : k + 1; [cmyk.order[k], cmyk.order[j]] = [cmyk.order[j], cmyk.order[k]]; renderStrip(); renderPanels(); drawThumbs(); drawMain(); renderChip(); return; }
+  const bl = t.closest("[data-blend]"); if (bl) { cmyk.blend = bl.dataset.blend; renderPanels(); drawMain(); drawThumbs(); return; }
+  const cl = t.closest("[data-cmp-layout]"); if (cl) { const k = cl.dataset.cmpLayout; cmp.layout = cmpLayout = k;
+    if (k === "lens" && cmp.bands.length < 2) cmp.bands.push(selUid());
+    if (k === "boxes" && !cmp.boxes.length) cmp.boxes.push({ x: 0.3, y: 0.3, w: 0.4, h: 0.3, uid: cmp.bands[1] ?? selUid() });
+    if (k === "cols" || k === "rows") cmp.splits = evenSplits(cmp.bands.length);
+    renderOverlays(); drawMain(); return; }
+  const brm = t.closest("[data-box-rm]"); if (brm) { cmp.boxes.splice(+brm.dataset.boxRm, 1); renderOverlays(); drawMain(); return; }
+  if (t.closest("#cp-quick")) return quickSave();
+  if (t.closest("#presets-btn") || t.closest('[data-act="presets"]')) return openGallery();
+  const sb = t.closest("[data-select]"); if (sb) return select(+sb.dataset.select);
+  const tb = t.closest("[data-thumb-size]"); if (tb) return setThumb(thumbPx() + 24 * +tb.dataset.thumbSize);
+  const bandRm = t.closest("[data-band-rm]"); if (bandRm) { cmp.bands.splice(+bandRm.dataset.bandRm, 1); cmp.splits = evenSplits(cmp.bands.length); renderOverlays(); drawMain(); return; }
+  if (t.closest("[data-cmp-add]")) { const last = recipe.findIndex((s) => s.uid === cmp.bands[cmp.bands.length - 1]); const next = recipe[Math.min(recipe.length - 1, last + 1)]; cmp.bands.push(next ? next.uid : "photo"); cmp.splits = evenSplits(cmp.bands.length); renderOverlays(); drawMain(); return; }
+  const cpre = t.closest("[data-cmp-preset]"); if (cpre) { cmp = cpre.dataset.cmpPreset === "all" ? cmpAll() : cmpDefault(); renderOverlays(); drawMain(); return; }
+  if (t.closest("#cp-btn")) { const m = $("#cp-menu"); m.hidden = !m.hidden; if (!m.hidden) renderCpMenu(); return; }
+  const cp = t.closest("[data-cp]"); if (cp) { if (view === "cmyk") leaveCmyk(); const c = proj.checkpoints[+cp.dataset.cp]; proj.checkpoints.unshift({ name: "Auto-saved before restore", ago: "just now", recipe: clone(recipe) });
+    recipe = proj.recipe = clone(c.recipe); sel = recipe.length - 1; closeMenus(); renderAll(); toast(`Restored “${c.name}”. Your previous state is saved as a checkpoint.`); return; }
+  if (t.closest("#cp-save")) { proj.checkpoints.unshift({ name: "Checkpoint " + (proj.checkpoints.length + 1), ago: "just now", recipe: clone(recipe) }); renderCpMenu(); return; }
+  const byp = t.closest("[data-byp]"); if (byp) { e.stopPropagation(); if (byp.dataset.lane) useLane(byp.dataset.lane); toggleBypass(+byp.dataset.byp); return; }
+  const plus = t.closest(".plus"); if (plus) { if (plus.dataset.lane) useLane(plus.dataset.lane); openAddMenu(+plus.dataset.g, plus); return; }
+  const add = t.closest("[data-add]"); if (add) { const g = +add.dataset.g; recipe.splice(g, 0, mk(add.dataset.add)); closeMenus(); select(g); toast(`Added ${DEFS[add.dataset.add].name}.`); return; }
+  const box = t.closest("#strip .box");
+  if (box) { const i = +box.dataset.i; if (box.dataset.lane) useLane(box.dataset.lane);
+    if (cmp && e.shiftKey && view === "editor" && mode === "design") return addToCompare(i < 0 ? "photo" : recipe[i].uid);
+    return select(i); }
+  const pb = t.closest("[data-pen]"); if (pb) { const p = +pb.dataset.pen; solo = solo === p ? null : p; renderStrip(); drawThumbs(); renderOverlays(); drawMain(); return; }
+  if (t.closest('[data-act="replace"]')) return toast("Prototype: replacing the image is not wired up. The real app keeps the recipe and re-runs it on the new photo.");
+  const ci = cardIndex(t);
+  if (t.closest('[data-act="help"]')) { const u = recipe[ci].uid; helpSet.has(u) ? helpSet.delete(u) : helpSet.add(u); renderPanels(); return; }
+  if (t.closest('[data-act="pin"]')) { togglePin(recipe[ci].uid); return; }
+  if (t.closest('[data-act="bypass"]')) return toggleBypass(ci);
+  if (t.closest('[data-act="remove"]')) { const [gone] = recipe.splice(ci, 1); pinned.delete(gone.uid);
+    if (cmp) { cmp.bands = cmp.bands.filter((u) => u !== gone.uid); cmp.boxes = cmp.boxes.filter((b) => b.uid !== gone.uid); if (!cmp.bands.length) cmp = null; else cmp.splits = evenSplits(cmp.bands.length); }
+    select(Math.min(sel > ci ? sel - 1 : sel, recipe.length - 1)); toast(`Removed ${DEFS[gone.step].name}.`); return; }
+  if (t.closest('[data-act="branch"]')) {
+    const d = DEFS[recipe[ci].step];
+    proj.checkpoints.unshift({ name: `${version ? version[0].toUpperCase() + version.slice(1) : "Version A"} (before branching at ${d.name})`, ago: "just now", recipe: clone(recipe), branch: true });
+    version = "version " + String.fromCharCode(65 + proj.checkpoints.filter((c) => c.branch).length);
+    renderAll(); toast(`Branched at ${d.name}. The old version is in Checkpoints; changes now go to ${version}.`); return;
+  }
+  const dice = t.closest("[data-dice]"); if (dice) { recipe[ci].params[dice.dataset.dice] = 1 + Math.floor(Math.random() * 9999); renderPanels(); schedule(); return; }
+  if (t.closest("#cmp-btn")) { cmp = cmp ? null : cmpDefault(); renderOverlays(); drawMain(); return; }
+  if (t.closest("#trv-btn")) { showTravel = !showTravel; renderOverlays(); drawMain(); return; }
+  if (t.closest("#jump-end")) return select(recipe.length - 1);
+  if (t.closest("#pop-x")) { popClosed = true; $("#popover").hidden = true; return; }
+  const orient = t.closest("[data-orient]"); if (orient) { page.landscape = orient.dataset.orient === "1"; renderAll(); return; }
+  if (t.closest("#pen-add")) { page.pens.push(page.pens.length % INKS.length); penOrder = page.pens.map((_, i) => i); renderAll(); return; }
+  const prm = t.closest("[data-pen-rm]"); if (prm) { page.pens.splice(+prm.dataset.penRm, 1); penOrder = page.pens.map((_, i) => i); renderAll(); return; }
+  const up = t.closest("[data-po-up]"), dn = t.closest("[data-po-dn]");
+  if (up || dn) { const k = +(up || dn).dataset[up ? "poUp" : "poDn"], j = up ? k - 1 : k + 1; [penOrder[k], penOrder[j]] = [penOrder[j], penOrder[k]]; renderAll(); return; }
+  if (t.closest("#play")) { if (!playing && plotT >= 1) plotT = 0; playing = !playing; t.closest("#play").textContent = playing ? "Pause" : "Play"; if (playing) tick(); return; }
+  const ex = t.closest("[data-exp]"); if (ex) return toast("Prototype: nothing is exported or sent.");
+  const look = t.closest("[data-look]"); if (look) { applyLook(look.dataset.look); return; }
+  if (t.classList.contains("modal-bg") || t.closest("#gal-close")) { document.querySelector(".modal-bg")?.remove(); return; }
+});
+function toggleBypass(i) {
+  const s = recipe[i], d = DEFS[s.step], io = ioAt(recipe, i); if (io.inn !== io.out) return;
+  s.on = !s.on; renderStrip(); renderPanels(); refresh(); toast(`${d.name} ${s.on ? "switched on" : "switched off"}.`);
+}
+document.addEventListener("input", (e) => {
+  const t = e.target;
+  if (t.closest(".settings") && t.dataset.k) {
+    const s = recipe[cardIndex(t)], d = DEFS[s.step].params.find((p) => p.k === t.dataset.k);
+    s.params[d.k] = d.type === "bool" ? t.checked : d.type === "select" ? t.value : +t.value;
+    const o = t.closest(".param")?.querySelector(`[data-out="${d.k}"]`); if (o) o.textContent = fmtParam(t.value, d);
+    schedule(); return;
+  }
+  if (t.id === "cmp-r") { cmp.lens.r = +t.value; drawMain(); return; }
+  if (t.id === "cm-gcr") { cmyk.gcr = +t.value; $("#cm-gcr-out").textContent = cmyk.gcr.toFixed(2); schedule(); return; }
+  if (t.id === "pg-margin") { page.margin = +t.value; t.previousElementSibling.lastElementChild.textContent = page.margin + " mm"; schedule(); return; }
+  if (t.id === "plot-t") { plotT = +t.value; playing = false; $("#play").textContent = "Play"; drawMain(); return; }
+});
+document.addEventListener("change", (e) => {
+  const t = e.target;
+  if (t.dataset.band != null) { cmp.bands[+t.dataset.band] = t.value; renderOverlays(); drawMain(); return; }
+  if (t.dataset.box != null) { cmp.boxes[+t.dataset.box].uid = t.value; renderOverlays(); drawMain(); return; }
+  if (t.id === "cm-link") { setLinked(t.checked); if (cmyk.linked !== t.checked) t.checked = cmyk.linked; return; }
+  if (t.id === "cm-sa") { cmyk.screenAngles = t.checked; schedule(); return; }
+  if (t.dataset.laneVis) { cmyk.vis[t.dataset.laneVis] = t.checked; renderStrip(); renderPanels(); drawThumbs(); drawMain(); renderChip(); return; }
+  if (t.id === "pg-paper") { page.paper = t.value; renderAll(); }
+  if (t.id === "pg-machine") { page.machine = t.value; renderAll(); }
+  if (t.id === "pg-reg") { page.regmarks = t.checked; drawMain(); }
+  if (t.dataset.penInk != null) { page.pens[+t.dataset.penInk] = +t.value; renderAll(); }
+  if (t.id === "pg-mirror") toast("Prototype: mirroring is not drawn here.");
+});
+document.addEventListener("toggle", (e) => { if (e.target.matches?.("details.more") && mode === "design") { const s = recipe[cardIndex(e.target)]; if (s) s._moreOpen = e.target.open; } }, true);
+function cardIndex(el) { const c = el.closest?.("[data-uid]"); if (!c) return sel; return recipe.findIndex((s) => s.uid === c.dataset.uid); }
+function togglePin(u) {
+  const i = recipe.findIndex((s) => s.uid === u), name = DEFS[recipe[i].step].name;
+  if (pinned.has(u)) { pinned.delete(u); toast(`Unpinned ${name}.`); } else { pinned.add(u); toast(`Pinned ${name}. Its sliders stay in the sidebar.`); }
+  renderStrip(); renderPanels(); drawThumbs();
+}
+function quickSave() {
+  proj.checkpoints.unshift({ name: "Checkpoint " + (proj.checkpoints.length + 1), ago: "just now", recipe: clone(recipe) });
+  if (!$("#cp-menu").hidden) renderCpMenu();
+  toast(`Saved “Checkpoint ${proj.checkpoints.length}”. Open Checkpoints ▾ to go back to it.`);
+}
+const thumbPx = () => parseFloat(getComputedStyle(document.documentElement).getPropertyValue("--thumb")) || 96;
+function setThumb(px) {
+  px = Math.round(Math.min(200, Math.max(56, px)));
+  document.documentElement.style.setProperty("--thumb", px + "px");
+  try { localStorage.setItem("plotlab-proto-thumb", String(px)); } catch (_) {}
+  schedule();
+}
+try { const t0 = +localStorage.getItem("plotlab-proto-thumb"); if (t0) document.documentElement.style.setProperty("--thumb", t0 + "px"); } catch (_) {}
+document.addEventListener("pointerdown", (e) => {
+  const grip = e.target.closest?.("#strip-grip"); if (!grip) return;
+  const y0 = e.clientY, t0 = thumbPx(); grip.setPointerCapture(e.pointerId);
+  const mv = (ev) => setThumb(t0 + (y0 - ev.clientY));
+  const up = () => { grip.removeEventListener("pointermove", mv); grip.removeEventListener("pointerup", up); };
+  grip.addEventListener("pointermove", mv); grip.addEventListener("pointerup", up);
+});
+function tick() {
+  if (!playing) return;
+  plotT = Math.min(1, plotT + 0.004); const r = $("#plot-t"); if (r) r.value = plotT; drawMain();
+  if (plotT >= 1) { playing = false; const b = $("#play"); if (b) b.textContent = "Play"; return; }
+  requestAnimationFrame(tick);
+}
+
+function openAddMenu(g, anchor) {
+  closeMenus();
+  const opts = Object.keys(DEFS).map((id) => { const r = recipe.slice(); r.splice(g, 0, mk(id)); return chainOK(r) ? { id, out: ioAt(r, g).out } : null; }).filter(Boolean);
+  const left = g === 0 ? ctxStart.stage : outStage(recipe, g - 1);
+  const where = view === "cmyk" ? (cmyk.linked ? " for all four inks" : ` in the ${INKC[cmyk.lane].name.toLowerCase()} lane`) : "";
+  const split = view === "editor" && left === "image" ? `<button data-split><span class="ic">◧</span><span><strong>Separate CMYK</strong> <span class="pill" style="--st:var(--st-field)">4 × Field</span><small>Splits the photo into four inks, one lane each. The steps after this point drive all four, linked.</small></span></button>` : "";
+  const m = document.createElement("div"); m.className = "add-menu";
+  m.innerHTML = `<div class="h">Steps that fit here${where} (after ${STAGES[left].label.toLowerCase()})</div>` +
+    (opts.length ? opts.map(({ id, out }) => `<button data-add="${id}" data-g="${g}"><span class="ic">${DEFS[id].icon}</span><span><strong>${DEFS[id].name}</strong> <span class="pill" style="--st:${stv(out)}">${STAGES[out].label}</span><small>${DEFS[id].blurb}</small></span></button>`).join("")
+      : `<div class="h">Nothing fits here. Each step turns its input into the next stage: Image → Field → Geometry → Toolpath.</div>`) + split;
+  document.body.appendChild(m);
+  const r = anchor.getBoundingClientRect();
+  m.style.left = Math.min(window.innerWidth - 272, Math.max(8, r.left - 120)) + "px";
+  m.style.bottom = window.innerHeight - r.top + 8 + "px";
+}
+
+/* drag to reorder */
+let dragFrom = null, laneDrag = null;
+document.addEventListener("dragstart", (e) => {
+  const lh = e.target.closest?.("[data-lane-drag]");
+  if (lh) { laneDrag = lh.dataset.laneDrag; e.dataTransfer.effectAllowed = "move"; e.dataTransfer.setData("text/plain", laneDrag); const h = $("#strip-hint"); if (h) h.textContent = "Drop on another lane to change the plot order."; return; }
+  const box = e.target.closest?.("#strip .box[draggable]"); if (!box) return;
+  if (box.dataset.lane) useLane(box.dataset.lane);
+  dragFrom = +box.dataset.i; e.dataTransfer.effectAllowed = "move"; e.dataTransfer.setData("text/plain", String(dragFrom));
+  box.classList.add("dragging"); document.body.classList.add("dragging");
+  let ok = 0;
+  box.closest(".strip-row").querySelectorAll(".gap").forEach((gp) => {
+    const g = +gp.dataset.g;
+    if (g === dragFrom || g === dragFrom + 1) return;
+    const r = recipe.slice(), [it] = r.splice(dragFrom, 1); r.splice(g > dragFrom ? g - 1 : g, 0, it);
+    const v = chainOK(r); gp.classList.add(v ? "drop-ok" : "drop-no"); ok += v;
+  });
+  const d = DEFS[recipe[dragFrom].step], io = ioAt(recipe, dragFrom);
+  $("#strip-hint").textContent = ok ? `${d.name} can move to ${ok} place${ok > 1 ? "s" : ""}: the green gaps. Or drop it on the sidebar to pin it.`
+    : `${d.name} has nowhere else to go here: it needs ${STAGES[io.inn].label.toLowerCase()} input. You can still drop it on the sidebar to pin it.`;
+});
+document.addEventListener("dragover", (e) => { if (!laneDrag) return; const row = e.target.closest?.("[data-lane-row]"); document.querySelectorAll(".lane.over").forEach((x) => x !== row && x.classList.remove("over")); if (!row) return; e.preventDefault(); row.classList.add("over"); });
+document.addEventListener("drop", (e) => {
+  if (!laneDrag) return; const row = e.target.closest?.("[data-lane-row]"); if (!row) return; e.preventDefault();
+  const to = cmyk.order.indexOf(row.dataset.laneRow); cmyk.order.splice(cmyk.order.indexOf(laneDrag), 1); cmyk.order.splice(to, 0, laneDrag); laneDrag = null;
+  renderStrip(); renderPanels(); drawThumbs(); drawMain(); renderOverlays(); renderChip(); toast(`Plot order: ${cmyk.order.map((k) => INKC[k].name).join(" → ")}.`);
+});
+document.addEventListener("dragover", (e) => { const sd = e.target.closest?.("aside.side"); if (sd && dragFrom != null) { e.preventDefault(); sd.classList.add("over"); return; } document.querySelector("aside.side.over")?.classList.remove("over"); });
+document.addEventListener("dragover", (e) => { const gp = e.target.closest?.(".gap.drop-ok"); if (!gp) return; e.preventDefault(); document.querySelectorAll(".gap.over").forEach((x) => x !== gp && x.classList.remove("over")); gp.classList.add("over"); });
+document.addEventListener("drop", (e) => {
+  if (e.target.closest?.("aside.side") && dragFrom != null) { e.preventDefault(); const u = recipe[dragFrom].uid; dragFrom = null; document.body.classList.remove("dragging"); $("aside.side").classList.remove("over"); if (!pinned.has(u)) togglePin(u); return; }
+  const gp = e.target.closest?.(".gap.drop-ok"); if (!gp || dragFrom == null) return; e.preventDefault();
+  const g = +gp.dataset.g, [it] = recipe.splice(dragFrom, 1), to = g > dragFrom ? g - 1 : g; recipe.splice(to, 0, it);
+  dragFrom = null; document.body.classList.remove("dragging"); select(to); toast(`Moved ${DEFS[it.step].name}.`);
+});
+document.addEventListener("dragend", () => { dragFrom = null; laneDrag = null; document.querySelectorAll(".lane.over").forEach((x) => x.classList.remove("over")); document.body.classList.remove("dragging"); document.querySelectorAll(".gap,.box").forEach((x) => x.classList.remove("drop-ok", "drop-no", "over", "dragging")); const h = $("#strip-hint"); if (h) h.textContent = ""; });
+
+/* compare: drag dividers, the lens, or boxes */
+(() => {
+  const cv = $("#main-canvas"); let dr = null;
+  const fr = (e) => { const c = cv._content, r = cv.getBoundingClientRect(); return [(e.clientX - r.left - c.cx) / c.side, (e.clientY - r.top - c.cy) / c.side]; };
+  const clamp = (v, a = 0, b = 1) => Math.min(b, Math.max(a, v));
+  const move = (e) => {
+    if (!dr) return; const [fx, fy] = fr(e);
+    if (dr.t === "split") { const k = dr.k, s = cmp.splits, f = cmp.layout === "rows" ? fy : fx; s[k] = clamp(f, k ? s[k - 1] + 0.02 : 0, k < s.length - 1 ? s[k + 1] - 0.02 : 1); }
+    else if (dr.t === "lens") { cmp.lens.x = clamp(fx - dr.dx); cmp.lens.y = clamp(fy - dr.dy); }
+    else if (dr.t === "move") { dr.b.x = clamp(fx - dr.dx, 0, 1 - dr.b.w); dr.b.y = clamp(fy - dr.dy, 0, 1 - dr.b.h); }
+    else if (dr.t === "resize") { dr.b.w = clamp(fx - dr.b.x, 0.05, 1 - dr.b.x); dr.b.h = clamp(fy - dr.b.y, 0.05, 1 - dr.b.y); }
+    else if (dr.t === "new") { const x1 = clamp(fx), y1 = clamp(fy); dr.b.x = Math.min(dr.x0, x1); dr.b.y = Math.min(dr.y0, y1); dr.b.w = Math.abs(x1 - dr.x0); dr.b.h = Math.abs(y1 - dr.y0); }
+    drawMain();
+  };
+  cv.addEventListener("pointerdown", (e) => {
+    if (!cmp || mode !== "design" || view !== "editor" || !cv._content) return;
+    const [fx, fy] = fr(e), L = cmp.layout;
+    if (L === "cols" || L === "rows") { const f = L === "rows" ? fy : fx; let best = Infinity, k = -1; cmp.splits.forEach((s, i) => { if (Math.abs(s - f) < best) { best = Math.abs(s - f); k = i; } }); if (k < 0) return; dr = { t: "split", k }; }
+    else if (L === "lens") { const inside = Math.hypot(fx - cmp.lens.x, fy - cmp.lens.y) < cmp.lens.r; dr = { t: "lens", dx: inside ? fx - cmp.lens.x : 0, dy: inside ? fy - cmp.lens.y : 0 }; }
+    else {
+      const hit = [...cmp.boxes].reverse().find((b) => fx >= b.x && fx <= b.x + b.w && fy >= b.y && fy <= b.y + b.h);
+      if (hit && fx > hit.x + hit.w - 0.04 && fy > hit.y + hit.h - 0.04) dr = { t: "resize", b: hit };
+      else if (hit) dr = { t: "move", b: hit, dx: fx - hit.x, dy: fy - hit.y };
+      else { if (fx < 0 || fy < 0 || fx > 1 || fy > 1) return; const b = { x: fx, y: fy, w: 0, h: 0, uid: selUid() }; cmp.boxes.push(b); dr = { t: "new", b, x0: fx, y0: fy }; }
+    }
+    cv.setPointerCapture(e.pointerId); move(e);
+  });
+  cv.addEventListener("pointermove", move);
+  cv.addEventListener("pointerup", () => {
+    if (dr?.t === "new") { const b = dr.b; if (b.w < 0.03 || b.h < 0.03) { b.w = b.h = 0.28; b.x = clamp(b.x - 0.14, 0, 0.72); b.y = clamp(b.y - 0.14, 0, 0.72); } renderOverlays(); drawMain(); }
+    dr = null;
+  });
+  cv.addEventListener("wheel", (e) => { if (!cmp || cmp.layout !== "lens" || view !== "editor") return; e.preventDefault(); cmp.lens.r = clamp(cmp.lens.r * Math.exp(-e.deltaY * 0.0015), 0.05, 0.5); const r = $("#cmp-r"); if (r) r.value = cmp.lens.r; drawMain(); }, { passive: false });
+})();
+
+/* gallery */
+function openGallery() {
+  const bg = document.createElement("div"); bg.className = "modal-bg";
+  bg.innerHTML = `<div class="modal" role="dialog" aria-label="Preset gallery"><div style="display:flex;align-items:center"><div style="flex:1"><h2>Preset gallery</h2>
+    <div class="muted">Each preset is a recipe, shown on your own photo. Picking one replaces the steps; your current recipe is saved as a checkpoint first.</div></div><button id="gal-close">Close</button></div>
+    <div class="gallery">${PRESETS.map((p) => { const r = p.make(); return `<button class="look" data-look="${p.id}"><canvas data-look-cv="${p.id}"></canvas><span class="t">${p.title}</span><span class="s">${p.summary}</span>
+      <span class="chain">${p.cmyk ? '<span class="muted" style="font-size:12px">Separate → 4 lanes → Stack</span>' : r.map((s, i) => `<i style="--st:${stv(ioAt(r, i, "image").out)}" title="${DEFS[s.step].name}"></i>`).join("")}</span></button>`; }).join("")}</div></div>`;
+  document.body.appendChild(bg);
+  requestAnimationFrame(() => bg.querySelectorAll("[data-look-cv]").forEach((cv) => { const p = PRESETS.find((p) => p.id === cv.dataset.lookCv);
+    if (p.cmyk) { const L = makeLanes(); drawThumb(cv, null, { draw: (g, w) => drawStack(g, 0, 0, w, { lanes: L, sa: false, minLw: 0.3 * (window.devicePixelRatio || 1) }) }); return; }
+    const o = evaluate(p.make()); drawThumb(cv, o[o.length - 1]); }));
+}
+function applyLook(id) {
+  const p = PRESETS.find((x) => x.id === id);
+  if (p.cmyk) { document.querySelector(".modal-bg")?.remove(); if (view === "cmyk") leaveCmyk(); return splitCMYK(true); }
+  if (view === "cmyk") leaveCmyk();
+  proj.checkpoints.unshift({ name: `Before “${p.title}”`, ago: "just now", recipe: clone(recipe) });
+  recipe = proj.recipe = p.make(); sel = recipe.length - 1;
+  document.querySelector(".modal-bg")?.remove(); renderAll(); toast(`Applied “${p.title}”. Your old recipe is in Checkpoints.`);
+}
+function renderCpMenu() {
+  const m = $("#cp-menu");
+  m.innerHTML = `<h4>Checkpoints for this project</h4><p class="explain">A checkpoint is a saved copy of the recipe. Click one to go back to it; where you are now gets saved first, so nothing is lost.</p>${proj.checkpoints.map((c, i) => `<button class="cp" data-cp="${i}"><canvas data-cp-cv="${i}"></canvas><span><span class="t">${c.branch ? "⑂ " : ""}${esc(c.name)}</span><br><span class="s">${c.ago} · ${c.recipe.length} steps</span></span></button>`).join("")}
+    `;
+  m.querySelectorAll("[data-cp-cv]").forEach((cv) => { const o = evaluate(proj.checkpoints[+cv.dataset.cpCv].recipe); drawThumb(cv, o[o.length - 1]); });
+}
+
+/* ---------------- phone viewer ---------------- */
+let phView = null, phSel = null, phCompare = 1, phRecipe = null, phTitle = "";
+function renderPhone() {
+  const root = $("#phone");
+  if (!phView) {
+    root.innerHTML = `<div class="ph"><div class="ph-head"><span class="brand">plotlab</span><span class="t muted">Projects</span></div><div class="ph-body">
+      <p class="ph-note">Viewing only. Edit on a laptop; your projects and checkpoints show up here.</p>
+      ${projects.map((p, i) => `<button class="ph-card" data-ph-open="${i}"><canvas data-ph-cv="${i}"></canvas><span><span class="t">${esc(p.name)}</span><br><span class="s">${p.recipe.length} steps · ${p.checkpoints.length} checkpoints</span></span></button>`).join("")}</div></div>`;
+    root.querySelectorAll("[data-ph-cv]").forEach((cv) => { const o = evaluate(projects[+cv.dataset.phCv].recipe); drawThumb(cv, o[o.length - 1]); });
+    return;
+  }
+  const p = projects[phView.p], r = phRecipe, o = evaluate(r);
+  if (phSel == null) phSel = r.length - 1;
+  root.innerHTML = `<div class="ph"><div class="ph-head"><button id="ph-back" aria-label="Back to projects">‹</button><span class="t">${esc(phTitle)}</span></div><div class="ph-body">
+    <div class="ph-view"><canvas id="ph-canvas"></canvas></div>
+    <div class="ph-ctrl"><span class="muted" style="font-size:12px">Before</span><input type="range" id="ph-cmp" min="0" max="1" step="0.01" value="${phCompare}" aria-label="Before and after"><span class="muted" style="font-size:12px">After</span></div>
+    <div class="ph-sec">Steps · tap to look</div>
+    <div class="ph-strip">${[-1, ...r.map((_, i) => i)].map((i) => { const d = i < 0 ? null : DEFS[r[i].step], io = i < 0 ? { inn: "image", out: "image" } : ioAt(r, i, "image"), inn = io.inn, out = io.out;
+      return `<div class="box ${phSel === i ? "sel" : ""}" data-ph-step="${i}" style="--in:${stv(inn)};--out:${stv(out)}"><div class="band ${inn === out ? "same" : ""}"><span>${STAGES[out].label}</span></div><canvas data-ph-th="${i}"></canvas><div class="lbl">${d ? d.name : "Photo"}</div></div>`; }).join("")}</div>
+    <div class="ph-sec">Checkpoints</div>
+    <div class="ph-cps">${[{ name: "Current", ago: "latest", recipe: p.recipe }, ...p.checkpoints].map((c, i) => `<button class="cp" data-ph-cp="${i}"><canvas data-ph-cpcv="${i}"></canvas><span><span class="t">${esc(c.name)}</span><br><span class="s">${c.ago}</span></span></button>`).join("")}</div>
+  </div></div>`;
+  drawPhoneView(o);
+  root.querySelectorAll("[data-ph-th]").forEach((cv) => { const i = +cv.dataset.phTh; drawThumb(cv, i < 0 ? SRC : o[i]); });
+  const cps = [p.recipe, ...p.checkpoints.map((c) => c.recipe)];
+  root.querySelectorAll("[data-ph-cpcv]").forEach((cv) => { const oo = evaluate(cps[+cv.dataset.phCpcv]); drawThumb(cv, oo[oo.length - 1]); });
+  root.querySelector(`[data-ph-step="${phSel}"]`)?.scrollIntoView({ inline: "center", block: "nearest" });
+}
+function drawPhoneView(o) {
+  const cv = $("#ph-canvas"); if (!cv) return;
+  o = o || evaluate(phRecipe);
+  const d = phSel < 0 ? SRC : o[phSel];
+  cv._content = drawPaperScene(cv, { data: d, compare: phCompare < 1 ? phCompare : null, before: SRC, padTop: 16 });
+}
+$("#phone").addEventListener("click", (e) => {
+  const t = e.target;
+  const op = t.closest("[data-ph-open]"); if (op) { const p = projects[+op.dataset.phOpen]; phView = { p: +op.dataset.phOpen }; phRecipe = p.recipe; phTitle = p.name; phSel = null; phCompare = 1; return renderPhone(); }
+  if (t.closest("#ph-back")) { phView = null; return renderPhone(); }
+  const st = t.closest("[data-ph-step]"); if (st) { phSel = +st.dataset.phStep; return renderPhone(); }
+  const cp = t.closest("[data-ph-cp]"); if (cp) { const p = projects[phView.p], i = +cp.dataset.phCp; phRecipe = i === 0 ? p.recipe : p.checkpoints[i - 1].recipe; phTitle = i === 0 ? p.name : p.checkpoints[i - 1].name; phSel = null; renderPhone(); $("#phone .ph-body").scrollTop = 0; }
+});
+$("#phone").addEventListener("input", (e) => { if (e.target.id === "ph-cmp") { phCompare = +e.target.value; drawPhoneView(); } });
+
+/* ---------------- variants + phone switch ---------------- */
+const isSmall = () => window.matchMedia("(max-width: 700px)").matches;
+function applyHash() {
+  const h = location.hash.replace("#", "");
+  const phone = h === "phone" || isSmall();
+  document.body.classList.toggle("phone", phone);
+  document.body.classList.toggle("phone-preview", phone && !isSmall());
+  const want = proj.isCmyk ? "cmyk" : "editor";
+  if (want !== view) {
+    if (want === "cmyk") { mainSel = sel; mode = "design"; useLane(cmyk.lane); sel = cmyk.focus === "step" ? cmyk.sel : -1; }
+    else { cmyk.sel = sel; useMain(); sel = Math.min(mainSel, recipe.length - 1); }
+    view = want;
+  }
+  document.querySelectorAll("[data-view]").forEach((b) => { b.setAttribute("aria-pressed", String(phone ? b.dataset.view === "phone" : b.dataset.view === "editor")); b.disabled = isSmall() && b.dataset.view !== "phone"; });
+  if (phone) renderPhone(); else renderAll();
+}
+function cycle(dir) { const ks = Object.keys(VARIANTS), i = (ks.indexOf(variant) + dir + ks.length) % ks.length; variant = ks[i]; location.hash = "variant-" + variant; }
+$("#proto-bar").addEventListener("click", (e) => { const b = e.target.closest("[data-view]"); if (b) location.hash = b.dataset.view; });
+document.addEventListener("keydown", (e) => {
+  if (e.target.closest?.("input, textarea, select, [contenteditable]")) return;
+  if (document.body.classList.contains("phone")) return;
+  if ((e.metaKey || e.ctrlKey) && e.key === "s") { e.preventDefault(); quickSave(); return; }
+  if (e.key === "Escape") { closeMenus(); document.querySelector(".modal-bg")?.remove(); }
+  else if ((e.key === "Enter" || e.key === " ") && e.target.closest?.("#strip .box")) { e.preventDefault(); e.target.closest(".box").click(); }
+});
+window.addEventListener("hashchange", applyHash);
+let rz; window.addEventListener("resize", () => { clearTimeout(rz); rz = setTimeout(() => { if (document.body.classList.contains("phone") !== (location.hash === "#phone" || isSmall())) applyHash(); else if (document.body.classList.contains("phone")) drawPhoneView(); else { drawMain(); } }, 80); });
+document.addEventListener("scroll", () => positionPopover(), true);
+
+/* ---------------- boot ---------------- */
+const img = new Image();
+img.onload = () => {
+  const c = document.createElement("canvas"); c.width = c.height = N;
+  const g = c.getContext("2d"); g.drawImage(img, 0, 0, N, N);
+  const d = g.getImageData(0, 0, N, N).data, rgb = new Float32Array(N * N * 3);
+  for (let i = 0; i < N * N; i++) { rgb[i * 3] = d[i * 4] / 255; rgb[i * 3 + 1] = d[i * 4 + 1] / 255; rgb[i * 3 + 2] = d[i * 4 + 2] / 255; }
+  SRC = { kind: "image", rgb };
+  makeProjects();
+  applyHash();
+};
+img.src = IMG_SRC;
+</script>
