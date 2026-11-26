@@ -450,3 +450,15 @@ aside.side.pin-over { outline: 2px dashed var(--accent); outline-offset: -6px; }
 .compare-canvas.cols .cmp-divider { cursor: ew-resize; }
 .compare-canvas.rows .cmp-divider { cursor: ns-resize; }
 .cmp-divider:focus-visible circle, .cmp-divider.dragging circle { stroke: var(--ink); stroke-width: 0.6; }
+.compare-canvas.lens { cursor: move; }
+.compare-canvas.boxes { cursor: crosshair; }
+.cmp-lens-ring { fill: transparent; stroke: var(--accent); stroke-width: 2; vector-effect: non-scaling-stroke; outline: none; }
+.cmp-lens-ring:focus-visible { stroke: var(--ink); stroke-width: 3; }
+.cmp-box-frame { fill: transparent; stroke: var(--accent); stroke-width: 2; vector-effect: non-scaling-stroke; cursor: move; outline: none; }
+.cmp-box-frame.drawing { stroke-dasharray: 4 3; }
+.cmp-box-frame:focus-visible { stroke: var(--ink); stroke-width: 3; }
+.cmp-box-corner { fill: var(--accent); cursor: nwse-resize; }
+.compare-bar .lens-size { display: inline-flex; align-items: center; gap: 4px; }
+.compare-bar .lens-size input { width: 90px; }
+.compare-bar .box-chip { display: inline-flex; align-items: center; gap: 4px; }
+.compare-bar .hint { font-size: 12px; }

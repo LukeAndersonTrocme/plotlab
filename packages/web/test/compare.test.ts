@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { addBox, applyBox, applyLens, bandView, boxRect, DEFAULT_BOX, fitLens, MAX_BOXES, MAX_LENS, MIN_BOX, MIN_LENS, moveBox, moveLens, removeBox, resizeBox, resizeLens, setBoxStep, setInLens, setUnder, shiftAdd, shiftRefusal, shownBands } from "../src/compare.ts";
 import { applySplits, bandInUse, stripView, nextBand, addBand, compareTargets, dragSplit, everyStep, evenSplits, makeCompare, MAX_STRIPS, MIN_GAP, pruneCompare, readCompare, removeBand, setBand, setLayout, thisVsBefore, type Compare } from "../src/compare.ts";
 
 /** Only the step ids (and whether a step is on) matter to the comparison. */
@@ -241,5 +242,287 @@ describe("compare: releasing a divider drag", () => {
     expect(applySplits(c, [0.9, 0.1].slice(0, 1))).toEqual({ ...c, splits: [0.9] });
     const three = makeCompare(["source", "tone", "order"]);
     expect(applySplits(three, [0.7, 0.2])).toBe(three);
+  });
+});
+
+const lensOf = (bands: string[], lens = { x: 0.5, y: 0.5, r: 0.2 }): Compare => ({ ...makeCompare(bands, "lens"), lens });
+const boxesOf = (under: string, ...boxes: Compare["boxes"]): Compare => ({ ...makeCompare([under], "boxes"), boxes });
+const near = (o: Record<string, number | string>) => Object.fromEntries(Object.entries(o).map(([k, v]) => [k, typeof v === "number" ? +v.toFixed(6) : v]));
+
+describe("compare: the lens", () => {
+  it("drags: its centre follows the pointer", () => {
+    expect(moveLens(lensOf(["source", "tone"]), 0.3, 0.6).lens).toEqual({ x: 0.3, y: 0.6, r: 0.2 });
+  });
+
+  it("stays inside the image: dragged past an edge, it stops with its rim on the edge", () => {
+    expect(moveLens(lensOf(["source", "tone"]), -1, 2).lens).toEqual({ x: 0.2, y: 0.8, r: 0.2 });
+  });
+
+  it("its size is a fraction of the image's shorter side, so on a wide image it can go nearer the left and right edges", () => {
+    // Twice as wide as tall: a radius of 0.2 of the height is 0.1 of the width.
+    expect(near(moveLens(lensOf(["source", "tone"]), 0, 0, 2).lens)).toEqual({ x: 0.1, y: 0.2, r: 0.2 });
+    expect(near(moveLens(lensOf(["source", "tone"]), 1, 1, 0.5).lens)).toEqual({ x: 0.8, y: 0.9, r: 0.2 });
+  });
+
+  it("resizes between a smallest and a largest size", () => {
+    expect(resizeLens(lensOf(["source", "tone"]), 0.3).lens.r).toBe(0.3);
+    expect(resizeLens(lensOf(["source", "tone"]), 0).lens.r).toBe(MIN_LENS);
+    expect(resizeLens(lensOf(["source", "tone"]), 9).lens.r).toBe(MAX_LENS);
+  });
+
+  it("growing near an edge pushes the centre in, so the lens stays inside", () => {
+    const c = lensOf(["source", "tone"], { x: 0.1, y: 0.9, r: 0.05 });
+    expect(resizeLens(c, 0.3).lens).toEqual({ x: 0.3, y: 0.7, r: 0.3 });
+  });
+
+  it("an unchanged lens is the same comparison", () => {
+    const c = lensOf(["source", "tone"]);
+    expect(moveLens(c, 0.5, 0.5)).toBe(c);
+    expect(resizeLens(c, 0.2)).toBe(c);
+  });
+
+  it("fitLens puts a saved lens inside an image of another shape", () => {
+    expect(near(fitLens({ x: 0.05, y: 0.5, r: 0.2 }, 2))).toEqual({ x: 0.1, y: 0.5, r: 0.2 });
+  });
+
+  it("under the lens is the first step; in the lens is the second (the first again when there's only one)", () => {
+    expect(shownBands(lensOf(["source", "tone", "order"]))).toEqual(["source", "tone"]);
+    expect(shownBands(lensOf(["tone"]))).toEqual(["tone"]);
+  });
+
+  it("the chips pick what's under and in the lens; not the same step for both", () => {
+    const c = lensOf(["source", "tone"]);
+    expect(setInLens(c, "order").bands).toEqual(["source", "order"]);
+    expect(setUnder(c, "threshold").bands).toEqual(["threshold", "tone"]);
+    expect(setInLens(c, "source")).toBe(c);
+    expect(setUnder(c, "tone")).toBe(c);
+  });
+
+  it("strips kept from side by side swap places, so switching back loses none", () => {
+    const c = lensOf(["source", "tone", "threshold", "order"]);
+    const d = setInLens(c, "order");
+    expect(d.bands).toEqual(["source", "order", "threshold", "tone"]);
+    expect(d.splits).toEqual(c.splits);
+  });
+
+  it("with only one step, picking what's in the lens adds it", () => {
+    expect(setInLens(lensOf(["source"]), "tone").bands).toEqual(["source", "tone"]);
+  });
+
+  it("releasing a lens drag puts only the lens on the comparison as it is now", () => {
+    const dragged = moveLens(lensOf(["source", "fill"]), 0.3, 0.3);
+    const pruned = pruneCompare(lensOf(["source", "fill"]), chain("tone"))!; // Fill removed meanwhile
+    const out = applyLens(pruned, dragged.lens);
+    expect(out.bands).toEqual(["source"]);
+    expect(out.lens).toEqual(dragged.lens);
+    expect(applyLens(pruned, pruned.lens)).toBe(pruned);
+  });
+});
+
+describe("compare: boxes", () => {
+  it("drawing from one corner to the other makes that box, whichever way you drag", () => {
+    expect(near(boxRect(0.6, 0.7, 0.2, 0.3))).toEqual({ x: 0.2, y: 0.3, w: 0.4, h: 0.4 });
+  });
+
+  it("a click without dragging makes a default-sized box centred on the click", () => {
+    expect(near(boxRect(0.5, 0.5, 0.5, 0.5))).toEqual(near({ x: 0.5 - DEFAULT_BOX / 2, y: 0.5 - DEFAULT_BOX / 2, w: DEFAULT_BOX, h: DEFAULT_BOX }));
+    // Near a corner it stays inside the image.
+    expect(near(boxRect(0.99, 0.01, 0.995, 0.012))).toEqual(near({ x: 1 - DEFAULT_BOX, y: 0, w: DEFAULT_BOX, h: DEFAULT_BOX }));
+  });
+
+  it("a thin box gets the smallest size; a drag off the image stops at its edge", () => {
+    expect(near(boxRect(0.2, 0.2, 0.6, 0.21))).toEqual(near({ x: 0.2, y: 0.2, w: 0.4, h: MIN_BOX }));
+    expect(near(boxRect(0.5, 0.5, 3, -2))).toEqual({ x: 0.5, y: 0, w: 0.5, h: 0.5 });
+  });
+
+  it("adding a box puts it at the end with its step; six boxes is the most", () => {
+    const c = addBox(boxesOf("source"), { x: 0.1, y: 0.1, w: 0.2, h: 0.2 }, "tone");
+    expect(c.boxes).toEqual([{ x: 0.1, y: 0.1, w: 0.2, h: 0.2, step: "tone" }]);
+    let six = boxesOf("source");
+    for (let k = 0; k < MAX_BOXES; k++) six = addBox(six, { x: 0, y: 0, w: 0.2, h: 0.2 }, "tone");
+    expect(six.boxes).toHaveLength(MAX_BOXES);
+    expect(addBox(six, { x: 0, y: 0, w: 0.2, h: 0.2 }, "tone")).toBe(six);
+  });
+
+  it("moves, staying inside the image", () => {
+    const c = boxesOf("source", { x: 0.1, y: 0.1, w: 0.3, h: 0.2, step: "tone" });
+    expect(moveBox(c, 0, 0.4, 0.5).boxes[0]).toEqual({ x: 0.4, y: 0.5, w: 0.3, h: 0.2, step: "tone" });
+    expect(near(moveBox(c, 0, 0.9, -1).boxes[0]!)).toEqual({ x: 0.7, y: 0, w: 0.3, h: 0.2, step: "tone" });
+  });
+
+  it("resizes from its bottom-right corner, not smaller than the smallest box nor past the image", () => {
+    const c = boxesOf("source", { x: 0.2, y: 0.2, w: 0.3, h: 0.2, step: "tone" });
+    expect(near(resizeBox(c, 0, 0.6, 0.7).boxes[0]!)).toEqual({ x: 0.2, y: 0.2, w: 0.4, h: 0.5, step: "tone" });
+    expect(near(resizeBox(c, 0, 0, 0).boxes[0]!)).toEqual({ x: 0.2, y: 0.2, w: MIN_BOX, h: MIN_BOX, step: "tone" });
+    expect(near(resizeBox(c, 0, 5, 5).boxes[0]!)).toEqual({ x: 0.2, y: 0.2, w: 0.8, h: 0.8, step: "tone" });
+  });
+
+  it("is removed from its chip; its step can be changed", () => {
+    const c = boxesOf("source", { x: 0, y: 0, w: 0.2, h: 0.2, step: "tone" }, { x: 0.5, y: 0.5, w: 0.2, h: 0.2, step: "order" });
+    expect(removeBox(c, 0).boxes).toEqual([c.boxes[1]]);
+    expect(setBoxStep(c, 1, "threshold").boxes[1]!.step).toBe("threshold");
+    expect(removeBox(c, 5)).toBe(c);
+    expect(setBoxStep(c, 1, "order")).toBe(c);
+  });
+
+  it("two boxes may show the same step, and a box may show the step underneath", () => {
+    const c = boxesOf("source", { x: 0, y: 0, w: 0.2, h: 0.2, step: "tone" });
+    expect(setBoxStep(addBox(c, { x: 0.5, y: 0.5, w: 0.2, h: 0.2 }, "order"), 1, "tone").boxes.map((b) => b.step)).toEqual(["tone", "tone"]);
+    expect(setBoxStep(c, 0, "source").boxes[0]!.step).toBe("source");
+  });
+
+  it("the chip under the boxes picks any step (the hidden strips swap places)", () => {
+    const c = { ...makeCompare(["source", "tone"], "boxes"), boxes: [] };
+    expect(setUnder(c, "tone").bands).toEqual(["tone", "source"]);
+    expect(setUnder(c, "order").bands).toEqual(["order", "tone"]);
+  });
+
+  it("the steps sent are the one under the boxes and each box's step, once each", () => {
+    const c = boxesOf("source", { x: 0, y: 0, w: 0.2, h: 0.2, step: "order" }, { x: 0.5, y: 0.5, w: 0.2, h: 0.2, step: "order" }, { x: 0.5, y: 0, w: 0.2, h: 0.2, step: "source" }, { x: 0, y: 0.5, w: 0.2, h: 0.2, step: "tone" });
+    expect(shownBands(c)).toEqual(["source", "order", "tone"]);
+    expect(compareTargets(c, r)).toEqual(["source", 3, 0]);
+  });
+
+  it("releasing a move or resize puts only that box's new place on the comparison as it is now", () => {
+    const a = { x: 0.1, y: 0.1, w: 0.2, h: 0.2, step: "fill" };
+    const b = { x: 0.5, y: 0.5, w: 0.2, h: 0.2, step: "order" };
+    const dragged = moveBox(boxesOf("source", a, b), 1, 0.6, 0.7).boxes[1]!;
+    // Fill was removed during the drag: its box is gone and the dragged one is now box 0.
+    const pruned = pruneCompare(boxesOf("source", a, b), chain("order"))!;
+    const out = applyBox(pruned, b, dragged, 1);
+    expect(out.boxes).toEqual([{ ...b, x: 0.6, y: 0.7 }]);
+  });
+
+  it("a box removed during the drag stays removed", () => {
+    const a = { x: 0.1, y: 0.1, w: 0.2, h: 0.2, step: "fill" };
+    const pruned = pruneCompare(boxesOf("source", a), chain("order"))!;
+    expect(applyBox(pruned, a, { ...a, x: 0.5 }, 0)).toBe(pruned);
+  });
+});
+
+describe("compare: shift-click on a thumbnail, per layout", () => {
+  it("side by side: adds a strip, not a step already shown, at most six", () => {
+    expect(shiftAdd(makeCompare(["source"]), "tone").bands).toEqual(["source", "tone"]);
+    expect(shiftRefusal(makeCompare(["source", "tone"]), "tone")).toBe("That step already has a strip.");
+    expect(shiftRefusal(makeCompare(["source", "tone", "threshold", "centerline", "order", "a"]), "b")).toBe("Six strips is the most.");
+  });
+
+  it("lens: sets what's in the lens (not the step under it)", () => {
+    const c = lensOf(["source", "tone"]);
+    expect(shiftAdd(c, "order").bands).toEqual(["source", "order"]);
+    expect(shiftRefusal(c, "source")).toBe("That step is already under the lens.");
+    expect(shiftRefusal(c, "tone")).toBe("That step is already in the lens.");
+    expect(shiftAdd(c, "source")).toBe(c);
+  });
+
+  it("boxes: adds a default-sized box showing that step (the same step again is fine); six boxes is the most", () => {
+    const c = shiftAdd(boxesOf("source"), "tone");
+    expect(c.boxes).toHaveLength(1);
+    expect(c.boxes[0]!.step).toBe("tone");
+    expect(c.boxes[0]!.w).toBe(DEFAULT_BOX);
+    const d = shiftAdd(c, "tone");
+    expect(d.boxes).toHaveLength(2);
+    expect(d.boxes[1]).not.toEqual({ ...c.boxes[0], step: "tone" }); // not exactly on top of the first
+    expect(shiftRefusal(d, "tone")).toBeNull();
+    let six = d;
+    while (six.boxes.length < MAX_BOXES) six = shiftAdd(six, "order");
+    expect(shiftRefusal(six, "order")).toBe("Six boxes is the most.");
+    expect(shiftAdd(six, "order")).toBe(six);
+  });
+});
+
+describe("compare: switching to the lens or boxes", () => {
+  it("the lens needs two steps: with one, the given step goes in the lens", () => {
+    expect(setLayout(makeCompare(["source"]), "lens", "tone").bands).toEqual(["source", "tone"]);
+    expect(setLayout(makeCompare(["source", "order"]), "lens", "tone").bands).toEqual(["source", "order"]);
+  });
+
+  it("boxes start with one box, showing the second step (or the given step)", () => {
+    const c = setLayout(makeCompare(["source", "order"]), "boxes", "tone");
+    expect(c.boxes).toHaveLength(1);
+    expect(c.boxes[0]!.step).toBe("order");
+    expect(setLayout(makeCompare(["source"]), "boxes", "tone").boxes[0]!.step).toBe("tone");
+    // Boxes already drawn stay.
+    const drawn = { ...c, layout: "lens" as const };
+    expect(setLayout(drawn, "boxes", "tone").boxes).toBe(c.boxes);
+  });
+
+  it("“This step vs the one before” keeps the lens where it is, and the boxes show this step", () => {
+    const lens = moveLens(lensOf(["source", "order"]), 0.3, 0.3);
+    const t = thisVsBefore(r, 2, "lens", lens);
+    expect(t.bands).toEqual(["threshold", "centerline"]);
+    expect(t.lens).toEqual(lens.lens);
+    const boxes = boxesOf("source", { x: 0.1, y: 0.1, w: 0.2, h: 0.2, step: "order" });
+    const u = thisVsBefore(r, 2, "boxes", boxes);
+    expect(u.bands[0]).toBe("threshold");
+    expect(u.boxes).toEqual([{ x: 0.1, y: 0.1, w: 0.2, h: 0.2, step: "centerline" }]);
+  });
+});
+
+describe("compare: lens and boxes follow their steps", () => {
+  it("removing the step in the lens leaves the step under it showing; reordering changes nothing", () => {
+    const c = lensOf(["source", "tone"]);
+    expect(pruneCompare(c, chain("order", "tone"))).toBe(c);
+    expect(shownBands(pruneCompare(c, chain("order"))!)).toEqual(["source"]);
+  });
+
+  it("the steps sent for the lens: under and in, once each, by their place in the chain", () => {
+    expect(compareTargets(lensOf(["order", "tone", "threshold"]), r)).toEqual([3, 0]);
+    expect(compareTargets(lensOf(["order"]), r)).toEqual([3]);
+  });
+
+  it("each part draws only a reply for its own step id at its place (bandView)", () => {
+    const c = boxesOf("source", { x: 0, y: 0, w: 0.2, h: 0.2, step: "order" });
+    const t = compareTargets(c, r);
+    expect(bandView([{ step: "source", index: -1 }, { step: "order", index: 3 }], c, t, "order")).toEqual({ step: "order", index: 3 });
+    expect(bandView([{ step: "source", index: -1 }, { step: "centerline", index: 3 }], c, t, "order")).toBeNull();
+    expect(bandView([{ step: "source", index: -1 }, { step: "order", index: 3 }], c, t, "tone")).toBeNull();
+  });
+});
+
+describe("compare: reading a saved lens and boxes", () => {
+  it("reads back what was saved", () => {
+    const c = addBox(moveLens(setLayout(makeCompare(["source", "tone"]), "lens"), 0.3, 0.6), { x: 0.1, y: 0.2, w: 0.3, h: 0.25 }, "order");
+    expect(readCompare(JSON.parse(JSON.stringify(c)), r)).toEqual(c);
+    const b = { ...c, layout: "boxes" as const };
+    expect(readCompare(JSON.parse(JSON.stringify(b)), r)).toEqual(b);
+  });
+
+  it("a lens or box out of range is brought back inside; at most six boxes", () => {
+    const c = readCompare({ layout: "boxes", bands: ["source"], lens: { x: 3, y: -1, r: 4 }, boxes: [{ x: 0.9, y: -0.5, w: 2, h: 0.001, step: "tone" }, ...Array.from({ length: 8 }, () => ({ x: 0, y: 0, w: 0.2, h: 0.2, step: "order" }))] }, r)!;
+    expect(c.lens).toEqual({ x: 1, y: 0, r: MAX_LENS });
+    expect(near(c.boxes[0]!)).toEqual({ x: 0, y: 0, w: 1, h: MIN_BOX, step: "tone" });
+    expect(c.boxes).toHaveLength(MAX_BOXES);
+  });
+});
+
+describe("compare: review fixes (#76)", () => {
+  it("“This step vs the one before” in Boxes with no boxes adds one showing this step", () => {
+    const t = thisVsBefore(r, 2, "boxes", boxesOf("source"));
+    expect(t.bands[0]).toBe("threshold");
+    expect(t.boxes.map((b) => b.step)).toEqual(["centerline"]);
+  });
+
+  it("every shift-clicked box gets its own place, up to six", () => {
+    let c = boxesOf("source");
+    while (c.boxes.length < MAX_BOXES) c = shiftAdd(c, "tone");
+    expect(new Set(c.boxes.map((b) => `${b.x},${b.y}`)).size).toBe(MAX_BOXES);
+    for (const b of c.boxes) expect(b.x + b.w <= 1 && b.y + b.h <= 1).toBe(true);
+  });
+
+  it("releasing a drag of one of two identical boxes moves the one dragged", () => {
+    const b = { x: 0.1, y: 0.1, w: 0.2, h: 0.2, step: "tone" };
+    const c = boxesOf("source", b, b);
+    const out = applyBox(c, b, { x: 0.5, y: 0.5, w: 0.2, h: 0.2 }, 1);
+    expect(out.boxes).toEqual([b, { ...b, x: 0.5, y: 0.5 }]);
+  });
+
+  it("removing the only step under the boxes puts the source there; the boxes stay", () => {
+    const c = boxesOf("fill", { x: 0.1, y: 0.1, w: 0.2, h: 0.2, step: "tone" });
+    const out = pruneCompare(c, chain("tone"))!;
+    expect(out.bands).toEqual(["source"]);
+    expect(out.boxes).toEqual(c.boxes);
+    // With no boxes left either, comparing turns off as before.
+    expect(pruneCompare(boxesOf("fill", { x: 0.1, y: 0.1, w: 0.2, h: 0.2, step: "fill" }), chain("tone"))).toBeNull();
   });
 });

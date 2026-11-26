@@ -1,6 +1,7 @@
-import { useId, useRef, useState, type KeyboardEvent, type PointerEvent } from "react";
+import { useId, useRef, useState, type KeyboardEvent, type PointerEvent, type ReactNode } from "react";
 import type { Paper } from "@plotlab/engine";
-import { addBand, applySplits, bandInUse, dragSplit, stripView, everyStep, MAX_STRIPS, nextBand, removeBand, setBand, setLayout, thisVsBefore, type Chain, type Compare } from "./compare.ts";
+import { addBand, applySplits, dragSplit, stripView, everyStep, MAX_BOXES, MAX_LENS, MAX_STRIPS, MIN_LENS, nextBand, removeBand, removeBox, resizeLens, setBand, setBoxStep, setInLens, setLayout, setUnder, thisVsBefore, type Band, type Chain, type Compare } from "./compare.ts";
+import { LensBoxesCanvas } from "./LensBoxes.tsx";
 import type { InspectTarget, InspectView } from "./protocol.ts";
 import { StageLayers } from "./StageView.tsx";
 
@@ -15,15 +16,23 @@ export type BandOption = { key: string; label: string };
 export function CompareCanvas(props: {
   paper: Paper;
   compare: Compare;
-  /** What each strip asks the worker for (`compareTargets`), to match `views` against. */
+  /** What the worker was asked for (`compareTargets`: one per shown step), to match `views` against. */
   targets: InspectTarget[];
   views: Array<InspectView | null> | null;
-  labels: string[];
+  /** A step's name (or "Source" for the source); empty for a removed step until the view catches up. */
+  labelOf: (band: Band) => string;
   hidden: Set<string>;
   showTravel: boolean;
   busy: boolean;
+  /** The step being looked at: what a newly drawn box shows. */
+  looking: Band;
   onChange: (c: Compare) => void;
 }) {
+  if (props.compare.layout === "lens" || props.compare.layout === "boxes") return <LensBoxesCanvas {...props} />;
+  return <StripsCanvas {...props} />;
+}
+
+function StripsCanvas(props: Parameters<typeof CompareCanvas>[0]) {
   const { widthMm: w, heightMm: h } = props.paper;
   const svg = useRef<SVGSVGElement>(null);
   const [drag, setDrag] = useState<{ k: number; c: Compare } | null>(null);
@@ -84,7 +93,7 @@ export function CompareCanvas(props: {
         );
       })}
       {c.bands.map((_, k) => {
-        const label = props.labels[k] ?? "";
+        const label = props.labelOf(c.bands[k]!);
         const r = rect(edges[k]!, edges[k + 1]!);
         const tw = label.length * fs * 0.58 + fs;
         if ((rows ? r.height : r.width) < (rows ? fs * 2.2 : tw + fs * 0.4)) return null;
@@ -139,13 +148,34 @@ export function CompareCanvas(props: {
   );
 }
 
+/** What shift-click on a thumbnail does, in the words of the layout. */
+export const shiftHint = (c: Compare) =>
+  c.layout === "lens" ? "Shift-click a thumbnail to show it in the lens" : c.layout === "boxes" ? "Shift-click a thumbnail to add a box showing it" : "Shift-click a thumbnail to add it as a strip";
+
 /**
- * The bar above the canvas while comparing: the layout, a chip per strip to pick its step (and
- * remove it), + Strip, and the two shortcuts.
+ * The bar above the canvas while comparing: the layout, then per layout a chip per strip to
+ * pick its step (and remove it) with + Strip; what's under and in the lens with its size; or
+ * what's under the boxes and a chip per box. Then the shortcuts.
  */
-export function CompareBar(props: { compare: Compare; chain: Chain; selected: number; options: BandOption[]; onChange: (c: Compare) => void }) {
+export function CompareBar(props: { compare: Compare; chain: Chain; selected: number; options: BandOption[]; looking: Band; aspect: number; onChange: (c: Compare) => void }) {
   const { compare: c, onChange } = props;
   const name = (key: string) => props.options.find((o) => o.key === key)?.label ?? key;
+  const strips = c.layout === "cols" || c.layout === "rows";
+  /** A step chip; an option is greyed out when picking it would change nothing (the rule for that chip). */
+  const chip = (label: string, value: Band, pick: (b: Band) => Compare, extra?: ReactNode) => (
+    <span key={label} className="band-chip">
+      <select aria-label={label} value={value} onChange={(e) => onChange(pick(e.target.value))} title={name(value)}>
+        {props.options.map((o) => (
+          <option key={o.key} value={o.key} disabled={o.key !== value && pick(o.key) === c}>
+            {o.label}
+          </option>
+        ))}
+      </select>
+      {extra}
+    </span>
+  );
+  // Switching to the lens with one step puts the step being looked at in it (or the next one).
+  const fill = props.looking !== c.bands[0] ? props.looking : nextBand(c, props.chain);
   return (
     <div className="compare-bar" role="group" aria-label="Compare stages">
       <span className="seg">
@@ -153,36 +183,64 @@ export function CompareBar(props: { compare: Compare; chain: Chain; selected: nu
           [
             ["cols", "▥ Side by side"],
             ["rows", "▤ Top to bottom"],
+            ["lens", "◯ Lens"],
+            ["boxes", "▢ Boxes"],
           ] as const
         ).map(([k, label]) => (
-          <button key={k} aria-pressed={c.layout === k} onClick={() => onChange(setLayout(c, k))}>
+          <button key={k} aria-pressed={c.layout === k} onClick={() => onChange(setLayout(c, k, fill))}>
             {label}
           </button>
         ))}
       </span>
-      <span className="muted">{c.layout === "rows" ? "Top to bottom:" : "Left to right:"}</span>
-      {c.bands.map((band, k) => (
-        <span key={k} className="band-chip">
-          <select aria-label={`Strip ${k + 1}`} value={band} onChange={(e) => onChange(setBand(c, k, e.target.value))} title={name(band)}>
-            {props.options.map((o) => (
-              <option key={o.key} value={o.key} disabled={bandInUse(c, k, o.key)}>
-                {o.label}
-              </option>
-            ))}
-          </select>
-          {c.bands.length > 1 && (
-            <button aria-label={`Remove strip ${k + 1}`} title="Remove this strip" onClick={() => onChange(removeBand(c, k))}>
-              ×
-            </button>
+      {strips && (
+        <>
+          <span className="muted">{c.layout === "rows" ? "Top to bottom:" : "Left to right:"}</span>
+          {c.bands.map((band, k) =>
+            chip(
+              `Strip ${k + 1}`,
+              band,
+              (b) => setBand(c, k, b),
+              c.bands.length > 1 && (
+                <button aria-label={`Remove strip ${k + 1}`} title="Remove this strip" onClick={() => onChange(removeBand(c, k))}>
+                  ×
+                </button>
+              ),
+            ),
           )}
-        </span>
-      ))}
-      <button className="cmp-add" disabled={c.bands.length >= MAX_STRIPS} title={c.bands.length >= MAX_STRIPS ? "Six strips is the most" : "Add a strip (or shift-click a thumbnail)"} onClick={() => onChange(addBand(c, nextBand(c, props.chain)))}>
-        + Strip
-      </button>
+          <button className="cmp-add" disabled={c.bands.length >= MAX_STRIPS} title={c.bands.length >= MAX_STRIPS ? "Six strips is the most" : "Add a strip (or shift-click a thumbnail)"} onClick={() => onChange(addBand(c, nextBand(c, props.chain)))}>
+            + Strip
+          </button>
+        </>
+      )}
+      {!strips && <span className="muted">Under:</span>}
+      {!strips && chip(c.layout === "lens" ? "Under the lens" : "Under the boxes", c.bands[0]!, (b) => setUnder(c, b))}
+      {c.layout === "lens" && (
+        <>
+          <span className="muted">In the lens:</span>
+          {chip("In the lens", c.bands[1] ?? c.bands[0]!, (b) => setInLens(c, b))}
+          <label className="muted lens-size">
+            Size <input type="range" aria-label="Lens size" min={MIN_LENS} max={MAX_LENS} step={0.01} value={c.lens.r} onChange={(e) => onChange(resizeLens(c, Number(e.target.value), props.aspect))} />
+          </label>
+        </>
+      )}
+      {c.layout === "boxes" && (
+        <>
+          {c.boxes.map((b, k) => (
+            <span key={`b${k}`} className="box-chip">
+              <span className="muted">Box {k + 1}:</span>
+              {chip(`Box ${k + 1}`, b.step, (s) => setBoxStep(c, k, s),
+                <button aria-label={`Remove box ${k + 1}`} title="Remove this box" onClick={() => onChange(removeBox(c, k))}>
+                  ×
+                </button>,
+              )}
+            </span>
+          ))}
+          <span className="muted hint">{c.boxes.length >= MAX_BOXES ? "Six boxes is the most." : "Drag on the image to draw a box. It shows the step you're looking at."}</span>
+        </>
+      )}
       <span className="quick">
-        <button onClick={() => onChange(thisVsBefore(props.chain, props.selected, c.layout))}>This step vs the one before</button>
-        <button onClick={() => onChange(everyStep(props.chain, c.layout))}>Every step</button>
+        <button onClick={() => onChange(thisVsBefore(props.chain, props.selected, c.layout, strips ? undefined : c))}>This step vs the one before</button>
+        {strips && <button onClick={() => onChange(everyStep(props.chain, c.layout))}>Every step</button>}
       </span>
     </div>
   );

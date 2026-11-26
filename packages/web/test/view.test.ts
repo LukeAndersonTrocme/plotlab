@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { addBand, dragSplit, makeCompare, MAX_STRIPS, setLayout } from "../src/compare.ts";
-import { canvasTarget, clickBox, compareTargetsOf, readThumbSize, setCompare, toggleCompare, resizeThumbs, THUMB, writeThumbSize, fitSelection, fitView, fromViewBlock, initialView, isPinned, openSetup, pin, RESULT, select, setMode, sidebarSteps, SOURCE, stepSelection, toggleSelect, togglePin, toggleSolo, toViewBlock, unpin, VIEW_BLOCK_VERSION, type ViewState } from "../src/view.ts";
+import { addBand, addBox, dragSplit, makeCompare, MAX_STRIPS, moveLens, setLayout, type Compare } from "../src/compare.ts";
+import { lookingBand, canvasTarget, clickBox, compareTargetsOf, readThumbSize, setCompare, toggleCompare, resizeThumbs, THUMB, writeThumbSize, fitSelection, fitView, fromViewBlock, initialView, isPinned, openSetup, pin, RESULT, select, setMode, sidebarSteps, SOURCE, stepSelection, toggleSelect, togglePin, toggleSolo, toViewBlock, unpin, VIEW_BLOCK_VERSION, type ViewState } from "../src/view.ts";
 
 const at = (patch: Partial<ViewState>): ViewState => ({ ...initialView, ...patch });
 /** Only the step ids matter to the view. */
@@ -367,5 +367,60 @@ describe("view state: compare stages", () => {
     const block = toViewBlock(comparing(["source", "order"]));
     const v = fromViewBlock(initialView, block, r);
     expect(fromViewBlock(v, block, r)).toBe(v);
+  });
+});
+
+describe("view state: the lens and boxes", () => {
+  const lens = (bands: string[]): ViewState => at({ compare: { ...makeCompare(bands, "lens"), lens: { x: 0.4, y: 0.5, r: 0.2 } } });
+  const boxes = (under: string, ...b: Compare["boxes"]): ViewState => at({ compare: { ...makeCompare([under], "boxes"), boxes: b } });
+
+  it("shift-click in the lens layout sets what's in the lens; the sidebar stays", () => {
+    const v = lens(["source", "order"]);
+    const w = clickBox(v, stepSelection("threshold"), true);
+    expect(w.compare!.bands).toEqual(["source", "threshold"]);
+    expect(w.selection).toEqual(v.selection);
+    expect(clickBox(v, SOURCE, true)).toBe(v); // already under the lens
+  });
+
+  it("shift-click in the boxes layout adds a box showing that step", () => {
+    const w = clickBox(boxes("source"), stepSelection("order"), true);
+    expect(w.compare!.boxes.map((b) => b.step)).toEqual(["order"]);
+  });
+
+  it("a plain click in either layout only changes the sidebar", () => {
+    const v = boxes("source", { x: 0, y: 0, w: 0.2, h: 0.2, step: "order" });
+    expect(clickBox(v, stepSelection("threshold"), false).compare).toBe(v.compare);
+  });
+
+  it("a box draws the step being looked at: the selected step, the source, or (for the result) the last step", () => {
+    expect(lookingBand(at({ selection: stepSelection("centerline") }), r)).toBe("centerline");
+    expect(lookingBand(at({ selection: SOURCE }), r)).toBe("source");
+    expect(lookingBand(initialView, r)).toBe("order");
+    expect(lookingBand(initialView, chain())).toBe("source");
+  });
+
+  it("a step added later with a removed step's id doesn't get its box back", () => {
+    const withFill = chain("threshold", "fill", "order");
+    const v = boxes("source", { x: 0, y: 0, w: 0.2, h: 0.2, step: "fill" }, { x: 0.5, y: 0.5, w: 0.2, h: 0.2, step: "order" });
+    const removed = fitView(v, withFill, chain("threshold", "order"));
+    const readded = fitView(removed, chain("threshold", "order"), withFill);
+    expect(readded.compare!.boxes.map((b) => b.step)).toEqual(["order"]);
+    expect(compareTargetsOf(readded, withFill)).toEqual(["source", 2]);
+  });
+
+  it("a step added later with a removed step's id isn't put back in the lens", () => {
+    const withFill = chain("threshold", "fill", "order");
+    const removed = fitView(lens(["source", "fill"]), withFill, chain("threshold", "order"));
+    const readded = fitView(removed, chain("threshold", "order"), withFill);
+    expect(readded.compare!.bands).toEqual(["source"]);
+    expect(compareTargetsOf(readded, withFill)).toEqual(["source"]);
+  });
+
+  it("the lens and boxes are saved in the view block and read back as they were", () => {
+    const c = addBox(moveLens(setLayout(makeCompare(["source", "threshold"]), "lens"), 0.25, 0.7), { x: 0.1, y: 0.2, w: 0.3, h: 0.25 }, "order");
+    for (const shown of [c, { ...c, layout: "boxes" as const }]) {
+      const block = JSON.parse(JSON.stringify(toViewBlock(at({ compare: shown }))));
+      expect(fromViewBlock(initialView, block, r).compare).toEqual(shown);
+    }
   });
 });

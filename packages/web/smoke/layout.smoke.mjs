@@ -607,6 +607,125 @@ try {
     await page.close();
   }
 
+  // Compare stages, Lens and Boxes (#76): the lens drags and resizes (the wheel only over it);
+  // boxes are drawn, moved, resized and removed; both change while a slider moves; both come
+  // back after a reload.
+  {
+    const page = await open(1280);
+    const has = (sel) => page.waitForFunction((sel) => {
+      const els = [...document.querySelectorAll(sel)];
+      return els.length > 0 && els.every((e) => e.querySelector("image, path"));
+    }, sel, { timeout: 30_000 });
+    const lens = () => page.$eval(".compare-canvas .cmp-lens-ring", (e) => ({ x: Number(e.dataset.x), y: Number(e.dataset.y), r: Number(e.dataset.r) }));
+    const rects = () => page.$$eval(".compare-canvas .cmp-box-frame", (els) => els.map((e) => e.dataset.rect));
+    const paper = async () => (await page.$(".compare-canvas > rect.paper")).boundingBox();
+    const at = (p, fx, fy) => [p.x + p.width * fx, p.y + p.height * fy];
+    let pos = 0.15;
+    const slide = async (sel) => {
+      const before = await page.$$eval(sel, (els) => els.map((e) => e.innerHTML));
+      const range = await (await page.$('aside.side .card.step.focus[data-step="threshold"] input[type=range]')).boundingBox();
+      const y = range.y + range.height / 2;
+      await page.mouse.move(range.x + range.width * 0.5, y);
+      await page.mouse.down();
+      await page.mouse.move(range.x + range.width * pos, y, { steps: 6 });
+      pos += 0.2;
+      const live = await page.waitForFunction(([sel, b]) => {
+        const now = [...document.querySelectorAll(sel)].map((e) => e.innerHTML);
+        return now.length === b.length && now.every((h, i) => h !== b[i] && /<path|<image/.test(h));
+      }, [sel, before], { timeout: 30_000 }).then(() => true, () => false);
+      await page.mouse.up();
+      return live;
+    };
+    await page.click('.strip .box[data-key="threshold"] .pic');
+    await page.waitForSelector('aside.side .card.step.focus[data-step="threshold"]', { timeout: 10_000 });
+    await page.click(".view-bar button:has-text('Compare stages')");
+    await page.click(".compare-bar button:has-text('Lens')");
+    await page.waitForSelector(".compare-canvas.lens");
+    await has(".compare-canvas .cmp-under");
+    await has(".compare-canvas .cmp-lens");
+    const ub = [await page.getAttribute(".cmp-under", "data-band"), await page.getAttribute(".cmp-lens", "data-band")];
+    check(ub.join(",") === "source,threshold", `lens: the step before under the lens, the step in it (${ub.join(", ")})`);
+
+    // Drag the lens by its middle.
+    const l0 = await lens();
+    let p = await paper();
+    const [lx, ly] = at(p, l0.x, l0.y);
+    await page.mouse.move(lx, ly);
+    await page.mouse.down();
+    await page.mouse.move(lx - p.width * 0.2, ly + p.height * 0.1, { steps: 6 });
+    await page.mouse.up();
+    const l1 = await lens();
+    check(l1.x < l0.x - 0.1 && l1.y > l0.y + 0.05 && l1.r === l0.r, `lens: drags (${l0.x},${l0.y} → ${l1.x},${l1.y})`);
+    // The wheel over the lens resizes it; elsewhere it leaves the lens alone.
+    await page.mouse.move(...at(p, l1.x, l1.y));
+    await page.mouse.wheel(0, -300);
+    await page.waitForTimeout(150);
+    const l2 = await lens();
+    await page.mouse.move(...at(p, 0.97, 0.03));
+    await page.mouse.wheel(0, -300);
+    await page.waitForTimeout(150);
+    const l3 = await lens();
+    check(l2.r > l1.r && l3.r === l2.r, `lens: the wheel resizes it only while over it (${l1.r} → ${l2.r} → ${l3.r})`);
+    await page.fill(".compare-bar input[aria-label='Lens size']", "0.3");
+    await page.waitForTimeout(150);
+    check((await lens()).r === 0.3, `lens: the size slider resizes it (${(await lens()).r})`);
+    check(await page.$eval("header.top button[aria-label=Back]", (b) => b.disabled), "lens: dragging and resizing it is not a Back step");
+    check(await slide(".compare-canvas .cmp-lens"), "lens: moving a slider changes what's in the lens while the slider moves");
+    if (process.env.SHOTS) await page.screenshot({ path: `${process.env.SHOTS}/compare-lens.png` });
+    const lensKept = await lens();
+
+    // Boxes: one to start with; draw one, click for a default one, move, resize, remove.
+    await page.click(".compare-bar button:has-text('Boxes')");
+    await page.waitForSelector(".compare-canvas.boxes");
+    check((await rects()).length === 1, `boxes: switching to boxes starts with one (${(await rects()).length})`);
+    p = await paper();
+    await page.mouse.move(...at(p, 0.05, 0.7));
+    await page.mouse.down();
+    await page.mouse.move(...at(p, 0.25, 0.9), { steps: 6 });
+    await page.mouse.up();
+    await page.waitForFunction(() => document.querySelectorAll(".compare-canvas .cmp-box-frame").length === 2);
+    const drawnBox = (await rects())[1].split(",").map(Number);
+    check(Math.abs(drawnBox[0] - 0.05) < 0.02 && Math.abs(drawnBox[2] - 0.2) < 0.02, `boxes: dragging on the image draws a box (${drawnBox.join(",")})`);
+    await page.mouse.click(...at(p, 0.85, 0.2));
+    await page.waitForFunction(() => document.querySelectorAll(".compare-canvas .cmp-box-frame").length === 3);
+    const clicked = (await rects())[2].split(",").map(Number);
+    check(clicked[2] === 0.28 && clicked[3] === 0.28, `boxes: a click without dragging makes a default-sized box (${clicked.join(",")})`);
+    const bands = await page.$$eval(".compare-canvas .cmp-box", (els) => els.map((e) => e.dataset.band));
+    check(bands[1] === "threshold" && bands[2] === "threshold", `boxes: a drawn box shows the step being looked at (${bands.join(", ")})`);
+    // Move box 2 by its middle, then resize it from its corner.
+    await page.mouse.move(...at(p, 0.15, 0.8));
+    await page.mouse.down();
+    await page.mouse.move(...at(p, 0.25, 0.75), { steps: 6 });
+    await page.mouse.up();
+    const moved = (await rects())[1].split(",").map(Number);
+    check(moved[0] > drawnBox[0] + 0.05 && moved[2] === drawnBox[2], `boxes: a box moves (${drawnBox.join(",")} → ${moved.join(",")})`);
+    const corner = await (await page.$$(".compare-canvas .cmp-box-corner"))[1].boundingBox();
+    await page.mouse.move(corner.x + corner.width / 2, corner.y + corner.height / 2);
+    await page.mouse.down();
+    await page.mouse.move(corner.x + corner.width / 2 + p.width * 0.1, corner.y + corner.height / 2, { steps: 6 });
+    await page.mouse.up();
+    const resized = (await rects())[1].split(",").map(Number);
+    check(resized[2] > moved[2] + 0.05 && resized[0] === moved[0], `boxes: a box resizes from its corner (${moved.join(",")} → ${resized.join(",")})`);
+    await page.click(".compare-bar button[aria-label='Remove box 3']");
+    const removed = await page.waitForFunction(() => document.querySelectorAll(".compare-canvas .cmp-box-frame").length === 2, null, { timeout: 5_000 }).then(() => true, () => false);
+    check(removed, "boxes: a box is removed from its chip");
+    await has(".compare-canvas .cmp-box");
+    check(await slide(".compare-canvas .cmp-box"), "boxes: moving a slider changes every box while the slider moves");
+    if (process.env.SHOTS) await page.screenshot({ path: `${process.env.SHOTS}/compare-boxes.png` });
+    const boxesKept = await rects();
+
+    // A reload brings the boxes back, and the lens where it was.
+    await page.reload();
+    await page.waitForSelector(".stats .big", { timeout: 60_000 });
+    await page.waitForSelector(".compare-canvas.boxes", { timeout: 10_000 }).catch(() => {});
+    const back = await rects().catch(() => []);
+    check(JSON.stringify(back) === JSON.stringify(boxesKept), `boxes: they come back after a reload (${back.join(" | ")})`);
+    await page.click(".compare-bar button:has-text('Lens')");
+    await page.waitForSelector(".compare-canvas.lens");
+    check(JSON.stringify(await lens()) === JSON.stringify(lensKept), `lens: it comes back where it was after a reload (${JSON.stringify(await lens())})`);
+    await page.close();
+  }
+
   // Dark mode: the chrome goes dark, the paper stays paper-coloured.
   {
     const page = await open(1280, "dark");

@@ -9,17 +9,17 @@ import { PassStrip, PlotPanel, usePlayback } from "./PlotPanel.tsx";
 import { fitSolo, framePlot, passBoxes, soloPlot } from "./plotmode.ts";
 import { fmtTime, setupSummary } from "./setup.ts";
 import { ModeSwitch, SetupChip } from "./Shell.tsx";
-import { canAddStrip, canvasTarget, clickBox, compareTargetsOf, fitView, fromViewBlock, initialView, isPinned, openSetup, pin, readThumbSize, resizeThumbs, RESULT, select, selectedIndex, setCompare, setMode, sidebarSteps, SOURCE, stepSelection, toggleCompare, toggleSelect, togglePin, toggleSolo, toViewBlock, writeThumbSize, type ViewState } from "./view.ts";
+import { canvasTarget, clickBox, lookingBand, compareTargetsOf, fitView, fromViewBlock, initialView, isPinned, openSetup, pin, readThumbSize, resizeThumbs, RESULT, select, selectedIndex, setCompare, setMode, sidebarSteps, SOURCE, stepSelection, toggleCompare, toggleSelect, togglePin, toggleSolo, toViewBlock, writeThumbSize, type ViewState } from "./view.ts";
 import { Strip } from "./Strip.tsx";
 import { addAt, moveToGap } from "./gaps.ts";
 import { STEP_DRAG, stripBoxes, thumbRenderSide, toggleBypass, type StripBox } from "./strip.ts";
-import { MAX_STRIPS, stripView } from "./compare.ts";
+import { bandView, shiftRefusal, shownBands } from "./compare.ts";
 import { EMPTY_RUN, Runner, type RunState } from "./runner.ts";
 import { decodeFile, loadSample, sampleSource } from "./sample.ts";
 import { canRedo, canUndo, commit, createHistory, preview, redo, undo, type History } from "./history.ts";
 import type { InspectTarget } from "./protocol.ts";
 import { StageView } from "./StageView.tsx";
-import { CompareBar, CompareCanvas, type BandOption } from "./Compare.tsx";
+import { CompareBar, CompareCanvas, shiftHint, type BandOption } from "./Compare.tsx";
 import { StepList, type SidebarCards } from "./StepList.tsx";
 import { CheckpointSidebar } from "./CheckpointSidebar.tsx";
 import { PhoneViewer, usePhoneWidth } from "./PhoneViewer.tsx";
@@ -524,7 +524,7 @@ function Editor(props: { hidden: boolean }) {
   // Compare stages (Design): the canvas shows the strips, each from the same run as everything else.
   const compare = view.mode === "design" ? view.compare : null;
   const compareTargets = compareTargetsOf(view, recipe) ?? [];
-  const shownViews = compare ? compare.bands.flatMap((_, k) => stripView(run.compared, compare.bands, compareTargets, k) ?? []) : [{ rasters: viewRasters, plot: viewPlot }];
+  const shownViews = compare ? shownBands(compare).flatMap((b) => bandView(run.compared, compare, compareTargets, b) ?? []) : [{ rasters: viewRasters, plot: viewPlot }];
   const viewLayers = [
     ...new Map(
       shownViews.flatMap((v) => [
@@ -663,12 +663,12 @@ function Editor(props: { hidden: boolean }) {
           )}
           <div className="view-bar">
             {view.mode === "design" && (
-              <button className="toggle-btn" aria-pressed={!!compare} onClick={() => changeView(toggleCompare(view, recipe))} title="Compare several steps on the same image, side by side or top to bottom">
+              <button className="toggle-btn" aria-pressed={!!compare} onClick={() => changeView(toggleCompare(view, recipe))} title="Compare several steps on the same image: side by side, top to bottom, in a lens or in boxes">
                 Compare stages
               </button>
             )}
             {compare ? (
-              <span>{selected >= 0 ? <>Sliders for <strong>{stepTitle(selected)}</strong></> : "Shift-click a thumbnail to add it as a strip"}</span>
+              <span>{selected >= 0 ? <>Sliders for <strong>{stepTitle(selected)}</strong></> : shiftHint(compare)}</span>
             ) : solo !== null && shown ? (
               <>
                 <span>
@@ -711,7 +711,7 @@ function Editor(props: { hidden: boolean }) {
                 <input type="checkbox" checked={showSource} onChange={(e) => setShowSource(e.target.checked)} /> Show source underneath
               </label>
             )}
-            {compare && <CompareBar compare={compare} chain={recipe} selected={selected} options={boxes.map(bandOption)} onChange={(c) => changeView(setCompare(viewRef.current, c))} />}
+            {compare && <CompareBar compare={compare} chain={recipe} selected={selected} options={boxes.map(bandOption)} looking={lookingBand(view, recipe)} aspect={recipe.paper.widthMm / recipe.paper.heightMm} onChange={(c) => changeView(setCompare(viewRef.current, c))} />}
           </div>
           {compare ? (
             <CompareCanvas
@@ -719,10 +719,11 @@ function Editor(props: { hidden: boolean }) {
               compare={compare}
               targets={compareTargets}
               views={run.compared}
-              labels={compare.bands.map((b) => {
+              labelOf={(b) => {
                 const box = boxes.find((x) => x.key === b);
                 return box ? bandOption(box).label : ""; // a removed step's strip, until the view catches up
-              })}
+              }}
+              looking={lookingBand(view, recipe)}
               hidden={hidden}
               showTravel={showTravel && recipe.target.kind === "plotter"}
               busy={run.busy}
@@ -856,8 +857,9 @@ function Editor(props: { hidden: boolean }) {
           comparing={!!compare}
           onSelect={(key, shift) => {
             const sel = key === "source" ? SOURCE : stepSelection(key);
-            // While comparing a click only changes the sidebar; shift-click adds a strip.
-            if (shift && compare && !canAddStrip(view, sel)) confirmSaved(compare.bands.length >= MAX_STRIPS ? "Six strips is the most." : "That step already has a strip.");
+            // While comparing a click only changes the sidebar; shift-click adds a strip, fills the lens or adds a box.
+            const why = shift && compare ? shiftRefusal(compare, key) : null;
+            if (why) confirmSaved(why);
             changeView(clickBox(view, sel, shift));
           }}
           onBypass={(index) => {
