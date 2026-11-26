@@ -51,6 +51,8 @@ export const MAX_BOXES = 6;
 /** A drag shorter than this (both ways) is a click. */
 const CLICK = 0.02;
 const clamp = (v: number, lo: number, hi: number) => Math.min(hi, Math.max(lo, v));
+/** The box the boxes layout starts with. */
+const FIRST_BOX: Rect = { x: 0.3, y: 0.3, w: 0.4, h: 0.3 };
 const LAYOUTS: readonly Layout[] = ["cols", "rows", "lens", "boxes"];
 
 export const evenSplits = (n: number): number[] => Array.from({ length: Math.max(0, n - 1) }, (_, k) => (k + 1) / n);
@@ -69,7 +71,9 @@ export function thisVsBefore(chain: Chain, at: number, layout?: Layout, from?: C
   // From the lens or boxes: the lens stays where it is, and the boxes show this step.
   if (!from) return c;
   const step = c.bands.at(-1)!;
-  return { ...c, lens: from.lens, boxes: layout === "boxes" ? from.boxes.map((b) => ({ ...b, step })) : from.boxes };
+  if (layout !== "boxes") return { ...c, lens: from.lens, boxes: from.boxes };
+  // Boxes with none drawn yet get one, as when switching to boxes, so "this step" is on show.
+  return { ...c, lens: from.lens, boxes: from.boxes.length ? from.boxes.map((b) => ({ ...b, step })) : [{ ...FIRST_BOX, step }] };
 }
 
 /** “Every step”: the source, then each step that's on; at most six strips (the last steps). */
@@ -121,7 +125,7 @@ export function setLayout(c: Compare, layout: Layout, fill?: Band): Compare {
   let next: Compare = { ...c, layout };
   if (layout === "lens" && next.bands.length < 2 && fill !== undefined && fill !== next.bands[0]) next = addBand(next, fill);
   const step = c.bands[1] ?? fill;
-  if (layout === "boxes" && !next.boxes.length && step !== undefined) next = { ...next, boxes: [{ x: 0.3, y: 0.3, w: 0.4, h: 0.3, step }] };
+  if (layout === "boxes" && !next.boxes.length && step !== undefined) next = { ...next, boxes: [{ ...FIRST_BOX, step }] };
   return next;
 }
 
@@ -168,7 +172,7 @@ const known = (chain: Chain) => {
 
 /**
  * After a chain edit: drop the strips (and boxes) of steps that are gone, each giving its room
- * to its neighbour. Null when no strip is left. Dropping them matters: the engine gives a new
+ * to its neighbour. Null when no strip is left (with boxes still drawn, the source goes under them instead). Dropping them matters: the engine gives a new
  * step the lowest free id, so a Fill added after removing Fill is "fill" again and mustn't
  * come back as a strip.
  */
@@ -176,8 +180,12 @@ export function pruneCompare(c: Compare, chain: Chain): Compare | null {
   const ok = known(chain);
   let next = c;
   for (let k = c.bands.length - 1; k >= 0; k--) if (!ok(c.bands[k]!)) next = next.bands.length > 1 ? removeBand(next, k) : { ...next, bands: [] };
-  if (!next.bands.length) return null;
   const boxes = next.boxes.filter((b) => ok(b.step));
+  // Boxes still drawn keep the comparison: the source goes underneath.
+  if (!next.bands.length) {
+    if (next.layout !== "boxes" || !boxes.length) return null;
+    next = { ...next, bands: ["source"], splits: [] };
+  }
   return boxes.length === next.boxes.length ? next : { ...next, boxes };
 }
 
@@ -308,18 +316,22 @@ export function setBoxStep(c: Compare, k: number, step: Band): Compare {
 }
 
 /**
- * The end of a box move or resize: the box as it was when the drag began (`before`) is found
- * on the comparison as it is now and gets the new place. A box removed meanwhile stays removed.
+ * The end of a move or resize of box `k`: that box, as it was when the drag began (`before`),
+ * gets the new place on the comparison as it is now. Boxes are only ever removed, never
+ * reordered, so it is at `k` or, if boxes before it went meanwhile, the nearest match below
+ * `k`; of two identical boxes, the one dragged. A box removed meanwhile stays removed.
  */
-export function applyBox(c: Compare, before: Box, after: Rect): Compare {
-  const k = c.boxes.findIndex((b) => b.step === before.step && sameRect(b, before));
-  return k < 0 ? c : withBox(c, k, fitRect(after));
+export function applyBox(c: Compare, before: Box, after: Rect, k: number): Compare {
+  const same = (i: number) => c.boxes[i]?.step === before.step && sameRect(c.boxes[i]!, before);
+  let i = Math.min(k, c.boxes.length - 1);
+  while (i >= 0 && !same(i)) i--;
+  return i < 0 ? c : withBox(c, i, fitRect(after));
 }
 
 /* ---------- Shift-click on a thumbnail ---------- */
 
-/** Where a shift-clicked box goes: near the middle, each one a little lower right, so they don't hide each other. */
-const shiftBox = (n: number): Rect => ({ x: 0.36 - 0.12 + (n % 4) * 0.06, y: 0.36 - 0.12 + (n % 4) * 0.06, w: DEFAULT_BOX, h: DEFAULT_BOX });
+/** Where shift-clicked box `n` goes: near the middle, each one a little lower right, so none hides another (up to six, all inside). */
+const shiftBox = (n: number): Rect => ({ x: 0.22 + n * 0.08, y: 0.22 + n * 0.08, w: DEFAULT_BOX, h: DEFAULT_BOX });
 
 /** Why shift-clicking `band` changes nothing, or null when it does something. */
 export function shiftRefusal(c: Compare, band: Band): string | null {

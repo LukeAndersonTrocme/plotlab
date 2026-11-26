@@ -389,14 +389,14 @@ describe("compare: boxes", () => {
     const dragged = moveBox(boxesOf("source", a, b), 1, 0.6, 0.7).boxes[1]!;
     // Fill was removed during the drag: its box is gone and the dragged one is now box 0.
     const pruned = pruneCompare(boxesOf("source", a, b), chain("order"))!;
-    const out = applyBox(pruned, b, dragged);
+    const out = applyBox(pruned, b, dragged, 1);
     expect(out.boxes).toEqual([{ ...b, x: 0.6, y: 0.7 }]);
   });
 
   it("a box removed during the drag stays removed", () => {
     const a = { x: 0.1, y: 0.1, w: 0.2, h: 0.2, step: "fill" };
     const pruned = pruneCompare(boxesOf("source", a), chain("order"))!;
-    expect(applyBox(pruned, a, { ...a, x: 0.5 })).toBe(pruned);
+    expect(applyBox(pruned, a, { ...a, x: 0.5 }, 0)).toBe(pruned);
   });
 });
 
@@ -493,5 +493,36 @@ describe("compare: reading a saved lens and boxes", () => {
     expect(c.lens).toEqual({ x: 1, y: 0, r: MAX_LENS });
     expect(near(c.boxes[0]!)).toEqual({ x: 0, y: 0, w: 1, h: MIN_BOX, step: "tone" });
     expect(c.boxes).toHaveLength(MAX_BOXES);
+  });
+});
+
+describe("compare: review fixes (#76)", () => {
+  it("“This step vs the one before” in Boxes with no boxes adds one showing this step", () => {
+    const t = thisVsBefore(r, 2, "boxes", boxesOf("source"));
+    expect(t.bands[0]).toBe("threshold");
+    expect(t.boxes.map((b) => b.step)).toEqual(["centerline"]);
+  });
+
+  it("every shift-clicked box gets its own place, up to six", () => {
+    let c = boxesOf("source");
+    while (c.boxes.length < MAX_BOXES) c = shiftAdd(c, "tone");
+    expect(new Set(c.boxes.map((b) => `${b.x},${b.y}`)).size).toBe(MAX_BOXES);
+    for (const b of c.boxes) expect(b.x + b.w <= 1 && b.y + b.h <= 1).toBe(true);
+  });
+
+  it("releasing a drag of one of two identical boxes moves the one dragged", () => {
+    const b = { x: 0.1, y: 0.1, w: 0.2, h: 0.2, step: "tone" };
+    const c = boxesOf("source", b, b);
+    const out = applyBox(c, b, { x: 0.5, y: 0.5, w: 0.2, h: 0.2 }, 1);
+    expect(out.boxes).toEqual([b, { ...b, x: 0.5, y: 0.5 }]);
+  });
+
+  it("removing the only step under the boxes puts the source there; the boxes stay", () => {
+    const c = boxesOf("fill", { x: 0.1, y: 0.1, w: 0.2, h: 0.2, step: "tone" });
+    const out = pruneCompare(c, chain("tone"))!;
+    expect(out.bands).toEqual(["source"]);
+    expect(out.boxes).toEqual(c.boxes);
+    // With no boxes left either, comparing turns off as before.
+    expect(pruneCompare(boxesOf("fill", { x: 0.1, y: 0.1, w: 0.2, h: 0.2, step: "fill" }), chain("tone"))).toBeNull();
   });
 });

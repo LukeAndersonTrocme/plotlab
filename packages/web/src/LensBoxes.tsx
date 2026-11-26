@@ -60,7 +60,9 @@ export function LensBoxesCanvas(props: OverlayProps) {
     const wheel = (e: WheelEvent) => {
       e.preventDefault();
       const p = latest.current;
-      p.onChange(resizeLens(p.compare, fitLens(p.compare.lens, aspect).r * Math.exp(-e.deltaY * 0.0015), aspect));
+      // In pixels: a wheel that scrolls by lines (about 3 a notch) or pages resizes as much as one by pixels.
+      const dy = e.deltaY * (e.deltaMode === 1 ? 16 : e.deltaMode === 2 ? 800 : 1);
+      p.onChange(resizeLens(p.compare, fitLens(p.compare.lens, aspect).r * Math.exp(-dy * 0.0015), aspect));
     };
     el.addEventListener("wheel", wheel, { passive: false });
     return () => el.removeEventListener("wheel", wheel);
@@ -113,7 +115,7 @@ export function LensBoxesCanvas(props: OverlayProps) {
   const release = () => {
     // Only what the drag changed goes on the comparison as it is now: a step removed meanwhile stays removed.
     if (drag?.t === "lens") props.onChange(applyLens(props.compare, drag.c.lens));
-    else if (drag?.t === "move" || drag?.t === "resize") props.onChange(applyBox(props.compare, drag.before, drag.c.boxes[drag.k] ?? drag.before));
+    else if (drag?.t === "move" || drag?.t === "resize") props.onChange(applyBox(props.compare, drag.before, drag.c.boxes[drag.k] ?? drag.before, drag.k));
     else if (drag?.t === "new") props.onChange(addBox(props.compare, drag.rect, props.looking));
     setDrag(null);
   };

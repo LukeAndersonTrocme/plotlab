@@ -19,7 +19,7 @@ export function CompareCanvas(props: {
   /** What the worker was asked for (`compareTargets`: one per shown step), to match `views` against. */
   targets: InspectTarget[];
   views: Array<InspectView | null> | null;
-  /** A step's name (or "Image" for the source); empty for a removed step until the view catches up. */
+  /** A step's name (or "Source" for the source); empty for a removed step until the view catches up. */
   labelOf: (band: Band) => string;
   hidden: Set<string>;
   showTravel: boolean;
