@@ -105,7 +105,7 @@ export function setLaneParam(recipe: Recipe, registry: StepRegistry, stepId: str
     // The lane's own state: a lane with its own settings keeps them; a linked lane edits the shared ones.
     own = !!def.runLayer && !l.linked;
   }
-  const next: RecipeStep = own
+  const next: RecipeStep = own && lane !== null
     ? { ...rs, layerParams: { ...rs.layerParams, [lane]: { ...rs.layerParams?.[lane], [name]: value } } }
     : { ...rs, params: { ...rs.params, [name]: value } };
   return { recipe: { ...recipe, steps: recipe.steps.map((s, i) => (i === index ? next : s)) } };
