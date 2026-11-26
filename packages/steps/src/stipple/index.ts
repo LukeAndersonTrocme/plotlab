@@ -26,7 +26,11 @@ export interface StippleOptions {
   iterations: number;
   seed: number;
   progress?: (fraction: number) => void;
+  /** Told when the dot count is capped at MAX_DOTS. */
+  warn?: (message: string) => void;
 }
+
+const thousands = (n: number) => n.toLocaleString("en-US");
 
 /**
  * Mean tone over a rectangle of the paper, from a summed-area table. Exact for the
@@ -89,7 +93,11 @@ export function stipplePoints(tone: Float32Array, w: number, h: number, frame: F
       if (t > maxTone) maxTone = t;
     }
   }
-  const n = Math.min(MAX_DOTS, Math.round((mass * cw * ch) / (spacing * spacing)));
+  const wanted = Math.round((mass * cw * ch) / (spacing * spacing));
+  const n = Math.min(MAX_DOTS, wanted);
+  if (wanted > MAX_DOTS) {
+    o.warn?.(`Stopped at ${thousands(MAX_DOTS)} dots (this would need about ${thousands(wanted)}), so the tone comes out lighter than asked. A larger Darkest spacing gives fewer dots.`);
+  }
   if (n === 0 || maxTone <= 0) {
     o.progress?.(1);
     return [];
@@ -239,6 +247,7 @@ export const stipple = defineStep({
       iterations: p.iterations,
       seed: (p.seed ^ hashId(layer.id)) >>> 0,
       progress: ctx.progress,
+      warn: ctx.warn,
     });
     const features: LineFeature[] = pts.map((q) => ({
       type: "Feature",

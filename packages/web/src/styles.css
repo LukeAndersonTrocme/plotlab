@@ -58,6 +58,7 @@ main { display: flex; flex: 1; min-height: 0; }
 .timings { color: var(--muted); font-size: 12px; margin-top: 8px; }
 .error, .notice { white-space: pre-wrap; padding: 8px 10px; border-radius: 6px; margin-top: 8px; font-size: 13px; }
 .error { background: #fbe9e7; color: #8a2a1f; }
+.warning { white-space: pre-wrap; padding: 6px 10px; border-radius: 6px; margin-top: 8px; font-size: 13px; background: #fdf3e1; color: #a06a00; border-left: 3px solid #a06a00; }
 .notice { background: #e8f0f8; color: #234; cursor: pointer; }
 .help { position: fixed; right: 0; top: 0; bottom: 0; width: min(440px, 100vw); background: var(--panel); border-left: 1px solid var(--line); padding: 16px 20px; overflow-y: auto; box-shadow: -4px 0 16px rgba(0, 0, 0, 0.08); }
 .help .close { position: absolute; right: 12px; top: 10px; }

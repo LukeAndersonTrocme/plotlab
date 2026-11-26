@@ -79,8 +79,16 @@ async function run(args: string[]): Promise<number> {
     if (entry.issues.length) throw new Error(note!);
     if (note) process.stderr.write(`warning: ${note}\n`);
     ran = entry.recipe;
-    const { output, plot, warnings: runWarnings } = await pipeline.run(source, ran, { sourceKey: file });
+    const { output, plot, results, warnings: runWarnings } = await pipeline.run(source, ran, { sourceKey: file });
     for (const w of runWarnings) process.stderr.write(`warning: ${w}\n`);
+    for (const r of results) {
+      const title = registry.get(r.step)?.title ?? r.step;
+      for (const w of r.warnings) {
+        // Name the layer only when the step made more than one, so one-layer output reads plainly.
+        const layer = w.layer !== undefined && r.layers.length > 1 ? ` (${r.layers.find((l) => l.id === w.layer)?.name ?? w.layer})` : "";
+        process.stderr.write(`warning: ${title}${layer}: ${w.message}\n`);
+      }
+    }
     const lineFormat = format === "svg" || format === "pdf";
     if (!plot && lineFormat && ran.target.kind === "plotter") throw new Error(`recipe ends at ${output.kind}; add a step that makes lines (e.g. centerline) to export for a plotter`);
     const stem = inputs.length > 1 ? basename(file, extname(file)) : "plot";

@@ -1,5 +1,5 @@
 import type { RecipeStep } from "./recipe.ts";
-import type { AnyStep, StepContext } from "./step.ts";
+import type { AnyStep, StepContext, StepWarning } from "./step.ts";
 import type { GeometryLayer, Image, Layer, Layers, LayerValueKind, StageData } from "./types.ts";
 
 /** A layer as the UI sees it in a step's output. */
@@ -28,6 +28,7 @@ export async function applyLayerStep(
   input: Layers,
   rs: Pick<RecipeStep, "params" | "layers" | "layerParams">,
   ctx: StepContext,
+  warnings?: StepWarning[],
 ): Promise<StageData> {
   const sel = rs.layers ?? "all";
   const selected = (l: Layer) => sel === "all" || sel.includes(l.id);
@@ -49,7 +50,8 @@ export async function applyLayerStep(
   const run = (l: Layer) => {
     const k = done++;
     const progress = ctx.progress && ((f: number) => ctx.progress!((k + f) / total));
-    return def.runLayer!(l, { ...rs.params, ...rs.layerParams?.[l.id] } as never, { ...ctx, progress }, grid);
+    const warn = warnings ? collect(warnings, l.id) : ctx.warn;
+    return def.runLayer!(l, { ...rs.params, ...rs.layerParams?.[l.id] } as never, { ...ctx, progress, warn }, grid);
   };
   if (def.output === "layers") {
     const layers: Layer[] = [];
@@ -70,15 +72,28 @@ export async function applyLayerStep(
   };
 }
 
-/** Run any step on its input, whole-stage or per layer. */
+/** A `warn` that appends to `into`, tagged with the layer, skipping repeats. */
+function collect(into: StepWarning[], layer?: string): (message: string) => void {
+  return (message) => {
+    if (into.some((w) => w.message === message && w.layer === layer)) return;
+    into.push(layer === undefined ? { message } : { message, layer });
+  };
+}
+
+/**
+ * Run any step on its input, whole-stage or per layer. Given `warnings`, the step's `warn`
+ * calls are collected there (deduplicated, tagged with the layer for per-layer runs);
+ * otherwise `ctx.warn` is passed through as is.
+ */
 export async function applyStep(
   def: AnyStep,
   input: StageData,
   rs: Pick<RecipeStep, "params" | "layers" | "layerParams">,
   ctx: StepContext,
+  warnings?: StepWarning[],
 ): Promise<StageData> {
-  if (def.runLayer) return applyLayerStep(def, input as Layers, rs, ctx);
-  return def.run!(input, rs.params as never, ctx);
+  if (def.runLayer) return applyLayerStep(def, input as Layers, rs, ctx, warnings);
+  return def.run!(input, rs.params as never, warnings ? { ...ctx, warn: collect(warnings) } : ctx);
 }
 
 /** The layers in a stage's output, for selectors and ink assignment in the UI. */
