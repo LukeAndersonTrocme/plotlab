@@ -30,7 +30,10 @@ export function Strip(props: {
   size: number;
   /** Ids of the pinned steps. */
   pins: readonly string[];
-  onSelect: (key: string) => void;
+  /** `shift`: shift-click (while comparing, that adds the step as a strip). */
+  onSelect: (key: string, shift: boolean) => void;
+  /** Compare stages is on: a click only shows the step's settings; shift-click adds it as a strip. */
+  comparing?: boolean;
   onBypass: (index: number) => void;
   onResize: (px: number) => void;
   onNotice: (msg: string) => void;
@@ -141,7 +144,7 @@ export function Strip(props: {
                 data-key={b.key}
                 className={["box", selected ? "sel" : "", pinned ? "pinned" : "", b.enabled ? "" : "off", b.index < 0 ? "source" : "", drag?.from === b.index ? "dragging" : ""].join(" ")}
                 style={{ "--in": stageVar(b.input), "--out": stageVar(b.output) } as CSSProperties}
-                onClick={() => props.onSelect(b.key)}
+                onClick={(e) => props.onSelect(b.key, e.shiftKey)}
                 draggable={b.index >= 0}
                 onDragStart={(e) => {
                   if (b.index < 0) return;
@@ -152,7 +155,7 @@ export function Strip(props: {
                 }}
                 onDragEnd={endDrag}
               >
-                <button className="pick" aria-pressed={selected} aria-label={`Show ${name}${pinned ? " (pinned)" : ""}`} title={`Show ${name} on the canvas, with its settings`}>
+                <button className="pick" aria-pressed={selected} aria-label={`Show ${name}${pinned ? " (pinned)" : ""}`} title={props.comparing ? `Show ${name}'s settings (shift-click: add it as a strip)` : `Show ${name} on the canvas, with its settings`}>
                   <span className={`band${changes ? "" : " same"}`} title={changes ? `${STAGE_NAMES[b.input]} in, ${STAGE_NAMES[b.output]} out` : STAGE_NAMES[b.output]}>
                     {changes ? `→ ${STAGE_NAMES[b.output]}` : STAGE_NAMES[b.output]}
                   </span>

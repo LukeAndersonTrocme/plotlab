@@ -429,3 +429,24 @@ aside.side.pin-over { outline: 2px dashed var(--accent); outline-offset: -6px; }
 .phone-ckpt-pic img { max-width: 100%; max-height: 100%; }
 .phone-ckpt-now { font-weight: 600; color: var(--muted); }
 .phone-ckpt-note { font-size: 13px; color: var(--muted); white-space: pre-wrap; }
+
+/* Compare stages (#75): strips on the canvas, and the bar above it. */
+.toggle-btn[aria-pressed="true"] { background: var(--accent); color: var(--accent-ink); border-color: var(--accent); }
+.compare-bar { flex-basis: 100%; display: flex; flex-wrap: wrap; gap: 6px; align-items: center; background: var(--panel); border: 1px solid var(--line); border-radius: 8px; padding: 5px 8px; }
+.compare-bar .muted { color: var(--muted); }
+.band-chip { display: inline-flex; align-items: center; gap: 2px; border: 1px solid var(--line); border-radius: 6px; padding: 1px 2px 1px 6px; }
+.band-chip select { border: 0; background: transparent; padding: 2px; max-width: 12em; }
+.band-chip button { border: 0; background: none; padding: 0 5px; color: var(--muted); }
+.compare-bar .quick { margin-left: auto; display: flex; flex-wrap: wrap; gap: 6px; }
+.compare-bar .quick button { font-size: 12px; padding: 3px 8px; }
+.compare-canvas { touch-action: none; user-select: none; -webkit-user-select: none; }
+.cmp-label rect { fill: rgba(29, 29, 27, 0.75); }
+.cmp-label text { fill: #fff; font-weight: 600; }
+.cmp-divider { outline: none; }
+.cmp-divider .hit { fill: transparent; }
+.cmp-divider line { stroke: var(--accent); stroke-width: 0.8; vector-effect: non-scaling-stroke; }
+.cmp-divider circle { fill: var(--accent); }
+.cmp-divider text { fill: var(--accent-ink); pointer-events: none; }
+.compare-canvas.cols .cmp-divider { cursor: ew-resize; }
+.compare-canvas.rows .cmp-divider { cursor: ns-resize; }
+.cmp-divider:focus-visible circle, .cmp-divider.dragging circle { stroke: var(--ink); stroke-width: 0.6; }

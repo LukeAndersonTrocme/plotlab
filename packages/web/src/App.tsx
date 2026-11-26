@@ -9,15 +9,17 @@ import { PassStrip, PlotPanel, usePlayback } from "./PlotPanel.tsx";
 import { fitSolo, framePlot, passBoxes, soloPlot } from "./plotmode.ts";
 import { fmtTime, setupSummary } from "./setup.ts";
 import { ModeSwitch, SetupChip } from "./Shell.tsx";
-import { canvasTarget, fitView, fromViewBlock, initialView, isPinned, openSetup, pin, readThumbSize, resizeThumbs, RESULT, select, selectedIndex, setMode, sidebarSteps, SOURCE, stepSelection, toggleSelect, togglePin, toggleSolo, toViewBlock, writeThumbSize, type ViewState } from "./view.ts";
+import { canAddStrip, canvasTarget, clickBox, compareTargetsOf, fitView, fromViewBlock, initialView, isPinned, openSetup, pin, readThumbSize, resizeThumbs, RESULT, select, selectedIndex, setCompare, setMode, sidebarSteps, SOURCE, stepSelection, toggleCompare, toggleSelect, togglePin, toggleSolo, toViewBlock, writeThumbSize, type ViewState } from "./view.ts";
 import { Strip } from "./Strip.tsx";
 import { addAt, moveToGap } from "./gaps.ts";
-import { STEP_DRAG, stripBoxes, thumbRenderSide, toggleBypass } from "./strip.ts";
+import { STEP_DRAG, stripBoxes, thumbRenderSide, toggleBypass, type StripBox } from "./strip.ts";
+import { MAX_STRIPS } from "./compare.ts";
 import { EMPTY_RUN, Runner, type RunState } from "./runner.ts";
 import { decodeFile, loadSample, sampleSource } from "./sample.ts";
 import { canRedo, canUndo, commit, createHistory, preview, redo, undo, type History } from "./history.ts";
 import type { InspectTarget } from "./protocol.ts";
 import { StageView } from "./StageView.tsx";
+import { CompareBar, CompareCanvas, type BandOption } from "./Compare.tsx";
 import { StepList, type SidebarCards } from "./StepList.tsx";
 import { CheckpointSidebar } from "./CheckpointSidebar.tsx";
 import { PhoneViewer, usePhoneWidth } from "./PhoneViewer.tsx";
@@ -107,6 +109,7 @@ function Editor(props: { hidden: boolean }) {
   /** Run a recipe. The selected step is found by id in that recipe, so it survives reordering. */
   const send = (r: Recipe, proxy: boolean, runOnDemand = false) => {
     runner.inspect = canvasTarget(viewRef.current, r);
+    runner.compare = compareTargetsOf(viewRef.current, r);
     runner.thumbs = thumbSide(viewRef.current);
     runner.passes = passSide(viewRef.current);
     runner.request(r, proxy, runOnDemand);
@@ -187,8 +190,8 @@ function Editor(props: { hidden: boolean }) {
     void project?.setRecipe({ recipe: history.base, savedAt: Date.now() }).catch((e) => setNotice(`Couldn't autosave: ${errText(e)}`));
   }, [project, history.base]);
 
-  // Save the pins into the project's view block: not a recipe edit (no Back step, no checkpoint).
-  const pinKey = view.pins.join("\n");
+  // Save the pins and the comparison into the project's view block: not a recipe edit (no Back step, no checkpoint).
+  const pinKey = `${view.pins.join("\n")}\n${JSON.stringify(view.compare)}`;
   useEffect(() => {
     const b = viewBlock.current;
     if (!project || b?.project !== project.id) return;
@@ -197,7 +200,7 @@ function Editor(props: { hidden: boolean }) {
       .then((block) => {
         if (viewBlock.current?.project === project.id) viewBlock.current.kept = block;
       })
-      .catch((e) => setNotice(`Couldn't save your pinned steps: ${errText(e)}`));
+      .catch((e) => setNotice(`Couldn't save your pinned steps and comparison: ${errText(e)}`));
   }, [project, pinKey]);
 
   // A short confirmation that goes away by itself (saving a checkpoint).
@@ -358,9 +361,11 @@ function Editor(props: { hidden: boolean }) {
     setView(next);
     if (next.thumb !== viewRef.current.thumb) writeThumbSize(defaultLocalStorage() ?? null, next.thumb);
     viewRef.current = next;
-    // Only ask the worker again when what it draws changes (the canvas, or thumbnail size).
+    // Only ask the worker again when what it draws changes (the canvas or its strips, or thumbnail size).
     if (!started.current) return;
-    if (canvasTarget(next, recipeRef.current) !== runner.inspect || thumbSide(next) !== runner.thumbs || passSide(next) !== runner.passes) send(recipeRef.current, false);
+    const r = recipeRef.current;
+    const strips = JSON.stringify(compareTargetsOf(next, r)) !== JSON.stringify(runner.compare);
+    if (canvasTarget(next, r) !== runner.inspect || strips || thumbSide(next) !== runner.thumbs || passSide(next) !== runner.passes) send(r, false);
   };
   /** A chain edit from the strip that ends with a step selected: the canvas shows that step. */
   const applySelecting = (next: Recipe, id: string) => {
@@ -516,9 +521,17 @@ function Editor(props: { hidden: boolean }) {
   const viewRasters = inspected ? inspected.rasters : proof ? [proof] : partPlot ? [] : run.rasterLayers;
   const viewPlot = inspected ? inspected.plot : proof ? null : (frame?.plot ?? plot);
   const head = frame?.head ? { at: frame.head.at, color: shown!.layers.find((l) => l.id === frame.head!.layerId)!.ink.color } : null;
+  // Compare stages (Design): the canvas shows the strips, each from the same run as everything else.
+  const compare = view.mode === "design" ? view.compare : null;
+  const compareTargets = compareTargetsOf(view, recipe) ?? [];
+  const shownViews = compare ? (run.compared ?? []).filter((v) => v !== null) : [{ rasters: viewRasters, plot: viewPlot }];
   const viewLayers = [
-    ...(viewPlot?.layers.map((l) => ({ id: l.id, name: l.name, color: l.ink.color })) ?? []),
-    ...viewRasters.filter((r) => r.color !== null).map((r) => ({ id: r.id, name: r.name, color: r.color! })),
+    ...new Map(
+      shownViews.flatMap((v) => [
+        ...(v.plot?.layers.map((l) => ({ id: l.id, name: l.name, color: l.ink.color })) ?? []),
+        ...v.rasters.filter((r) => r.color !== null).map((r) => ({ id: r.id, name: r.name, color: r.color! })),
+      ]).map((l) => [l.id, l]),
+    ).values(),
   ];
   const stepTitle = (i: number) => registry.get(recipe.steps[i]?.step ?? "")?.title ?? "step";
   // A switched-off step shows what passes through it; an on-demand step that hasn't run, traced order.
@@ -541,6 +554,7 @@ function Editor(props: { hidden: boolean }) {
     void saveCheckpoint(name, `Saved this version as “${name}”. Your changes from here on are a new version; the saved one stays in Checkpoints.`);
   };
 
+  const boxes = stripBoxes(recipe, registry, run);
   const summary = setupSummary(recipe, run.estimate);
   const projectName = sourceName === "sample" ? "Sample image" : sourceName;
 
@@ -648,7 +662,14 @@ function Editor(props: { hidden: boolean }) {
             </div>
           )}
           <div className="view-bar">
-            {solo !== null && shown ? (
+            {view.mode === "design" && (
+              <button className="toggle-btn" aria-pressed={!!compare} onClick={() => changeView(toggleCompare(view, recipe))} title="Compare several steps on the same image, side by side or top to bottom">
+                Compare stages
+              </button>
+            )}
+            {compare ? (
+              <span>{selected >= 0 ? <>Sliders for <strong>{stepTitle(selected)}</strong></> : "Shift-click a thumbnail to add it as a strip"}</span>
+            ) : solo !== null && shown ? (
               <>
                 <span>
                   Showing only <strong>{shown.layers[0]!.name}</strong>
@@ -685,12 +706,26 @@ function Editor(props: { hidden: boolean }) {
                   <span className="swatch" style={{ background: l.color }} /> {l.name}
                 </label>
               ))}
-            {inspect !== "source" && (
+            {inspect !== "source" && !compare && (
               <label className="toggle">
                 <input type="checkbox" checked={showSource} onChange={(e) => setShowSource(e.target.checked)} /> Show source underneath
               </label>
             )}
+            {compare && <CompareBar compare={compare} chain={recipe} selected={selected} options={boxes.map(bandOption)} onChange={(c) => changeView(setCompare(viewRef.current, c))} />}
           </div>
+          {compare ? (
+            <CompareCanvas
+              paper={recipe.paper}
+              compare={compare}
+              targets={compareTargets}
+              views={run.compared}
+              labels={compare.bands.map((b) => bandOption(boxes.find((x) => x.key === b) ?? boxes[0]!).label)}
+              hidden={hidden}
+              showTravel={showTravel && recipe.target.kind === "plotter"}
+              busy={run.busy}
+              onChange={(c) => changeView(setCompare(viewRef.current, c))}
+            />
+          ) : (
           <StageView
             paper={recipe.paper}
             rasters={viewRasters}
@@ -701,6 +736,7 @@ function Editor(props: { hidden: boolean }) {
             empty={run.busy ? "Working…" : "Nothing to show at this stage"}
             head={head}
           />
+          )}
         </section>
 
         <aside
@@ -809,12 +845,18 @@ function Editor(props: { hidden: boolean }) {
         <Strip
           recipe={recipe}
           registry={registry}
-          boxes={stripBoxes(recipe, registry, run)}
+          boxes={boxes}
           thumbs={run.thumbs}
           selected={view.selection.kind === "step" ? view.selection.id : view.selection.kind === "source" ? "source" : null}
           size={view.thumb}
           pins={view.pins}
-          onSelect={(key) => changeView(select(view, key === "source" ? SOURCE : stepSelection(key)))}
+          comparing={!!compare}
+          onSelect={(key, shift) => {
+            const sel = key === "source" ? SOURCE : stepSelection(key);
+            // While comparing a click only changes the sidebar; shift-click adds a strip.
+            if (shift && compare && !canAddStrip(view, sel)) confirmSaved(compare.bands.length >= MAX_STRIPS ? "Six strips is the most." : "That step already has a strip.");
+            changeView(clickBox(view, sel, shift));
+          }}
           onBypass={(index) => {
             const res = toggleBypass(recipe, index, registry);
             if ("reason" in res) setNotice(res.reason);
@@ -853,6 +895,9 @@ function Editor(props: { hidden: boolean }) {
     </div>
   );
 }
+
+/** A strip's chip and label: the source, or the step's place and name. */
+const bandOption = (b: StripBox): BandOption => ({ key: b.key, label: b.index < 0 ? "Source" : `${b.index + 1} · ${b.title}${b.enabled ? "" : " (off)"}` });
 
 function notLinesNotice(names: string[]): string {
   const n = names.length;

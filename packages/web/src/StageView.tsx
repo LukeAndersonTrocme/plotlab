@@ -44,27 +44,11 @@ const pathD = (p: Position[]) => {
   return d;
 };
 
-/**
- * The paper in mm: optional dimmed source underneath, then rasters (image or layers,
- * composited with each ink's mix mode), then lines at their real ink width.
- */
-export function StageView(props: {
-  paper: Paper;
-  rasters: RasterView[];
-  plot: Plot | null;
-  showTravel: boolean;
-  underlay: RasterView | null;
-  hidden: Set<string>;
-  empty?: string;
-  /** Where the pen is in the plot-order animation, in its ink's colour. */
-  head?: { at: Position; color: string } | null;
-}) {
-  const { paper, plot } = props;
-  const { widthMm: w, heightMm: h } = paper;
-  const nothing = !props.rasters.length && !plot;
+/** What's on the paper (mm units): optional dimmed source, then rasters, then lines. Compare stages draws one per strip. */
+export function StageLayers(props: { rasters: RasterView[]; plot: Plot | null; showTravel: boolean; underlay: RasterView | null; hidden: Set<string> }) {
+  const { plot } = props;
   return (
-    <svg className="preview" viewBox={`-5 -5 ${w + 10} ${h + 10}`} preserveAspectRatio="xMidYMid meet">
-      <rect x={0} y={0} width={w} height={h} className="paper" />
+    <>
       {props.underlay && <Raster view={props.underlay} opacity={0.25} />}
       <g style={{ isolation: "isolate" }}>
         {props.rasters.filter((r) => !props.hidden.has(r.id)).map((r) => (
@@ -89,6 +73,32 @@ export function StageView(props: {
             </g>
           ))}
       </g>
+    </>
+  );
+}
+
+/**
+ * The paper in mm: optional dimmed source underneath, then rasters (image or layers,
+ * composited with each ink's mix mode), then lines at their real ink width.
+ */
+export function StageView(props: {
+  paper: Paper;
+  rasters: RasterView[];
+  plot: Plot | null;
+  showTravel: boolean;
+  underlay: RasterView | null;
+  hidden: Set<string>;
+  empty?: string;
+  /** Where the pen is in the plot-order animation, in its ink's colour. */
+  head?: { at: Position; color: string } | null;
+}) {
+  const { paper, plot } = props;
+  const { widthMm: w, heightMm: h } = paper;
+  const nothing = !props.rasters.length && !plot;
+  return (
+    <svg className="preview" viewBox={`-5 -5 ${w + 10} ${h + 10}`} preserveAspectRatio="xMidYMid meet">
+      <rect x={0} y={0} width={w} height={h} className="paper" />
+      <StageLayers rasters={props.rasters} plot={plot} showTravel={props.showTravel} underlay={props.underlay} hidden={props.hidden} />
       {props.head && <circle className="pen-head" cx={props.head.at[0]} cy={props.head.at[1]} r={Math.max(1.5, Math.min(w, h) / 120)} fill={props.head.color} />}
       {nothing && props.empty && (
         <text x={w / 2} y={h / 2} textAnchor="middle" className="empty-text">
