@@ -1,6 +1,6 @@
 import { STAGE_WORDS } from "./chain.ts";
 import { applyStep, describeLayers, type LayerInfo } from "./layers.ts";
-import { printScreenAngle } from "./lanes.ts";
+import { lanesOf, printScreenAngle } from "./lanes.ts";
 import { MAX_WORKING_SIDE, placeOnPaper, resample, workingSize } from "./layout.ts";
 import { inkFor, toPlot, withoutBudget, workingMmPerPx } from "./project.ts";
 import type { Recipe } from "./recipe.ts";
@@ -135,13 +135,15 @@ export class Pipeline {
     if (recipe.input !== stage) {
       throw new Error(`This source enters as ${STAGE_WORDS[stage]}, but the recipe starts at ${STAGE_WORDS[recipe.input]}. Set the recipe's "input" to "${stage}".`);
     }
+    // Print screen angles only mean something once the picture is split into inks.
+    const angles = recipe.screenAngles === true && lanesOf(recipe, this.registry).split !== null;
     const ctx: StepContext = {
       paper: recipe.paper,
       target: recipe.target,
       inks: recipe.inks,
       inkFor: (id) => inkFor(recipe, id),
       passOrder: recipe.passOrder,
-      screenAngle: (id, i) => (recipe.screenAngles ? printScreenAngle(id, i) : 0),
+      screenAngle: (id, i) => (angles ? printScreenAngle(id, i) : 0),
     };
     const placed = this.place(source, recipe, opts);
     const inkKey = JSON.stringify([recipe.inks, recipe.layerInks, recipe.passOrder]);
@@ -156,7 +158,7 @@ export class Pipeline {
       if (def.input !== data.kind) throw new StepError(index, `${def.title} needs ${def.input} but receives ${data.kind}`);
       key = `${key}>${def.id}@${def.version}${JSON.stringify([rs.params, rs.layers, rs.layerParams])}`;
       if (def.output === "plot") key += inkKey;
-      if (def.usesScreenAngles && recipe.screenAngles) key += "|screen-angles";
+      if (def.usesScreenAngles && angles) key += "|screen-angles";
       const hit = this.cache.get(index);
       if (opts.runOnDemand === false && def.cost === "on-demand" && hit?.key !== key) {
         stale.push(index);

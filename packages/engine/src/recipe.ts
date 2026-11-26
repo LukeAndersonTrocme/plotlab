@@ -56,8 +56,8 @@ export interface Recipe {
   machine: string;
   /**
    * Print screen angles (#66): turn each ink's Fill lattice by its print angle (C 15°, M 75°,
-   * Y 0°, K 45°; `printScreenAngle`) so the inks don't all hatch the same way. On by default
-   * after a split; recipes from before v4 load with it off, so their output doesn't change.
+   * Y 0°, K 45°; `printScreenAngle`) so the inks don't all hatch the same way. Only applies
+   * while the chain is split into lanes (`lanesOf`). On by default after a split; recipes from before v4 load with it off, so their output doesn't change.
    * Absent counts as off; `loadRecipe` always writes it.
    */
   screenAngles?: boolean;

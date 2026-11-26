@@ -1,6 +1,6 @@
 import { readdirSync, readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
-import { enterAt, loadRecipe, type Recipe } from "@plotlab/engine";
+import { enterAt, lanesOf, loadRecipe, type Recipe } from "@plotlab/engine";
 import { applyPreset, createRegistry, presets, presetSteps } from "../src/index.ts";
 
 const casesDir = new URL("../../../golden/cases/", import.meta.url);
@@ -48,6 +48,20 @@ describe("presets", () => {
     it("overrides the preset's print look but keeps the rest of the current print settings", () => {
       const out = applyPreset(base({ kind: "print", dpi: 1200, mode: "gray", halftone: { lpi: 30 }, negative: true }), "atkinson-print");
       expect(out.target).toEqual({ kind: "print", dpi: 1200, mode: "bitmap", halftone: null, negative: true });
+    });
+    it("CMYK print splits the picture into four inks, linked, with their inks and print screen angles on", () => {
+      const out = applyPreset(base({ kind: "plotter" }), "cmyk-print");
+      const v = lanesOf(out, createRegistry());
+      expect(v.lanes.map((l) => l.layer)).toEqual(["C", "M", "Y", "K"]);
+      expect(v.linked).toBe(true);
+      expect(v.stack.map((i) => out.steps[i]!.step)).toEqual(["order"]);
+      expect(out.layerInks).toEqual({ C: "cyan", M: "magenta", Y: "yellow", K: "black" });
+      expect(out.inks.map((i) => i.id)).toEqual(["k", "cyan", "magenta", "yellow", "black"]);
+      expect(out.screenAngles).toBe(true);
+      // Other presets leave the switch and the inks as they were.
+      const plain = applyPreset(base({ kind: "plotter" }), "topo-hatch");
+      expect(plain.screenAngles).toBe(false);
+      expect(plain.inks.map((i) => i.id)).toEqual(["k"]);
     });
     it("starts the chain at an image, so an SVG or separations source can switch steps off to fit", () => {
       const r = { ...base({ kind: "plotter" }), input: "geometry" as const };

@@ -63,6 +63,15 @@ describe("print screen angles in a linked split", () => {
       expect(turned.every((d) => same(d, want)), `${layer}: ${at0} → ${turned[0]}, want ${want}`).toBe(true);
     }
   });
+  it("only a split recipe turns its lattices: a single-ink recipe with the switch on is unchanged", async () => {
+    const single = (on: boolean) => {
+      const r = recipe(on);
+      return { ...r, steps: [{ ...r.steps[0]!, id: "tone", step: "tone", params: { contrast: 1, gamma: 1, invert: false } }, ...r.steps.slice(1)] };
+    };
+    const a = (await new Pipeline(reg).run(img, loadRecipe(single(false), reg).recipe)).output as Geometry;
+    const b = (await new Pipeline(reg).run(img, loadRecipe(single(true), reg).recipe)).output as Geometry;
+    expect(directions(b, "tone")).toEqual(directions(a, "tone"));
+  });
   it("switching the angles on or off reruns Fill (the cache key includes it)", async () => {
     const p = new Pipeline(reg);
     const a = (await p.run(img, recipe(false))).output as Geometry;
