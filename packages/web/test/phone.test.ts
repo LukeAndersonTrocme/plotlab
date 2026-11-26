@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { IDBFactory } from "fake-indexeddb";
 import { indexedDbLibrary, memoryLibrary, type Checkpoint, type Library, type NewSource } from "../src/storage/index.ts";
-import { inspectFor, isPhoneWidth, listProjectCards, nudgeSplit, openForViewing, PHONE_MAX_PX, PHONE_QUERY, phoneWidth, projectCover, readOnlyLibrary, splitAt, viewerLibrary } from "../src/phone.ts";
+import { canDrawPlots, inspectFor, isPhoneWidth, keepEditor, listProjectCards, nudgeSplit, openForViewing, PHONE_MAX_PX, PHONE_QUERY, phoneWidth, projectCover, readOnlyLibrary, splitAt, viewerLibrary } from "../src/phone.ts";
 
 describe("phone width switch", () => {
   it("is a phone under 700 px wide, the editor from 700 px", () => {
@@ -41,6 +41,24 @@ describe("phone width switch", () => {
     expect(calls).toBe(1);
     off();
     expect(listeners.size).toBe(0);
+  });
+});
+
+describe("keeping the editor", () => {
+  it("never starts the editor on a phone-width load", () => {
+    expect(keepEditor(false, true)).toBe(false);
+    expect(keepEditor(false, false)).toBe(true);
+  });
+  it("keeps an editor that has started when the window narrows, so no work is lost", () => {
+    expect(keepEditor(true, true)).toBe(true);
+    expect(keepEditor(true, false)).toBe(true);
+  });
+});
+
+describe("drawing plots on this browser", () => {
+  it("needs OffscreenCanvas (iOS Safari before 16.4 has none)", () => {
+    expect(canDrawPlots({ OffscreenCanvas: class {} })).toBe(true);
+    expect(canDrawPlots({})).toBe(false);
   });
 });
 
@@ -204,6 +222,22 @@ describe.each(adapters)("the phone viewer on %s storage", (_name, make) => {
     expect(cards.map((c) => c.name)).toEqual(["Sample (Mona Lisa)"]);
     expect((await openForViewing(v.library, cards[0]!.id))?.recipe).toBeUndefined();
     expect(await lib.listProjects()).toEqual([]);
+  });
+
+  it("skips a project that can't be read and lists the rest", async () => {
+    const { lib, cat } = await seed();
+    const broken: Library = {
+      ...lib,
+      persistent: lib.persistent,
+      listProjects: () => lib.listProjects(),
+      getLastOpened: () => lib.getLastOpened(),
+      openProject: async (id) => {
+        const p = await lib.openProject(id);
+        if (!p || id !== cat.id) return p;
+        return Object.assign(Object.create(p), { id: p.id, name: p.name, getRecipe: () => Promise.reject(new Error("corrupt")) });
+      },
+    };
+    expect((await listProjectCards(readOnlyLibrary(broken))).map((c) => c.name)).toEqual(["dog.jpg"]);
   });
 
   it("uses the stored projects when there are any", async () => {

@@ -38,6 +38,19 @@ export function phoneWidth(win: WindowLike) {
   };
 }
 
+/**
+ * Whether the editor is mounted: never started on a phone-width load (none of its work
+ * spins up), but once started it stays, hidden behind the viewer, so narrowing the window
+ * (a laptop window snapped to half the screen) loses no Back steps, dialogs or pictures.
+ */
+export const keepEditor = (started: boolean, phone: boolean) => started || !phone;
+
+/**
+ * Whether this browser can draw plots: decoding the image and the worker both need
+ * OffscreenCanvas (iOS Safari has it from 16.4). Without it, stored pictures still show.
+ */
+export const canDrawPlots = (g: object = globalThis) => "OffscreenCanvas" in g;
+
 /** Where the before/after line is, 0 (all after) to 1 (all before), from a finger at `clientX`. */
 export function splitAt(clientX: number, rect: { left: number; width: number }): number {
   if (!(rect.width > 0)) return 0.5;
@@ -121,18 +134,27 @@ export interface ProjectCard {
   checkpoints: number;
 }
 
-/** The project list: the last opened first, then by the most recent work (a recipe save or a checkpoint). */
+/**
+ * The project list: the last opened first, then by the most recent work (a recipe save or a
+ * checkpoint). A project that can't be read is left out rather than holding up the rest.
+ */
 export async function listProjectCards(lib: ViewerLibrary): Promise<ProjectCard[]> {
-  const last = await lib.getLastOpened();
-  const rows = await Promise.all(
+  const last = await lib.getLastOpened().catch(() => undefined);
+  const read = await Promise.all(
     (await lib.listProjects()).map(async (info) => {
-      const p = await lib.openProject(info.id);
-      const cps = p ? await p.listCheckpoints() : [];
-      const saved = (await p?.getRecipe())?.savedAt ?? 0;
-      const latest = Math.max(saved, ...cps.map((c) => c.createdAt));
-      return { card: { id: info.id, name: info.name, checkpoints: cps.length }, latest };
+      try {
+        const p = await lib.openProject(info.id);
+        if (!p) return null;
+        const cps = await p.listCheckpoints();
+        const saved = (await p.getRecipe())?.savedAt ?? 0;
+        const latest = Math.max(saved, ...cps.map((c) => c.createdAt));
+        return { card: { id: info.id, name: info.name, checkpoints: cps.length }, latest };
+      } catch {
+        return null;
+      }
     }),
   );
+  const rows = read.filter((r): r is NonNullable<typeof r> => r !== null);
   const rank = (r: (typeof rows)[number]) => Number(r.card.id === last);
   rows.sort((a, b) => rank(b) - rank(a) || b.latest - a.latest || (a.card.name < b.card.name ? -1 : 1));
   return rows.map((r) => r.card);

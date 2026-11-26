@@ -3,7 +3,7 @@ import { enterAt, loadRecipe, sourceStage, type Paper, type Plot, type Recipe, t
 import { createRegistry } from "@plotlab/steps";
 import { checkpointLabel, checkpointTime } from "./checkpoints.ts";
 import { defaultRecipe } from "./defaults.ts";
-import { inspectFor, listProjectCards, nudgeSplit, openForViewing, phoneWidth, projectCover, splitAt, viewerLibrary, type ProjectCard, type ViewerLibrary, type ViewerProject } from "./phone.ts";
+import { canDrawPlots, inspectFor, listProjectCards, nudgeSplit, openForViewing, phoneWidth, projectCover, splitAt, viewerLibrary, type ProjectCard, type ViewerLibrary, type ViewerProject } from "./phone.ts";
 import type { RasterView } from "./protocol.ts";
 import { EMPTY_RUN, Runner, type RunState } from "./runner.ts";
 import { decodeFile, sampleSource } from "./sample.ts";
@@ -45,18 +45,21 @@ export function PhoneViewer() {
   }, []);
   return (
     <div className="phone">
-      {error && <p className="phone-error">{error}</p>}
-      {lib && open ? <ProjectView library={lib.library} id={open} onBack={() => setOpen(null)} /> : <ProjectList lib={lib} onOpen={setOpen} />}
+      {lib && open ? <ProjectView library={lib.library} id={open} onBack={() => setOpen(null)} /> : <ProjectList lib={lib} error={error} onOpen={setOpen} />}
     </div>
   );
 }
 
-function ProjectList(props: { lib: { library: ViewerLibrary; example: boolean } | null; onOpen: (id: ProjectId) => void }) {
+function ProjectList(props: { lib: { library: ViewerLibrary; example: boolean } | null; error: string | null; onOpen: (id: ProjectId) => void }) {
   const [cards, setCards] = useState<ProjectCard[] | null>(null);
+  const [failed, setFailed] = useState<string | null>(null);
   useEffect(() => {
     if (!props.lib) return;
     let alive = true;
-    void listProjectCards(props.lib.library).then((c) => alive && setCards(c));
+    listProjectCards(props.lib.library).then(
+      (c) => alive && setCards(c),
+      (e) => alive && setFailed(`Couldn't read your projects: ${errText(e)}`),
+    );
     return () => {
       alive = false;
     };
@@ -68,7 +71,9 @@ function ProjectList(props: { lib: { library: ViewerLibrary; example: boolean } 
       </header>
       <p className="phone-note">{NOTE}</p>
       {props.lib?.example && <p className="phone-note">No projects are saved in this browser yet, so here is the sample to look at.</p>}
-      {!cards ? (
+      {props.error || failed ? (
+        <p className="phone-error">{props.error ?? failed}</p>
+      ) : !cards ? (
         <p className="phone-wait">Loading your projects…</p>
       ) : (
         <ul className="phone-projects">
@@ -110,7 +115,8 @@ const readRecipe = (json: unknown, src: Source): Recipe => enterAt(json === unde
 
 interface Opened {
   project: ViewerProject;
-  source: Source;
+  /** The decoded image; null when this browser can't draw plots (stored pictures still show). */
+  source: Source | null;
   /** The saved recipe ("now"), or null if this build can't read it. */
   current: Recipe | null;
   checkpoints: Checkpoint[];
@@ -136,14 +142,22 @@ function ProjectView(props: { library: ViewerLibrary; id: ProjectId; onBack: () 
       try {
         const v = await openForViewing(props.library, props.id);
         if (!v) throw new Error("it isn't stored any more");
+        if (!canDrawPlots()) {
+          if (!alive) return;
+          setProblem("This browser is too old to draw plots. Saved checkpoint pictures still show below; a newer browser (on iPhone, iOS 16.4 or later) shows the rest.");
+          setOpened({ project: v.project, source: null, current: null, checkpoints: v.checkpoints });
+          return;
+        }
         const source = await decodeFile(new File([v.source.bytes], v.project.name, { type: v.source.type }));
         let current: Recipe | null = null;
+        let unreadable: string | null = null;
         try {
           current = readRecipe(v.recipe, source);
         } catch (e) {
-          setProblem(`This project's settings can't be read by this version (${errText(e)}).`);
+          unreadable = `This project's settings can't be read by this version (${errText(e)}).`;
         }
         if (!alive) return;
+        if (unreadable) setProblem(unreadable);
         r = new Runner(setRun);
         r.setSource(source, v.project.id);
         runner.current = r;
@@ -161,7 +175,7 @@ function ProjectView(props: { library: ViewerLibrary; id: ProjectId; onBack: () 
   }, [props.library, props.id]);
 
   const recipe = useMemo<Recipe | null>(() => {
-    if (!opened) return null;
+    if (!opened?.source) return null;
     if (version === "now") return opened.current;
     const cp = opened.checkpoints.find((c) => c.id === version);
     try {
@@ -171,6 +185,11 @@ function ProjectView(props: { library: ViewerLibrary; id: ProjectId; onBack: () 
     }
   }, [opened, version]);
   const inspect = recipe ? inspectFor(recipe, picked) : null;
+  /** Another version: back to its end result (the tapped step may not be in it). */
+  const showVersion = (v: string) => {
+    setVersion(v);
+    setPicked(null);
+  };
 
   // A new version: a quick low-resolution picture first, then the full one.
   useEffect(() => {
@@ -261,20 +280,20 @@ function ProjectView(props: { library: ViewerLibrary; id: ProjectId; onBack: () 
           )}
           <div className="phone-checkpoints">
             {opened.current && (
-              <button className={version === "now" ? "phone-ckpt sel" : "phone-ckpt"} aria-pressed={version === "now"} onClick={() => setVersion("now")}>
+              <button className={version === "now" ? "phone-ckpt sel" : "phone-ckpt"} aria-pressed={version === "now"} onClick={() => showVersion("now")}>
                 <span className="phone-ckpt-pic phone-ckpt-now">Now</span>
                 <span className="phone-ckpt-name">Latest settings</span>
               </button>
             )}
             {opened.checkpoints.map((cp) => (
-              <button key={cp.id} className={version === cp.id ? "phone-ckpt sel" : "phone-ckpt"} aria-pressed={version === cp.id} onClick={() => setVersion(cp.id)}>
+              <button key={cp.id} className={version === cp.id ? "phone-ckpt sel" : "phone-ckpt"} aria-pressed={version === cp.id} onClick={() => showVersion(cp.id)}>
                 <CheckpointPicture project={opened.project} id={cp.id} />
                 <span className="phone-ckpt-name">{checkpointLabel(cp)}</span>
                 {cp.name && <span className="phone-ckpt-when">{checkpointTime(cp.createdAt)}</span>}
               </button>
             ))}
           </div>
-          {version !== "now" && !recipe && <p className="phone-error">This checkpoint's settings can't be read by this version.</p>}
+          {opened.source && version !== "now" && !recipe && <p className="phone-error">This checkpoint's settings can't be read by this version.</p>}
           {opened.checkpoints.find((c) => c.id === version)?.note && <p className="phone-ckpt-note">{opened.checkpoints.find((c) => c.id === version)!.note}</p>}
         </section>
       )}
