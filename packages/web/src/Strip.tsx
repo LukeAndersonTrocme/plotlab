@@ -302,8 +302,10 @@ export function Strip(props: {
                 className={["gap", drop ? (drop.ok ? "drop-ok" : "drop-no") : "", drop?.ok && over === gap ? "over" : ""].join(" ")}
                 data-gap={gap}
                 title={drop && !drop.ok ? drop.reason : undefined}
+                // A dimmed gap: say why in the hint (visible text, not only the tooltip).
+                onDragEnter={() => drop && !drop.ok && setNo({ gap, reason: drop.reason ?? "" })}
                 onDragOver={(e) => {
-                  // A dimmed gap: say why in the hint (visible text), and take no drop.
+                  // A dimmed gap takes no drop.
                   if (drop && !drop.ok) {
                     if (no?.gap !== gap) setNo({ gap, reason: drop.reason ?? "" });
                     return;

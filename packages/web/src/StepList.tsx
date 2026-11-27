@@ -272,12 +272,6 @@ export function StepList(props: {
         {focused && (
           <>
             <div className="step-actions">
-              <button className="move-left" title={`Move ${def.title} one place left in the ${laneAt(index) ? `${laneAt(index)!.name} lane` : "recipe strip"} (Alt+← on its box)`} onClick={() => moveBy(index, -1)}>
-                Move left
-              </button>
-              <button className="move-right" title={`Move ${def.title} one place right in the ${laneAt(index) ? `${laneAt(index)!.name} lane` : "recipe strip"} (Alt+→ on its box)`} onClick={() => moveBy(index, 1)}>
-                Move right
-              </button>
               <button
                 disabled={!bypass.ok}
                 title={bypass.ok ? (enabled ? "Skip this step and see what the chain does without it" : "Put this step back in the chain") : bypass.reason}
@@ -300,6 +294,12 @@ export function StepList(props: {
                   Take out of {lane.name}
                 </button>
               )}
+              <button className="move-left" title={`Move ${def.title} one place left in the ${laneAt(index) ? `${laneAt(index)!.name} lane` : "recipe strip"} (Alt+← on its box)`} onClick={() => moveBy(index, -1)}>
+                Move left
+              </button>
+              <button className="move-right" title={`Move ${def.title} one place right in the ${laneAt(index) ? `${laneAt(index)!.name} lane` : "recipe strip"} (Alt+→ on its box)`} onClick={() => moveBy(index, 1)}>
+                Move right
+              </button>
             </div>
             {lane && !layerStep && <p className="hint lane-note">Settings for {lane.name} only.</p>}
             {!remove.ok && <p className="reason">{remove.reason}</p>}
