@@ -14,7 +14,7 @@ function wired(r: Recipe, view: ViewState) {
   const lp = laneProps({
     recipe: r,
     registry: reg,
-    run: { steps: [], stale: [] },
+    run: { steps: [], staleIds: [] },
     plot: null,
     view,
     currentView: () => out.view,

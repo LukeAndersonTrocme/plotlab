@@ -77,10 +77,9 @@ export function stackRows(layers: string[], names: string[], plot: Plot | null, 
 type Run = Parameters<typeof stripBoxes>[2];
 
 /** The boxes of lane `layer`: each lane step's strip box, keyed by step and ink. */
-export function laneBoxes(recipe: Recipe, registry: StepRegistry, run: Run, layer: string): StripBox[] {
+export function laneBoxes(recipe: Recipe, registry: StepRegistry, run: Run, layer: string, boxes = stripBoxes(recipe, registry, run)): StripBox[] {
   const lane = lanesOf(recipe, registry).lanes.find((l) => l.layer === layer);
   if (!lane) return [];
-  const boxes = stripBoxes(recipe, registry, run);
   return lane.steps.map((s) => ({ ...boxes[s.index + 1]!, key: laneKey(s.id, layer), lane: "lane" as const }));
 }
 
@@ -96,7 +95,8 @@ export function laneRows(recipe: Recipe, registry: StepRegistry, run: Run, plot:
   if (v.split === null) return [];
   const inks = registry.get(recipe.steps[v.split]!.step)?.layerInks ?? {};
   const order = laneOrder(v.layers, plot, recipe.passOrder).filter((l) => show === "all" || l === show);
-  return order.map((layer) => ({ layer, name: inks[layer]?.name ?? layer, boxes: laneBoxes(recipe, registry, run, layer) }));
+  const boxes = stripBoxes(recipe, registry, run);
+  return order.map((layer) => ({ layer, name: inks[layer]?.name ?? layer, boxes: laneBoxes(recipe, registry, run, layer, boxes) }));
 }
 
 /** What lane `layer` has at its gap `at`: layers until a line step there has made its lines. */

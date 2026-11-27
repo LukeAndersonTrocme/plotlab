@@ -42,6 +42,7 @@ const result = (id: number): FromWorker => ({
   working: null,
   steps: [],
   stale: [],
+  staleIds: [],
   rasterLayers: [],
   inspected: null,
   underlay: null,

@@ -22,7 +22,7 @@ import { LayerScope } from "./LayerScope.tsx";
 import { ParamControl } from "./ParamControl.tsx";
 import { splitSettings } from "./settings.ts";
 import type { InspectTarget, StepInfo } from "./protocol.ts";
-import { removeCheck, STAGE_NAMES, toggleBypass } from "./strip.ts";
+import { bypassRule, removeCheck, STAGE_NAMES, toggleBypass } from "./strip.ts";
 import { allInks, unlinkedNotice } from "./lanes.ts";
 
 /** Which cards the sidebar shows, by chain position (from `sidebarSteps` in view.ts). */
@@ -107,11 +107,6 @@ export function StepList(props: {
       else change(res.recipe, proxy, registry.get(rs.step));
     } else patchStep(index, { layerParams: { ...rs.layerParams, [layer]: { ...rs.layerParams?.[layer], [name]: value } } }, proxy);
   };
-  /** Whether Switch off / on works for the step at `index` (the same rule as the strip's toggle). */
-  const bypassCheck = (index: number): { ok: true } | { ok: false; reason: string } => {
-    const res = toggleBypass(recipe, index, registry);
-    return "reason" in res ? { ok: false, reason: res.reason } : { ok: true };
-  };
   /** Layers arriving at step `index`: the output of the last step before it that ran. */
   const inputLayers = (index: number): LayerInfo[] => [...props.steps].reverse().find((s) => s.index < index)?.layers ?? [];
 
@@ -152,7 +147,7 @@ export function StepList(props: {
     const ran = props.steps.some((s) => s.index === index);
     const pinned = props.pins.includes(rs.id);
     const focused = props.cards?.looking === index;
-    const bypass = bypassCheck(index);
+    const bypass = bypassRule(recipe, index, registry); // the strip toggle's rule too
     const remove = removeCheck(recipe, index, registry);
     items.push(
       <div

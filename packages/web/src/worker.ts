@@ -155,7 +155,7 @@ async function postThumbs(msg: Extract<ToWorker, { type: "run" }>, side: number,
     return at < 0 ? placed : results.find((r) => r.index === at)!.output;
   };
   const lanes = stripLanes(msg.recipe, registry);
-  const laneBox = new Map(stripBoxes(msg.recipe, registry, { steps: [], stale: [] }).map((b) => [b.key, b.lane]));
+  const laneBox = new Map(stripBoxes(msg.recipe, registry, { steps: [], staleIds: [] }).map((b) => [b.key, b.lane]));
   const own = lanes && !lanes.linked;
   const steps = msg.recipe.steps.flatMap((s, i) => {
     const lane = laneBox.get(s.id);
@@ -233,6 +233,7 @@ async function handle(msg: Exclude<ToWorker, { type: "gallery" | "thumbnail" }>)
       warnings,
       working: placed.kind === "geometry" ? null : { width: placed.width, height: placed.height, mmPerPx: placed.frame.widthMm / placed.width },
       stale,
+      staleIds: stale.map((i) => msg.recipe.steps[i]!.id),
       steps: results.map((r) => ({ index: r.index, id: msg.recipe.steps[r.index]!.id, step: r.step, ms: r.ms, cached: r.cached, layers: r.layers })),
       rasterLayers: await resultRasters(output, msg.recipe),
       inspected,

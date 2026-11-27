@@ -74,20 +74,20 @@ describe("independent lanes in the strip", () => {
   };
   it("each lane's boxes are keyed by step and ink, with their chain position", () => {
     const r = mixed();
-    const boxes = laneBoxes(r, reg, { steps: [], stale: [] }, "M");
+    const boxes = laneBoxes(r, reg, { steps: [], staleIds: [] }, "M");
     expect(boxes.map((b) => [b.key, b.index, b.title])).toEqual([
       ["pixelate@M", 1, "Pixelate"],
       ["centerline@M", 2, "Centerline"],
     ]);
-    expect(laneBoxes(r, reg, { steps: [], stale: [] }, "C").map((b) => b.key)).toEqual(["centerline@C"]);
+    expect(laneBoxes(r, reg, { steps: [], staleIds: [] }, "C").map((b) => b.key)).toEqual(["centerline@C"]);
   });
   it("rows come in pass order: all four, or the one ink chosen", () => {
     const r = mixed();
-    const all = laneRows(r, reg, { steps: [], stale: [] }, plotOf(["Y", "M", "C", "K"]), "all");
+    const all = laneRows(r, reg, { steps: [], staleIds: [] }, plotOf(["Y", "M", "C", "K"]), "all");
     expect(all.map((l) => l.layer)).toEqual(["Y", "M", "C", "K"]);
     expect(all.map((l) => l.name)).toEqual(["Yellow", "Magenta", "Cyan", "Black"]);
-    expect(laneRows(r, reg, { steps: [], stale: [] }, null, "M").map((l) => l.layer)).toEqual(["M"]);
-    expect(laneRows(recipe(["threshold", "centerline", "order"]), reg, { steps: [], stale: [] }, null, "all")).toEqual([]);
+    expect(laneRows(r, reg, { steps: [], staleIds: [] }, null, "M").map((l) => l.layer)).toEqual(["M"]);
+    expect(laneRows(recipe(["threshold", "centerline", "order"]), reg, { steps: [], staleIds: [] }, null, "all")).toEqual([]);
   });
   it('a lane\'s "+" offers exactly what addInLane takes there, or says why nothing fits', () => {
     const r = mixed();
