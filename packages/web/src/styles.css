@@ -199,6 +199,17 @@ header button.on { background: var(--accent); color: var(--accent-ink); border-c
 .ckpt-all { font-size: 13px; }
 .ckpt-warn { color: var(--error-ink); }
 .ckpt-scroll { flex: 1; min-height: 0; overflow-y: auto; }
+.bundle { display: flex; flex-direction: column; gap: 6px; padding-top: 8px; border-top: 1px solid var(--line); }
+.bundle h3 { font-size: 12px; font-weight: 600; margin: 0; }
+.bundle-export { display: flex; flex-direction: column; gap: 4px; }
+.bundle-leave { font-size: 13px; }
+/* The Open a bundle picker is a label styled as a button; the input itself stays reachable but unseen. */
+.bundle-btn { display: inline-block; width: 100%; box-sizing: border-box; text-align: center; border: 1px solid var(--line); background: var(--panel); border-radius: 6px; padding: 6px 12px; cursor: pointer; }
+.bundle-btn.busy { opacity: 0.6; cursor: progress; }
+.bundle-open:focus-within .bundle-btn, .phone-bundle:focus-within .bundle-btn { outline: 2px solid var(--accent); outline-offset: 1px; }
+.bundle-file { position: absolute; width: 1px; height: 1px; opacity: 0; overflow: hidden; }
+.bundle-open { position: relative; display: block; }
+.phone-bundle { position: relative; display: block; margin: 0 0 10px; }
 .ckpt-group h3 { font-size: 12px; font-weight: 600; margin: 10px 0 4px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .ckpt-current { color: var(--muted); font-weight: normal; }
 .ckpt-group ul { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 10px; }

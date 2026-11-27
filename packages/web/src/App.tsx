@@ -28,6 +28,8 @@ import { StageView } from "./StageView.tsx";
 import { CompareBar, CompareCanvas, shiftHint, type BandOption } from "./Compare.tsx";
 import { StepList, type SidebarCards } from "./StepList.tsx";
 import { CheckpointSidebar } from "./CheckpointSidebar.tsx";
+import { openBundleFile } from "./BundleControls.tsx";
+import type { ImportResult } from "./bundle.ts";
 import { PhoneViewer, usePhoneWidth } from "./PhoneViewer.tsx";
 import { keepEditor } from "./phone.ts";
 import { attachThumbnail, checkpointLabel, createCheckpoint, restoreSafely } from "./checkpoints.ts";
@@ -499,6 +501,10 @@ function Editor(props: { hidden: boolean }) {
 
   const loadFile = async (file: File) => {
     if (!ready) return;
+    if (/\.zip$/i.test(file.name)) {
+      if (library) await openBundleFile(library, file).then((o) => bundleOpened(o.result, o.message), (e) => setNotice(errText(e)));
+      return;
+    }
     preSplit.current = null;
     if (file.name.endsWith(".json")) {
       try {
@@ -544,6 +550,17 @@ function Editor(props: { hidden: boolean }) {
     } catch (e) {
       setNotice(`Couldn't read ${file.name}${e instanceof Error && e.message ? `: ${e.message}` : ""}. Try PNG, JPEG, WebP, TIFF or SVG.`);
     }
+  };
+
+  /** After a bundle is opened: show its project (as when opening its image), then say what was added. */
+  const bundleOpened = async (r: ImportResult, message: string) => {
+    setSaved((n) => n + 1);
+    const p = r.project.id === project?.id ? null : await library?.openProject(r.project.id);
+    if (p) {
+      const s = await p.getSource();
+      await loadFile(new File([s.bytes], nameOf(p), { type: s.type }));
+    }
+    setNotice((n) => (p && n ? `${message}\n${n}` : message));
   };
 
   const showAsExported = (on: boolean) => {
@@ -973,6 +990,8 @@ function Editor(props: { hidden: boolean }) {
           version={saved}
           onSave={() => void saveCheckpoint()}
           onRestore={(cp) => void restore(cp)}
+          onNotice={setNotice}
+          onBundleOpened={(r, m) => void bundleOpened(r, m)}
         />
       </main>
       {view.mode === "design" && (

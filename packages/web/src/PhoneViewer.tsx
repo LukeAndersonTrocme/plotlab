@@ -1,6 +1,7 @@
-import { useEffect, useMemo, useRef, useState, useSyncExternalStore, type KeyboardEvent, type PointerEvent } from "react";
+import { useEffect, useMemo, useRef, useState, useSyncExternalStore, type KeyboardEvent, type PointerEvent, type ReactNode } from "react";
 import { enterAt, loadRecipe, sourceStage, type Paper, type Plot, type Recipe, type Source } from "@plotlab/engine";
 import { createRegistry } from "@plotlab/steps";
+import { OpenBundle } from "./BundleControls.tsx";
 import { checkpointLabel, checkpointTime } from "./checkpoints.ts";
 import { defaultRecipe } from "./defaults.ts";
 import { canDrawPlots, inspectFor, listProjectCards, nudgeSplit, openForViewing, phoneWidth, projectCover, splitAt, viewerLibrary, type ProjectCard, type ViewerLibrary, type ViewerProject } from "./phone.ts";
@@ -11,7 +12,7 @@ import { SAMPLE_NAME } from "./session.ts";
 import { StageView, useBlobUrl } from "./StageView.tsx";
 import { Thumb } from "./Strip.tsx";
 import { STAGE_NAMES, stripBoxes, thumbRenderSide } from "./strip.ts";
-import { defaultLocalStorage, openLibrary, type Checkpoint, type ProjectId } from "./storage/index.ts";
+import { defaultLocalStorage, openLibrary, type Checkpoint, type Library, type ProjectId } from "./storage/index.ts";
 
 const registry = createRegistry();
 /** Strip thumbnails on the phone, in CSS px. */
@@ -27,30 +28,58 @@ export function usePhoneWidth(): boolean {
 
 /**
  * The phone viewer (#66, #74): your projects, then one project's plot full screen with a
- * before/after slider, its step strip and its checkpoints. It only reads storage (phone.ts).
+ * before/after slider, its step strip and its checkpoints. Looking never writes to storage
+ * (phone.ts); the one thing that does is Open a bundle, which merges a project exported on
+ * a laptop into this browser's projects (ADR 0014: adds, never overwrites).
  */
 export function PhoneViewer() {
+  const [store, setStore] = useState<Library | null>(null);
   const [lib, setLib] = useState<{ library: ViewerLibrary; example: boolean } | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [open, setOpen] = useState<ProjectId | null>(null);
+  const [opened, setOpened] = useState<{ text: string; failed: boolean } | null>(null);
+  const show = (library: Library) => viewerLibrary(library, () => sampleSource(SAMPLE_NAME));
   useEffect(() => {
     let alive = true;
     openLibrary({ localStorage: defaultLocalStorage() })
-      .then(({ library }) => viewerLibrary(library, () => sampleSource(SAMPLE_NAME)))
-      .then((l) => alive && setLib(l))
+      .then(async ({ library }) => {
+        const l = await show(library);
+        if (!alive) return;
+        setStore(library);
+        setLib(l);
+      })
       .catch((e) => alive && setError(`Couldn't read your projects: ${errText(e)}`));
     return () => {
       alive = false;
     };
   }, []);
+  // After a bundle is opened, read the library again: the list (no longer the sample) shows it.
+  const bundleOpened = (message: string) => {
+    setOpened({ text: message, failed: false });
+    if (store) void show(store).then(setLib, (e) => setOpened({ text: `${message} But the list couldn't be read again: ${errText(e)}`, failed: true }));
+  };
   return (
     <div className="phone">
-      {lib && open ? <ProjectView library={lib.library} id={open} onBack={() => setOpen(null)} /> : <ProjectList lib={lib} error={error} onOpen={setOpen} />}
+      {lib && open ? (
+        <ProjectView library={lib.library} id={open} onBack={() => setOpen(null)} />
+      ) : (
+        <ProjectList
+          lib={lib}
+          error={error}
+          onOpen={setOpen}
+          bundle={
+            <>
+              <OpenBundle library={store} className="phone-bundle" onOpened={(_r, m) => bundleOpened(m)} onError={(m) => setOpened({ text: m, failed: true })} />
+              {opened && <p className={opened.failed ? "phone-error" : "phone-note phone-opened"} role="status">{opened.text}</p>}
+            </>
+          }
+        />
+      )}
     </div>
   );
 }
 
-function ProjectList(props: { lib: { library: ViewerLibrary; example: boolean } | null; error: string | null; onOpen: (id: ProjectId) => void }) {
+function ProjectList(props: { lib: { library: ViewerLibrary; example: boolean } | null; error: string | null; onOpen: (id: ProjectId) => void; bundle: ReactNode }) {
   const [cards, setCards] = useState<ProjectCard[] | null>(null);
   const [failed, setFailed] = useState<string | null>(null);
   useEffect(() => {
@@ -70,7 +99,8 @@ function ProjectList(props: { lib: { library: ViewerLibrary; example: boolean } 
         <h1>plotlab</h1>
       </header>
       <p className="phone-note">{NOTE}</p>
-      {props.lib?.example && <p className="phone-note">No projects are saved in this browser yet, so here is the sample to look at.</p>}
+      {props.lib?.example && <p className="phone-note">No projects are saved in this browser yet, so here is the sample to look at. To see your own, export a project on your laptop (Checkpoints, Export project) and open the .zip here.</p>}
+      {props.bundle}
       {props.error || failed ? (
         <p className="phone-error">{props.error ?? failed}</p>
       ) : !cards ? (
