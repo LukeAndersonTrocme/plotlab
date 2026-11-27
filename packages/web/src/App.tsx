@@ -33,6 +33,8 @@ import { download } from "./download.ts";
 import type { ImportResult } from "./bundle.ts";
 import { PhoneViewer, usePhoneWidth } from "./PhoneViewer.tsx";
 import { keepEditor } from "./phone.ts";
+import { once } from "./once.ts";
+import { registerKeeper } from "./prune.ts";
 import { attachThumbnail, checkpointLabel, createCheckpoint, restoreSafely } from "./checkpoints.ts";
 import { galleryItems, pickPreset, type GalleryItem } from "./gallery.ts";
 import { focusOf, shortcut } from "./keys.ts";
@@ -259,12 +261,17 @@ function Editor(props: { hidden: boolean }) {
    */
   const preSplit = useRef<SplitMark | null>(null);
   /** Record what a split about to be committed replaces (`markSplit` on the history it lands on). */
+  // The checkpoint Undo the split will use must outlive pruning.
+  useEffect(() => registerKeeper(() => [preSplit.current?.checkpoint]), []);
   const markNextSplit = (checkpoint?: string) =>
     setHistory((h) => {
       preSplit.current = markSplit(h, checkpoint);
       return h;
     });
-  const restore = async (cp: Checkpoint) => {
+  // A second click while a restore runs does nothing (the guard outlives re-renders).
+  const restoreGuard = useRef(once((run: () => Promise<void>) => run()));
+  const restore = (cp: Checkpoint) => restoreGuard.current(() => restoreNow(cp));
+  const restoreNow = async (cp: Checkpoint) => {
     if (!library || !project || !ready) return;
     preSplit.current = null;
     const before = history.present;
@@ -284,7 +291,7 @@ function Editor(props: { hidden: boolean }) {
       if (live) send(fitted, false);
       else setDirty(true);
     } catch (e) {
-      setNotice(`Couldn't restore that checkpoint: ${errText(e)}`);
+      setNotice(`Couldn't restore “${label}”, so nothing was changed and no extra checkpoint was kept. (${errText(e)})`);
     }
   };
 

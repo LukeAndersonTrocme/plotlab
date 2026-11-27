@@ -185,3 +185,28 @@ describe("saving before a change that replaces the recipe", () => {
   });
 });
 
+
+describe("a failed restore", () => {
+  it("removes the 'Before restoring' checkpoint it saved, and rethrows", async () => {
+    const lib = memoryLibrary();
+    const p = await project(lib, "a.png", 1);
+    const target = await createCheckpoint(p, { recipe: { n: 1 }, name: "t", now: 1 });
+    const h = createHistory<{ n: number }>({ n: 2 });
+    const bad = () => {
+      throw new Error("unreadable");
+    };
+    await expect(restoreSafely(lib, p, target, h, bad, { name: "Before restoring t", now: 2 })).rejects.toThrow("unreadable");
+    expect((await listForProject(p)).map((c) => c.id)).toEqual([target.id]);
+  });
+  it("keeps a checkpoint that already existed", async () => {
+    const lib = memoryLibrary();
+    const p = await project(lib, "a.png", 1);
+    const target = await createCheckpoint(p, { recipe: { n: 1 }, now: 1 });
+    const same = await createCheckpoint(p, { recipe: { n: 2 }, name: "mine", now: 2 });
+    const bad = () => {
+      throw new Error("x");
+    };
+    await expect(restoreSafely(lib, p, target, createHistory<{ n: number }>({ n: 2 }), bad, { name: "Before restoring", now: 3 })).rejects.toThrow();
+    expect((await listForProject(p)).map((c) => c.id)).toContain(same.id);
+  });
+});

@@ -48,6 +48,8 @@ export interface Checkpoint {
   recipe: unknown;
   name: string;
   note: string;
+  /** Saved by plotlab itself (before a preset, restore, split...), not by hand: the only kind that is pruned (`prune.ts`). */
+  auto?: true;
 }
 
 export interface ProjectStore {

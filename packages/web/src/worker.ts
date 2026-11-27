@@ -1,4 +1,5 @@
 /// <reference lib="webworker" />
+import { LruMap } from "./lru.ts";
 import { exportOutput, exportProof, imageToRGBA, inkFor, lanesOf, layerToRGBA, leftoverRasters, Pipeline, StepError, toPlot, zipFiles, type Image, type Layers, type Plot, type PlotLayer, type Recipe, type Source, type StageData, type StepResult } from "@plotlab/engine";
 import { estimatePlot, getMachine } from "@plotlab/machines";
 import { createRegistry } from "@plotlab/steps";
@@ -22,8 +23,10 @@ const full = new Pipeline(registry);
 const proxy = new Pipeline(registry);
 /** Checkpoint and gallery pictures: their own pipeline, so the canvas cache stays as it is. */
 const picturePipe = new Pipeline(registry);
+/** Two galleries' worth (12 presets each, e.g. two window sizes); older pictures are forgotten. */
+const GALLERY_CACHE_LIMIT = 24;
 /** Gallery pictures by recipe and size, for this source: reopening the gallery is instant. */
-let galleryCache = new Map<string, Promise<Blob>>();
+let galleryCache = new LruMap<string, Promise<Blob>>(GALLERY_CACHE_LIMIT);
 let src: { source: Source; key: string } | null = null;
 /** Encoded PNGs keyed by the pixel buffer they came from (outputs are cached by the pipeline, so identity is stable). */
 let pngCache = new WeakMap<object, Map<string, Promise<Blob>>>();
@@ -182,7 +185,7 @@ async function handle(msg: Exclude<ToWorker, { type: "gallery" | "thumbnail" }>)
     full.reset();
     proxy.reset();
     picturePipe.reset();
-    galleryCache = new Map();
+    galleryCache = new LruMap(GALLERY_CACHE_LIMIT);
     jobs.background("gallery", []);
     jobs.background("passes", []);
     pngCache = new WeakMap();
