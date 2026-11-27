@@ -121,6 +121,7 @@ function spyWrites(lib: Library) {
         setRecipe: (s) => (writes.push("setRecipe"), p.setRecipe(s)),
         setView: (v) => (writes.push("setView"), p.setView(v)),
         putCheckpoint: (c, t) => (writes.push("putCheckpoint"), p.putCheckpoint(c, t)),
+        putThumbnail: (i, t) => (writes.push("putThumbnail"), p.putThumbnail(i, t)),
         deleteCheckpoint: (i) => (writes.push("deleteCheckpoint"), p.deleteCheckpoint(i)),
       };
     },
@@ -157,7 +158,7 @@ describe.each(adapters)("the phone viewer on %s storage", (_name, make) => {
     const ro = readOnlyLibrary(lib);
     for (const k of ["createProject", "deleteProject", "setLastOpened"]) expect(k in ro).toBe(false);
     const p = (await ro.openProject(cat.id))!;
-    for (const k of ["setRecipe", "setView", "putCheckpoint", "deleteCheckpoint"]) expect(k in p).toBe(false);
+    for (const k of ["setRecipe", "setView", "putCheckpoint", "putThumbnail", "deleteCheckpoint"]) expect(k in p).toBe(false);
     expect((await p.getRecipe())?.recipe).toEqual({ v: "cat" });
   });
 
