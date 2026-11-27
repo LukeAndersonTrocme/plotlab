@@ -107,6 +107,9 @@ importers:
       '@plotlab/steps':
         specifier: workspace:*
         version: link:../steps
+      fflate:
+        specifier: 0.8.2
+        version: 0.8.2
       react:
         specifier: 18.3.1
         version: 18.3.1
