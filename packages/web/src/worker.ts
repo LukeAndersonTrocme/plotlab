@@ -1,11 +1,12 @@
 /// <reference lib="webworker" />
-import { exportOutput, exportProof, imageToRGBA, inkFor, layerToRGBA, leftoverRasters, Pipeline, StepError, toPlot, zipFiles, type Image, type Layers, type Plot, type PlotLayer, type Recipe, type Source, type StageData, type StepResult } from "@plotlab/engine";
+import { exportOutput, exportProof, imageToRGBA, inkFor, lanesOf, layerToRGBA, leftoverRasters, Pipeline, StepError, toPlot, zipFiles, type Image, type Layers, type Plot, type PlotLayer, type Recipe, type Source, type StageData, type StepResult } from "@plotlab/engine";
 import { estimatePlot, getMachine } from "@plotlab/machines";
 import { createRegistry } from "@plotlab/steps";
 import type { FromWorker, InspectTarget, InspectView, RasterView, ToWorker } from "./protocol.ts";
 import { shownAt, STACK_KEY, stripBoxes, stripLanes } from "./strip.ts";
 import { Jobs } from "./jobs.ts";
 import { drawResult, laneOf } from "./pictures.ts";
+import { laneKey } from "./lanes.ts";
 import { ThumbnailRenderer } from "./thumbs.ts";
 
 /** Longest side of the low-res proxy used while dragging. */
@@ -140,8 +141,9 @@ async function passThumb(id: number, side: number, recipe: Recipe, plot: Plot, l
 /**
  * One thumbnail per strip box: the source, then each step's output (what passes through
  * for a switched-off step; traced order for an on-demand step that hasn't run). In a split
- * chain the split and the lane steps show each ink as a 2×2, and the Stack box shows all
- * the inks together after the last lane step.
+ * chain the split and the lane steps show each ink as a 2×2 (linked), or each lane's steps
+ * show their ink alone (independent); the Stack box shows all the inks together after the
+ * last lane step.
  */
 async function postThumbs(msg: Extract<ToWorker, { type: "run" }>, side: number, placed: StageData, results: StepResult[]): Promise<void> {
   const ran = results.map((r) => r.index);
@@ -151,9 +153,17 @@ async function postThumbs(msg: Extract<ToWorker, { type: "run" }>, side: number,
   };
   const lanes = stripLanes(msg.recipe, registry);
   const laneBox = new Map(stripBoxes(msg.recipe, registry, { steps: [], stale: [] }).map((b) => [b.key, b.lane]));
+  const own = lanes && !lanes.linked;
+  const steps = msg.recipe.steps.flatMap((s, i) => {
+    const lane = laneBox.get(s.id);
+    if (!lanes || !lane || lane === "split") return [{ key: s.id, data: outputAt(i), lanes: lane ? lanes?.layers : undefined }];
+    return own ? [] : [{ key: s.id, data: outputAt(i), lanes: lanes.layers as string[] | string | undefined }];
+  });
+  const laneSteps = own ? lanesOf(msg.recipe, registry).lanes.flatMap((l) => l.steps.map((s) => ({ key: laneKey(s.id, l.layer), data: outputAt(s.index), lanes: l.layer as string[] | string | undefined }))) : [];
   const boxes = [
-    { key: "source", data: placed, lanes: undefined as string[] | undefined },
-    ...msg.recipe.steps.map((s, i) => ({ key: s.id, data: outputAt(i), lanes: lanes && laneBox.get(s.id) ? lanes.layers : undefined })),
+    { key: "source", data: placed, lanes: undefined as string[] | string | undefined },
+    ...steps,
+    ...laneSteps,
     ...(lanes ? [{ key: STACK_KEY, data: outputAt(lanes.stackAfter), lanes: undefined }] : []),
   ];
   const items: Array<{ key: string; png: Blob }> = [];

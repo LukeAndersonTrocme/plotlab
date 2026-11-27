@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { addBand, addBox, dragSplit, makeCompare, MAX_STRIPS, moveLens, setLayout, type Compare } from "../src/compare.ts";
-import { lookingBand, canvasTarget, clickBox, compareTargetsOf, readThumbSize, setCompare, toggleCompare, resizeThumbs, THUMB, writeThumbSize, fitSelection, fitView, fromViewBlock, initialView, isPinned, openSetup, pin, RESULT, select, setMode, sidebarSteps, SOURCE, stepSelection, toggleSelect, togglePin, toggleSolo, toViewBlock, unpin, VIEW_BLOCK_VERSION, type ViewState } from "../src/view.ts";
+import { clickLaneBox, showLanes, lookingBand, canvasTarget, clickBox, compareTargetsOf, readThumbSize, setCompare, toggleCompare, resizeThumbs, THUMB, writeThumbSize, fitSelection, fitView, fromViewBlock, initialView, isPinned, openSetup, pin, RESULT, select, setMode, sidebarSteps, SOURCE, stepSelection, toggleSelect, togglePin, toggleSolo, toViewBlock, unpin, VIEW_BLOCK_VERSION, type ViewState } from "../src/view.ts";
 
 const at = (patch: Partial<ViewState>): ViewState => ({ ...initialView, ...patch });
 /** Only the step ids matter to the view. */
@@ -422,5 +422,33 @@ describe("view state: the lens and boxes", () => {
       const block = JSON.parse(JSON.stringify(toViewBlock(at({ compare: shown }))));
       expect(fromViewBlock(initialView, block, r).compare).toEqual(shown);
     }
+  });
+});
+
+describe("view state: CMYK lanes (Independent inks)", () => {
+  it("starts with every lane showing and no lane picked", () => {
+    expect(initialView.laneView).toBe("all");
+    expect(initialView.lane).toBeNull();
+  });
+  it("a tab shows one lane (and that ink's settings); All lanes shows every lane again", () => {
+    const one = showLanes(initialView, "M");
+    expect(one).toMatchObject({ laneView: "M", lane: "M" });
+    expect(showLanes(one, "all")).toMatchObject({ laneView: "all", lane: "M" });
+    expect(showLanes(one, "M")).toBe(one);
+  });
+  it("a box in a lane selects that step for that ink; clicking it again goes back to the result", () => {
+    const v = clickLaneBox(initialView, "centerline", "Y");
+    expect(v).toMatchObject({ selection: stepSelection("centerline"), lane: "Y" });
+    // The same step in another lane is another box.
+    expect(clickLaneBox(v, "centerline", "C")).toMatchObject({ selection: stepSelection("centerline"), lane: "C" });
+    expect(clickLaneBox(v, "centerline", "Y")).toMatchObject({ selection: RESULT, lane: null });
+  });
+  it("picking anything outside the lanes forgets the lane", () => {
+    const v = clickLaneBox(initialView, "centerline", "Y");
+    expect(select(v, SOURCE).lane).toBeNull();
+    expect(select(v, stepSelection("centerline")).lane).toBe("Y");
+  });
+  it("is only the view: not saved in the view block", () => {
+    expect(Object.keys(toViewBlock(clickLaneBox(showLanes(initialView, "M"), "centerline", "M")))).toEqual(["version", "pins", "compare"]);
   });
 });

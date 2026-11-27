@@ -88,3 +88,8 @@ export function renderLaneThumbnail(data: StageData, s: ThumbnailSettings, maxSi
   });
   return { width, height, rgba };
 }
+
+/** One ink alone on the paper (a box in an independent lane, #66). RGBA bytes. */
+export function renderInkThumbnail(data: StageData, s: ThumbnailSettings, maxSide: number, layer: string): { width: number; height: number; rgba: Uint8ClampedArray } {
+  return renderThumbnail(onlyLayer(data, layer), s, maxSide);
+}
