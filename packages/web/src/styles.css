@@ -116,6 +116,9 @@ details.more > summary { cursor: pointer; color: var(--accent); font-size: 13px;
 .stats .over-budget { color: var(--warn); }
 .stats .budget.over-budget { font-weight: 600; max-width: 46ch; }
 .refining { color: var(--accent); }
+.canvas-frame { position: relative; flex: 1; min-height: 0; display: flex; flex-direction: column; }
+.canvas-frame.failed .preview, .canvas-frame.failed .compare-canvas { opacity: 0.35; filter: grayscale(0.6); }
+.failed-note { position: absolute; top: 14px; left: 50%; transform: translateX(-50%); z-index: 2; max-width: min(60ch, 90%); padding: 8px 12px; border-radius: 6px; background: var(--error-bg); color: var(--error-ink); box-shadow: 0 2px 8px rgba(0,0,0,.2); }
 .preview { flex: 1; min-height: 0; width: 100%; margin: 10px 0; }
 .preview.empty { display: grid; place-items: center; color: var(--muted); }
 .paper { fill: var(--paper); stroke: #dedad2; stroke-width: 0.3; filter: drop-shadow(0 1px 2px rgba(0, 0, 0, 0.12)); }

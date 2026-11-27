@@ -170,7 +170,8 @@ export class Runner {
       return;
     }
     this.inFlight = null;
-    if (m.type === "error") this.set({ error: { message: m.message, index: m.index }, busy: false });
+    // A recipe that fails has no estimate: an earlier recipe's must not stay on screen (#85).
+    if (m.type === "error") this.set({ error: { message: m.message, index: m.index }, estimate: null, busy: false });
     else {
       const { type: _t, id: _id, proxy, working, ...rest } = m;
       // The readout describes full-resolution work; proxies would make it flicker.
