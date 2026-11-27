@@ -904,6 +904,81 @@ try {
     await page.close();
   }
 
+  // CMYK views (#79): Stacked / Four panels (at the split, a step and the stack), Show other
+  // inks under one ink's step, and See-through / Opaque in the Stack panel (pass order shows).
+  {
+    const page = await open(1400);
+    const canvas = "section.view svg.preview";
+    check(!(await page.$(".view-bar .ink-view-bar")), "no Stacked / Four panels before the picture is split");
+    await page.click('.strip .box[data-key="source"] .pic');
+    await page.click("aside.side .split-card button:has-text('Split into CMYK')");
+    await page.waitForSelector(".strip .box.lane.split", { timeout: 30_000 });
+    await page.waitForSelector(".view-bar .ink-view-bar", { timeout: 10_000 });
+    /** Each panel's ink, and the inks drawn in it. */
+    const panels = () =>
+      page.$$eval("svg.four-panels g.ink-panel", (els) => els.map((g) => `${g.dataset.panel}${g.dataset.hidden ? "(hidden)" : ""}:${[...new Set([...g.querySelectorAll("[data-ink]")].map((e) => e.dataset.ink))].join("")}`).join(" "));
+    const viewing = () => page.textContent(".view-bar");
+    await page.click('.strip .box[data-key="cmyk"] .pic');
+    await page.click(".ink-view-bar button:has-text('Four panels')");
+    await page.waitForSelector("svg.four-panels", { timeout: 10_000 });
+    await page.waitForFunction(() => document.querySelectorAll("svg.four-panels [data-ink]").length >= 4, null, { timeout: 30_000 }).catch(() => {});
+    const atSplit = await panels();
+    check(atSplit === "C:C M:M Y:Y K:K" && /each ink at the split/.test(await viewing()), `four panels at the split: C, M, Y, K side by side, each ink alone (${atSplit})`);
+    await page.click('.strip .box[data-key="centerline"] .pic');
+    await page.waitForFunction(() => /each ink after Centerline/.test(document.querySelector(".view-bar").textContent) && document.querySelector('svg.four-panels g[data-panel="C"] g[data-ink="C"]'), null, { timeout: 30_000 }).catch(() => {});
+    const atStep = await panels();
+    check(/^C:C M:M? Y:Y? K:K?$/.test(atStep) && (await page.$('svg.four-panels g[data-panel="C"] g[data-ink="C"]')) !== null && /each ink after Centerline/.test(await viewing()), `four panels at a step: each ink's lines after Centerline (${atStep})`);
+    await page.click('.strip .box[data-key="@stack"] .pic');
+    await page.waitForFunction(() => /each ink in the final stack/.test(document.querySelector(".view-bar").textContent), null, { timeout: 30_000 }).catch(() => {});
+    const atStack = await panels();
+    check(/^C:C M:M? Y:Y? K:K?$/.test(atStack) && /each ink in the final stack/.test(await viewing()), `four panels at the stack: each ink of the final plot (${atStack})`);
+    await page.uncheck('.stack-row[data-ink="C"] input[type=checkbox]');
+    const hiddenC = await panels();
+    check(/^C\(hidden\): /.test(hiddenC), `an ink hidden in the Stack panel stays hidden in four panels (${hiddenC})`);
+    await page.check('.stack-row[data-ink="C"] input[type=checkbox]');
+    await page.click(".ink-view-bar button:has-text('Stacked')");
+    await page.waitForSelector("svg.four-panels", { state: "detached", timeout: 10_000 });
+
+    // See-through (multiply) vs opaque (normal, in pass order): the stack preview changes, and the order shows.
+    const drawn = () => page.$$eval(`${canvas} g[data-ink]`, (els) => els.map((e) => `${e.dataset.ink}:${getComputedStyle(e).mixBlendMode}`));
+    const stats = await page.textContent(".stats .big");
+    const seeThrough = await drawn();
+    const shotSee = await page.locator(canvas).screenshot();
+    await page.click(".stack-mix button:has-text('Opaque')");
+    await page.waitForFunction((c) => [...document.querySelectorAll(`${c} g[data-ink]`)].every((e) => getComputedStyle(e).mixBlendMode === "normal"), canvas, { timeout: 10_000 }).catch(() => {});
+    const opaque = await drawn();
+    const passOrder = () => page.$$eval(".stack-row", (els) => els.map((e) => e.dataset.ink).join(""));
+    const order = await passOrder();
+    const drawnOrder = opaque.map((d) => d.split(":")[0]).join("");
+    const shotOpaque = await page.locator(canvas).screenshot();
+    check((await page.textContent(".stats .big")) === stats, `See-through / Opaque is only the preview: the plot's time is unchanged (${stats})`);
+    check(seeThrough.length >= 2 && seeThrough.every((d) => d.endsWith(":multiply")) && opaque.every((d) => d.endsWith(":normal")) && !shotSee.equals(shotOpaque), `See-through multiplies, Opaque draws in pass order with normal blending (${seeThrough.join(",")} → ${opaque.join(",")}; pass order ${order})`);
+    check(drawnOrder === order.split("").filter((id) => drawnOrder.includes(id)).join(""), `opaque inks are drawn in the pass order (${drawnOrder} in ${order})`);
+    // Opaque: changing the pass order changes the picture.
+    const first = order[0];
+    await page.click(`.stack-row[data-ink="${first}"] button[aria-label^="Plot"][aria-label$="later"]`);
+    await page.waitForFunction((o) => [...document.querySelectorAll(".stack-row")].map((e) => e.dataset.ink).join("") !== o, order, { timeout: 30_000 }).catch(() => {});
+    await page.waitForFunction(([c, o]) => [...document.querySelectorAll(`${c} g[data-ink]`)].map((e) => e.dataset.ink).join("") !== o, [canvas, drawnOrder], { timeout: 30_000 }).catch(() => {});
+    const reordered = (await drawn()).map((d) => d.split(":")[0]).join("");
+    const shotMoved = await page.locator(canvas).screenshot();
+    check(reordered !== drawnOrder && !shotMoved.equals(shotOpaque), `with opaque inks the pass order changes the picture (${drawnOrder} → ${reordered})`);
+    await page.click(".stack-mix button:has-text('See-through')");
+
+    // Show other inks: one ink's step (an independent lane) with the other inks faint underneath.
+    await page.click(".lanes-bar button:has-text('Independent')");
+    await page.waitForSelector(".lane-rows", { timeout: 10_000 });
+    await page.click('.box[data-key="centerline@C"] .pick');
+    await page.waitForSelector(".ink-view-bar button:has-text('Show other inks')", { timeout: 10_000 });
+    const faint = () => page.$$eval(`${canvas} [data-ink]`, (els) => els.map((e) => `${e.dataset.ink}${e.dataset.faint ? "~" : ""}`).join(","));
+    await page.waitForFunction((c) => document.querySelector(`${c} [data-faint]`), canvas, { timeout: 30_000 }).catch(() => {});
+    const withOthers = await faint();
+    const pressed = await page.getAttribute(".ink-view-bar button:has-text('Show other inks')", "aria-pressed");
+    await page.click(".ink-view-bar button:has-text('Show other inks')");
+    const alone = await faint();
+    check(pressed === "true" && /~/.test(withOthers) && /C$/.test(withOthers) && alone === "C", `Show other inks: the other inks faintly under Cyan's step, or Cyan alone (${withOthers} → ${alone})`);
+    await page.close();
+  }
+
   // Dark mode: the chrome goes dark, the paper stays paper-coloured.
   {
     const page = await open(1280, "dark");

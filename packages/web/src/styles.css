@@ -513,4 +513,5 @@ aside.side.pin-over { outline: 2px dashed var(--accent); outline-offset: -6px; }
 .four-panels .panel-label { font-weight: 600; paint-order: stroke; stroke: var(--paper); stroke-width: 0.8px; }
 .ink-text-C { fill: #00a0d6; } .ink-text-M { fill: #d6127a; } .ink-text-Y { fill: #c49f00; } .ink-text-K { fill: #1d1d1b; }
 .stack-mix { display: flex; flex-direction: column; gap: 4px; margin-top: 8px; }
+.stack-mix .seg { align-self: flex-start; }
 .stack-mix .seg button { padding: 2px 8px; font-size: 12px; }
