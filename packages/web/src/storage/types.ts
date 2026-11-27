@@ -48,6 +48,8 @@ export interface Checkpoint {
   recipe: unknown;
   name: string;
   note: string;
+  /** Saved by plotlab itself (before a preset, restore, split...), not by hand: the only kind that is pruned (`prune.ts`). */
+  auto?: true;
 }
 
 export interface ProjectStore {
@@ -64,6 +66,8 @@ export interface ProjectStore {
   setView(view: unknown): Promise<void>;
   /** Adds or replaces a checkpoint. Without a thumbnail, any stored one is kept. */
   putCheckpoint(checkpoint: Checkpoint, thumbnail?: Uint8Array): Promise<void>;
+  /** Adds or replaces just the picture of a checkpoint that still exists; does nothing for a deleted one. */
+  putThumbnail(id: string, thumbnail: Uint8Array): Promise<void>;
   getCheckpoint(id: string): Promise<Checkpoint | undefined>;
   /** In no particular order; `checkpoints.ts` sorts. */
   listCheckpoints(): Promise<Checkpoint[]>;

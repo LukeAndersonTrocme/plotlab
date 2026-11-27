@@ -1,8 +1,9 @@
 /**
  * Checkpoints (GLOSSARY): saved by hand in a project, listed for the open project or
- * across all projects, renamed, noted, deleted, and restored as one Back step. No cap.
+ * across all projects, renamed, noted, deleted, and restored as one Back step. Only the automatic ones are capped (prune.ts).
  */
 import { commit, type History } from "./history.ts";
+import { pruneAuto } from "./prune.ts";
 import type { Checkpoint, Library, ProjectId, ProjectStore, Source } from "./storage/index.ts";
 
 let counter = 0;
@@ -20,10 +21,10 @@ export const checkpointLabel = (cp: Checkpoint) => cp.name || checkpointTime(cp.
 
 export async function createCheckpoint(
   project: ProjectStore,
-  input: { recipe: unknown; thumbnail?: Uint8Array; name?: string; note?: string; now?: number },
+  input: { recipe: unknown; thumbnail?: Uint8Array; name?: string; note?: string; now?: number; auto?: boolean },
 ): Promise<Checkpoint> {
   const now = input.now ?? Date.now();
-  const cp: Checkpoint = { id: newId(now), createdAt: now, sourceHash: project.id, recipe: input.recipe, name: input.name?.trim() ?? "", note: input.note ?? "" };
+  const cp: Checkpoint = { id: newId(now), createdAt: now, sourceHash: project.id, recipe: input.recipe, name: input.name?.trim() ?? "", note: input.note ?? "", ...(input.auto && { auto: true as const }) };
   await project.putCheckpoint(cp, input.thumbnail);
   return cp;
 }
@@ -50,7 +51,8 @@ export async function listAllGrouped(library: Library, current: ProjectId): Prom
 export async function updateCheckpoint(project: ProjectStore, id: string, patch: { name?: string; note?: string }): Promise<Checkpoint | undefined> {
   const cp = await project.getCheckpoint(id);
   if (!cp) return undefined;
-  const next = { ...cp, ...(patch.name !== undefined && { name: patch.name.trim() }), ...(patch.note !== undefined && { note: patch.note }) };
+  const { auto: _auto, ...rest } = cp; // renamed or noted by hand: it's yours now, no longer pruned
+  const next: Checkpoint = { ...rest, ...(patch.name !== undefined && { name: patch.name.trim() }), ...(patch.note !== undefined && { note: patch.note }) };
   await project.putCheckpoint(next);
   return next;
 }
@@ -62,8 +64,7 @@ export const deleteCheckpoint = (project: ProjectStore, id: string) => project.d
  * (it's drawn in the worker); a checkpoint deleted meanwhile stays deleted.
  */
 export async function attachThumbnail(project: ProjectStore, id: string, thumbnail: Uint8Array): Promise<void> {
-  const cp = await project.getCheckpoint(id);
-  if (cp) await project.putCheckpoint(cp, thumbnail);
+  await project.putThumbnail(id, thumbnail); // the picture only: never rewrites the checkpoint or brings back a deleted one
 }
 
 /** Same JSON content, whatever the key order (a restored recipe has been through the upgrader). */
@@ -81,11 +82,14 @@ const canonical = (v: unknown): string =>
  */
 export async function autoCheckpoint(
   project: ProjectStore,
-  input: { recipe: unknown; name: string; now?: number },
+  input: { recipe: unknown; name: string; now?: number; deferPrune?: boolean },
 ): Promise<{ checkpoint: Checkpoint; created: boolean }> {
   const existing = (await listForProject(project)).find((c) => sameRecipe(c.recipe, input.recipe));
   if (existing) return { checkpoint: existing, created: false };
-  return { checkpoint: await createCheckpoint(project, input), created: true };
+  const { deferPrune, ...rest } = input;
+  const checkpoint = await createCheckpoint(project, { ...rest, auto: true });
+  if (!deferPrune) await pruneAuto(project);
+  return { checkpoint, created: true };
 }
 
 type Parse<R> = (json: unknown) => { recipe: R; warnings: string[] };
@@ -112,8 +116,17 @@ export async function restoreSafely<R>(
   parse: Parse<R>,
   save: { name: string; now?: number },
 ): Promise<Awaited<ReturnType<typeof restoreFrom<R>>> & { saved: { checkpoint: Checkpoint; created: boolean } }> {
-  const saved = await autoCheckpoint(current, { recipe: history.present, ...save });
-  return { ...(await restoreFrom(library, current, cp, history, parse)), saved };
+  // Pruning waits until the restore has worked: a failed one must not cost an old checkpoint.
+  const saved = await autoCheckpoint(current, { recipe: history.present, ...save, deferPrune: true });
+  try {
+    const restored = await restoreFrom(library, current, cp, history, parse);
+    if (saved.created) await pruneAuto(current);
+    return { ...restored, saved };
+  } catch (e) {
+    // Nothing was restored, so the checkpoint saved for it would be a picture-less orphan.
+    if (saved.created) await current.deleteCheckpoint(saved.checkpoint.id).catch(() => undefined);
+    throw e;
+  }
 }
 
 /**

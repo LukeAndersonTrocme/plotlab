@@ -1,6 +1,7 @@
 import { lanesOf, linkLanes, linkLoss, splitWith, type Recipe, type StepRegistry } from "@plotlab/engine";
 import { presets } from "@plotlab/steps";
 import { autoCheckpoint, listForProject, restoreSafely } from "./checkpoints.ts";
+import { registerKeeper } from "./prune.ts";
 import { commit, type History } from "./history.ts";
 import type { Checkpoint, Library, ProjectStore } from "./storage/index.ts";
 
@@ -59,6 +60,9 @@ type Parse = (json: unknown) => { recipe: Recipe; warnings: string[] };
 
 /** Names of the checkpoints saved just before a split: "Split into CMYK", and picking a preset that splits. */
 const SPLIT_NAMES = new Set([PRE_SPLIT, ...presets.filter((p) => p.screenAngles).map((p) => `Before “${p.title}”`)]);
+
+// Undo the split falls back to the newest checkpoint saved just before a split: never prune that one.
+registerKeeper((all) => [all.filter((c) => SPLIT_NAMES.has(c.name)).sort((a, b) => b.createdAt - a.createdAt)[0]?.id]);
 
 /**
  * The checkpoint to undo a split with: the one saved at this split (remembered this session)
