@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { loadRecipe, type Recipe } from "@plotlab/engine";
 import { createRegistry } from "@plotlab/steps";
-import { removeCheck, shownAt, stripBoxes, thumbRenderSide, toggleBypass } from "../src/strip.ts";
+import { removeCheck, shownAt, stripBoxes, stripLanes, thumbRenderSide, toggleBypass } from "../src/strip.ts";
 
 const reg = createRegistry();
 const recipe = (steps: Array<string | { step: string; enabled?: boolean }>): Recipe =>
@@ -121,5 +121,21 @@ describe("thumbRenderSide", () => {
     expect(thumbRenderSide(100, 1)).toBe(128);
     expect(thumbRenderSide(20, 1)).toBe(64);
     expect(thumbRenderSide(200, 3)).toBe(400);
+  });
+});
+
+describe("strip lanes: CMYK as one row of 2×2 thumbnails, then a Stack box", () => {
+  it("a chain without a split has no lane row and no Stack box", () => {
+    const r = recipe(["tone", "levels", "bands", "fill", "order"]);
+    expect(stripBoxes(r, reg, ran()).map((b) => b.lane)).toEqual([null, null, null, null, null, null]);
+    expect(stripLanes(r, reg)).toBeNull();
+  });
+  it("a split chain: the trunk, then the split and the steps in the lanes as 2×2 boxes, then the Stack box before the stack steps", () => {
+    const r = recipe(["reaction", "cmyk", "levels", "bands", "fill", "order"]);
+    expect(stripBoxes(r, reg, ran()).map((b) => b.lane)).toEqual([null, null, "split", "lane", "lane", "lane", null]);
+    expect(stripLanes(r, reg)).toEqual({ layers: ["C", "M", "Y", "K"], names: ["Cyan", "Magenta", "Yellow", "Black"], linked: true, stackAfter: 4, screenAngles: false });
+  });
+  it("the Stack box follows the split itself when no step comes after it", () => {
+    expect(stripLanes(recipe(["cmyk"]), reg)?.stackAfter).toBe(0);
   });
 });

@@ -1,0 +1,11 @@
+{
+  "schemaVersion": 4,
+  "input": "image",
+  "target": { "kind": "plotter" },
+  "paper": { "widthMm": 148, "heightMm": 210 },
+  "layout": { "fit": "fit", "marginMm": 12, "position": [0.5, 0.5] },
+  "inks": [{ "id": "black", "name": "Black", "color": "#111111", "mix": "multiply", "widthMm": 0.3 }],
+  "machine": "generic",
+  "preset": "cmyk-print",
+  "fixture": "mona-lisa-600.jpg"
+}

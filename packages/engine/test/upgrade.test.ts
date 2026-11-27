@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { loadRecipe } from "../src/index.ts";
+import { loadRecipe, RECIPE_SCHEMA_VERSION } from "../src/index.ts";
 import { createRegistry } from "../../steps/src/index.ts";
 
 // Verbatim copy of golden/cases/shapes-centerline.recipe.json as it was at schema v1.
@@ -19,7 +19,7 @@ const v1 = {
 describe("schema v1 → v2 upgrade", () => {
   it("moves pens to inks, plot margin to layout, plot to order", () => {
     const { recipe, warnings } = loadRecipe(v1, createRegistry());
-    expect(recipe.schemaVersion).toBe(3);
+    expect(recipe.schemaVersion).toBe(RECIPE_SCHEMA_VERSION);
     expect(recipe.target).toEqual({ kind: "plotter" });
     expect(recipe.layout.marginMm).toBe(15);
     expect(recipe.inks[0]).toEqual({ id: "black", name: "black", color: "#111111", mix: "multiply", widthMm: 0.5 });
@@ -39,7 +39,7 @@ describe("schema v2 → v3: stable step ids", () => {
   };
   it("gives every step an id, unique within the recipe, without a warning (nothing is lost, nothing to act on)", () => {
     const { recipe, warnings } = loadRecipe(v2, createRegistry());
-    expect(recipe.schemaVersion).toBe(3);
+    expect(recipe.schemaVersion).toBe(RECIPE_SCHEMA_VERSION);
     const ids = recipe.steps.map((s) => s.id);
     expect(ids.every((id) => typeof id === "string" && id.length > 0)).toBe(true);
     expect(new Set(ids).size).toBe(ids.length);
@@ -76,5 +76,25 @@ describe("step ids in a current recipe", () => {
     const { recipe, warnings } = loadRecipe({ ...base, steps: [{ step: "threshold", id: "x" }, { step: "centerline", id: "x" }] }, createRegistry());
     expect(recipe.steps.map((s) => s.id)).toEqual(["x", "centerline"]);
     expect(warnings).toEqual([{ index: 1, message: expect.stringMatching(/id "x" is used twice/) }]);
+  });
+});
+
+describe("schema v3 → v4: print screen angles", () => {
+  const v3 = {
+    schemaVersion: 3,
+    input: "image",
+    paper: { widthMm: 210, heightMm: 148 },
+    inks: [{ id: "black", color: "#111111" }],
+    steps: [{ id: "cmyk", step: "cmyk" }, { id: "levels", step: "levels" }, { id: "bands", step: "bands" }, { id: "fill", step: "fill" }],
+  };
+  it("older recipes upgrade with the switch off, so their output doesn't change, and nothing to tell", () => {
+    const { recipe, warnings } = loadRecipe(v3, createRegistry());
+    expect(recipe.schemaVersion).toBe(4);
+    expect(recipe.screenAngles).toBe(false);
+    expect(warnings).toEqual([]);
+  });
+  it("a v4 recipe keeps its switch", () => {
+    expect(loadRecipe({ ...v3, schemaVersion: 4, screenAngles: true }, createRegistry()).recipe.screenAngles).toBe(true);
+    expect(loadRecipe({ ...v3, schemaVersion: 4 }, createRegistry()).recipe.screenAngles).toBe(false);
   });
 });

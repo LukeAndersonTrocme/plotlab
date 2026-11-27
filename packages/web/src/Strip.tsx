@@ -2,7 +2,7 @@ import { Fragment, useEffect, useRef, useState, type CSSProperties, type Keyboar
 import { STAGE_WORDS, type Recipe, type StageKind, type StepRegistry } from "@plotlab/engine";
 import { addMenu, dragHint, dropGaps, type DropGap } from "./gaps.ts";
 import { useBlobUrl } from "./StageView.tsx";
-import { STAGE_NAMES, STAGES, STEP_DRAG, type StripBox } from "./strip.ts";
+import { STACK_KEY, STAGE_NAMES, STAGES, STEP_DRAG, type StripBox, type StripLanes } from "./strip.ts";
 import { THUMB } from "./view.ts";
 
 const stageVar = (k: StageKind) => `var(--st-${k === "geometry" ? "lines" : k})`;
@@ -41,6 +41,10 @@ export function Strip(props: {
   onAdd: (gap: number, stepId: string) => void;
   /** Move the step at chain position `from` into gap `gap`. */
   onMove: (from: number, gap: number) => void;
+  /** The CMYK lane row when the picture is split (`stripLanes`), else null. */
+  lanes: StripLanes | null;
+  onUnsplit: () => void;
+  onScreenAngles: (on: boolean) => void;
 }) {
   const row = useRef<HTMLDivElement>(null);
   const steps = props.boxes.length - 1;
@@ -112,6 +116,7 @@ export function Strip(props: {
         <span className={`strip-hint${drag ? " drag-hint" : ""}`} aria-live="polite">
           {drag ? `${drag.hint} Or drop it on the sidebar to pin it.` : `${steps} ${steps === 1 ? "step" : "steps"} · click a box to see that step and its settings, drag it to move it, + to add a step`}
         </span>
+        {props.lanes && <LanesBar lanes={props.lanes} onUnsplit={props.onUnsplit} onScreenAngles={props.onScreenAngles} />}
         <span className="legend" aria-label="Stage colours">
           {STAGES.map((k) => (
             <span key={k} style={{ "--st": stageVar(k) } as CSSProperties}>
@@ -142,7 +147,7 @@ export function Strip(props: {
             <Fragment key={b.key}>
               <div
                 data-key={b.key}
-                className={["box", selected ? "sel" : "", pinned ? "pinned" : "", b.enabled ? "" : "off", b.index < 0 ? "source" : "", drag?.from === b.index ? "dragging" : ""].join(" ")}
+                className={["box", selected ? "sel" : "", pinned ? "pinned" : "", b.enabled ? "" : "off", b.index < 0 ? "source" : "", b.lane ? `lane ${b.lane}` : "", drag?.from === b.index ? "dragging" : ""].join(" ")}
                 style={{ "--in": stageVar(b.input), "--out": stageVar(b.output) } as CSSProperties}
                 onClick={(e) => props.onSelect(b.key, e.shiftKey)}
                 draggable={b.index >= 0}
@@ -159,7 +164,7 @@ export function Strip(props: {
                   <span className={`band${changes ? "" : " same"}`} title={changes ? `${STAGE_NAMES[b.input]} in, ${STAGE_NAMES[b.output]} out` : STAGE_NAMES[b.output]}>
                     {changes ? `→ ${STAGE_NAMES[b.output]}` : STAGE_NAMES[b.output]}
                   </span>
-                  <span className="pic">
+                  <span className={`pic${b.lane ? " quad" : ""}`} title={b.lane && props.lanes ? `${props.lanes.names.join(", ")}: one ink in each corner` : undefined}>
                     <Thumb png={props.thumbs[b.key]} />
                   </span>
                   <span className="lbl">
@@ -219,6 +224,9 @@ export function Strip(props: {
                   +
                 </button>
               </div>
+              {props.lanes?.stackAfter === b.index && (
+                <StackBox png={props.thumbs[STACK_KEY]} names={props.lanes.names} selected={props.selected === null} onSelect={() => props.onSelect(STACK_KEY, false)} />
+              )}
             </Fragment>
           );
         })}
@@ -243,6 +251,50 @@ export function Strip(props: {
         />
       )}
     </section>
+  );
+}
+
+/** The lane row's controls: the inks, Linked, the print screen angles switch and Undo the split. */
+function LanesBar(props: { lanes: StripLanes; onUnsplit: () => void; onScreenAngles: (on: boolean) => void }) {
+  const { lanes } = props;
+  return (
+    <span className="lanes-bar" aria-label="Inks">
+      <span className="lanes-inks" title={`Split into ${lanes.names.join(", ")}. Each box in the row shows all four inks, one in each corner.`}>
+        {lanes.layers.map((l) => (
+          <span key={l} className={`ink-dot ink-${l}`} aria-hidden="true" />
+        ))}
+        {lanes.layers.join(" ")}
+      </span>
+      <span className="pill" style={{ "--st": stageVar("layers") } as CSSProperties} title={lanes.linked ? "Linked: one set of steps and settings drives every ink." : "Independent: some inks have their own steps or settings."}>
+        {lanes.linked ? "Linked" : "Independent"}
+      </span>
+      <label className="toggle" title="Turn each ink's Fill lines by its print screen angle (cyan 15°, magenta 75°, yellow 0°, black 45°), so the inks don't all hatch the same way.">
+        <input type="checkbox" checked={lanes.screenAngles} onChange={(e) => props.onScreenAngles(e.target.checked)} /> Screen angles
+      </label>
+      <button className="link" onClick={props.onUnsplit} title="Go back to the single chain you had before splitting (the split version is saved as a checkpoint).">
+        Undo the split
+      </button>
+    </span>
+  );
+}
+
+/** Where the lanes merge: all the inks together. Clicking it shows the end result. */
+function StackBox(props: { png: Blob | undefined; names: string[]; selected: boolean; onSelect: () => void }) {
+  return (
+    <div data-key={STACK_KEY} className={`box stack${props.selected ? " sel" : ""}`} style={{ "--in": stageVar("geometry"), "--out": stageVar("geometry") } as CSSProperties} onClick={props.onSelect}>
+      <button className="pick" aria-pressed={props.selected} aria-label="Show the stack: all inks together" title={`The stack: ${props.names.join(", ")} together, as they will print`}>
+        <span className="band same">Stack</span>
+        <span className="pic">
+          <Thumb png={props.png} />
+        </span>
+        <span className="lbl">
+          <span className="ic" aria-hidden="true">
+            ☰
+          </span>
+          <span className="name">Stack</span>
+        </span>
+      </button>
+    </div>
   );
 }
 
@@ -315,7 +367,7 @@ function AddMenuPop(props: {
               </span>
               {o.experimental && <span className="badge experimental">experimental</span>}
             </span>
-            <small>{o.summary}</small>
+            <small>{o.split ? `Splits the picture into inks: the steps after it apply to every ink. ${o.summary}` : o.summary}</small>
           </span>
         </button>
       ))}

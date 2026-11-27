@@ -1,7 +1,8 @@
-import { defaultParams, retarget, withStepIds, type AnyStep, type Recipe, type RecipeStep, type TargetRequest } from "@plotlab/engine";
+import { defaultParams, retarget, withStepIds, withStepInks, type AnyStep, type Recipe, type RecipeStep, type TargetRequest } from "@plotlab/engine";
 import { bands } from "./bands/index.ts";
 import { cells } from "./cells/index.ts";
 import { centerline } from "./centerline/index.ts";
+import { cmyk } from "./cmyk/index.ts";
 import { dither } from "./dither/index.ts";
 import { fill } from "./fill/index.ts";
 import { levels } from "./levels/index.ts";
@@ -27,6 +28,8 @@ export interface Preset {
    * Presets without one keep the current target.
    */
   target?: TargetRequest;
+  /** Turns the recipe's print screen angles on (a preset that splits the picture into inks). */
+  screenAngles?: true;
 }
 
 /** A preset step; `chain` gives the steps their ids. */
@@ -88,6 +91,20 @@ const chains: Array<Omit<Preset, "steps"> & { steps: Array<Omit<RecipeStep, "id"
     steps: [s(tone), s(levels, { count: 5, smoothing: 0.5 }), s(cells, { mode: "scaled", cellMm: 4, threshold: 10, minSize: 15, maxSize: 95 }), s(order)],
   },
   {
+    id: "cmyk-print",
+    title: "CMYK print",
+    summary: "Four inks, cyan, magenta, yellow and black, each hatched in four bands at its own print angle. Linked: one set of settings for all four.",
+    steps: [
+      s(cmyk),
+      s(levels, { count: 4, smoothing: 0.8 }),
+      s(bands, { simplify: 0.2 }),
+      // Sparser than the one-ink presets: four inks plot four times the lines.
+      s(fill, { minSpacing: 1, maxSpacing: 3 }),
+      s(order),
+    ],
+    screenAngles: true,
+  },
+  {
     id: "atkinson-print",
     title: "Atkinson print",
     summary: "One ink of crisp 1-bit dots in the early-Macintosh style, for print or screen. Not plottable yet.",
@@ -123,10 +140,19 @@ export function presetSteps(id: string): RecipeStep[] {
   return structuredClone(p.steps);
 }
 
-/** The recipe with a preset picked: its steps replace the chain, and its target (if any) is switched to. */
+/** Steps whose default inks a preset adds (as adding the step from the strip does). */
+const INKED: AnyStep[] = [cmyk];
+
+/**
+ * The recipe with a preset picked: its steps replace the chain, its steps' default inks are
+ * added (Separate CMYK's four), and its target (if any) is switched to. A splitting preset
+ * turns the print screen angles on.
+ */
 export function applyPreset(recipe: Recipe, id: string): Recipe {
   const p = presets.find((x) => x.id === id);
   if (!p) throw new Error(`unknown preset "${id}"`);
   // Every preset chain starts from an image; fit it to another source with `enterAt`.
-  return { ...recipe, input: "image", steps: presetSteps(id), ...(p.target ? { target: retarget(recipe.target, p.target) } : {}) };
+  let out: Recipe = { ...recipe, input: "image", steps: presetSteps(id), ...(p.target ? { target: retarget(recipe.target, p.target) } : {}) };
+  for (const def of INKED) if (out.steps.some((s) => s.step === def.id)) out = withStepInks(out, def);
+  return p.screenAngles ? { ...out, screenAngles: true } : out;
 }

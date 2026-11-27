@@ -285,6 +285,12 @@ header button.on { background: var(--accent); color: var(--accent-ink); border-c
 .box:hover .byp, .box.off .byp, .box .byp:focus-visible { opacity: 1; }
 .box .byp[aria-disabled="true"] { opacity: 0.25; cursor: not-allowed; }
 .box:hover .byp[aria-disabled="true"] { opacity: 0.45; }
+.box.lane::after { content: ""; position: absolute; left: 6px; right: 6px; bottom: -4px; height: 3px; border-radius: 2px; background: linear-gradient(90deg, #00a0d6 0 25%, #d6127a 25% 50%, #f0c400 50% 75%, #1d1d1b 75%); }
+.box.stack { border-style: dashed; margin-right: 12px; }
+.lanes-bar { display: inline-flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.lanes-inks { display: inline-flex; align-items: center; gap: 3px; font-weight: 600; letter-spacing: 0.04em; }
+.ink-dot { width: 9px; height: 9px; border-radius: 50%; display: inline-block; }
+.ink-C { background: #00a0d6; } .ink-M { background: #d6127a; } .ink-Y { background: #f0c400; } .ink-K { background: #1d1d1b; }
 .box.off .pic img { opacity: 0.3; filter: grayscale(1); }
 .box.off .lbl .name { text-decoration: line-through; color: var(--muted); }
 .box.dragging { opacity: 0.4; }

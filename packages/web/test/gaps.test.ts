@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { checkChain, loadRecipe, type Recipe } from "@plotlab/engine";
+import { checkChain, lanesOf, loadRecipe, type Recipe } from "@plotlab/engine";
 import { createRegistry } from "@plotlab/steps";
 import { addAt, addMenu, dragHint, dropGaps, moveToGap, stageAt } from "../src/gaps.ts";
 
@@ -39,8 +39,8 @@ describe("stageAt: what the chain has at a gap", () => {
 describe("addMenu: the steps a '+' offers", () => {
   const offered = (r: Recipe, gap: number) => addMenu(r, reg, gap).options.map((o) => o.id).sort();
 
-  it("after the source, only steps that keep it an image (the next step needs one)", () => {
-    expect(offered(base, 0)).toEqual(["reaction"]);
+  it("after the source, only steps that keep it an image (the next step needs one), and Separate CMYK, which splits", () => {
+    expect(offered(base, 0)).toEqual(["cmyk", "reaction"]);
   });
 
   it("between Threshold and Centerline, the steps that work on layers and keep them layers", () => {
@@ -185,5 +185,31 @@ describe("dragHint", () => {
 
   it("says why when there is nowhere else, in stage words", () => {
     expect(dragHint(base, reg, 1)).toBe("Centerline has nowhere else to go: it turns layers into lines, and only fits where the chain has layers.");
+  });
+});
+
+describe("Separate CMYK in the \"+\" right after the source: a split", () => {
+  const r = recipe(["tone", "levels", "bands", "fill", "order"]);
+  it("is offered right after the source, marked as a split", () => {
+    const o = addMenu(r, reg, 0).options.find((x) => x.id === "cmyk");
+    expect(o).toMatchObject({ split: true });
+    expect(addMenu(r, reg, 0).options.find((x) => x.id === "threshold")).toBeUndefined();
+  });
+  it("adding it splits: four lanes, linked, and a stack; the following steps keep their ids", () => {
+    const res = addAt(r, reg, 0, "cmyk");
+    if ("reason" in res) throw new Error(res.reason);
+    expect(res.split).toBe(true);
+    const v = lanesOf(res.recipe, reg);
+    expect(v.lanes).toHaveLength(4);
+    expect(v.linked).toBe(true);
+    expect(v.stack).toEqual([4]);
+    expect(res.id).toBe("cmyk");
+    expect(ids(res.recipe).slice(1)).toEqual(ids(r).slice(1));
+    fitsEverywhere(res.recipe);
+  });
+  it("isn't offered once the picture is split", () => {
+    const res = addAt(r, reg, 0, "cmyk");
+    if ("reason" in res) throw new Error(res.reason);
+    expect(addMenu(res.recipe, reg, 0).options.find((x) => x.id === "cmyk")).toBeUndefined();
   });
 });

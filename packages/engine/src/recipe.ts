@@ -5,7 +5,7 @@ import type { StepRegistry } from "./step.ts";
 import type { Ink, Paper, StageKind } from "./types.ts";
 
 /** Bump when the recipe envelope changes shape. Add an upgrader to `UPGRADERS`. */
-export const RECIPE_SCHEMA_VERSION = 3;
+export const RECIPE_SCHEMA_VERSION = 4;
 
 export interface RecipeStep {
   /**
@@ -54,6 +54,13 @@ export interface Recipe {
   passOrder: PassOrder;
   /** Machine profile id (plotter target). */
   machine: string;
+  /**
+   * Print screen angles (#66): turn each ink's Fill lattice by its print angle (C 15°, M 75°,
+   * Y 0°, K 45°; `printScreenAngle`) so the inks don't all hatch the same way. Only applies
+   * while the chain is split into lanes (`lanesOf`). On by default after a split; recipes from before v4 load with it off, so their output doesn't change.
+   * Absent counts as off; `loadRecipe` always writes it.
+   */
+  screenAngles?: boolean;
   steps: RecipeStep[];
 }
 
@@ -111,9 +118,10 @@ export function withStepIds<S extends { step: string; id?: unknown }>(steps: S[]
 
 /**
  * Upgrades (by the version they start from) that lose and change nothing the person made,
- * so there is nothing to tell them: v2 → v3 only adds step ids.
+ * so there is nothing to tell them: v2 → v3 only adds step ids; v3 → v4 adds print screen
+ * angles, switched off.
  */
-const SILENT_UPGRADES = new Set([2]);
+const SILENT_UPGRADES = new Set([2, 3]);
 
 const UPGRADERS: Record<number, (r: Raw) => Raw> = {
   // v1 → v2: pens become inks; the plot step's margin moves to the project layout and
@@ -141,6 +149,8 @@ const UPGRADERS: Record<number, (r: Raw) => Raw> = {
   },
   // v2 → v3: every step gets a stable id (pins and comparisons refer to steps by id).
   2: (r) => ({ ...r, schemaVersion: 3, steps: withStepIds((Array.isArray(r.steps) ? (r.steps as Raw[]) : []).map((s) => ({ ...s, step: String(s.step) }))) }),
+  // v3 → v4: the print screen angles switch, off, so older recipes plot exactly as before.
+  3: (r) => ({ ...r, schemaVersion: 4, screenAngles: false }),
 };
 
 function readTarget(v: unknown, errors: RecipeWarning[], warnings: RecipeWarning[]): Target {
@@ -329,6 +339,7 @@ export function loadRecipe(raw: unknown, registry: StepRegistry): { recipe: Reci
       layerInks,
       passOrder,
       machine: typeof r.machine === "string" ? r.machine : "generic",
+      screenAngles: r.screenAngles === true,
       steps,
     },
     warnings,

@@ -50,6 +50,7 @@ export const fill = defineStep({
   input: "geometry",
   output: "geometry",
   cost: "live",
+  usesScreenAngles: true,
   params: {
     kind: {
       type: "enum",
@@ -99,11 +100,13 @@ export const fill = defineStep({
     outline: { type: "boolean", label: "Draw band outlines", help: "Also draw the border of each band.", default: false },
   },
   help: help.fill ?? "",
-  run(geo, p): Geometry {
+  run(geo, p, ctx): Geometry {
     const params = p as unknown as FillParams;
     return {
       ...geo,
-      layers: geo.layers.map((l) => {
+      layers: geo.layers.map((l, li) => {
+        // Print screen angles (when on) turn each ink's lattice, so the inks don't hatch alike.
+        const turn = ctx.screenAngle?.(l.id, li) ?? 0;
         const polys = l.features.features.filter((f) => f.geometry.type === "Polygon");
         const count = polys.reduce((m, f) => Math.max(m, Number(f.properties.level) || 0), 0);
         const toneOf = (f: GeoFeature) => {
@@ -125,7 +128,8 @@ export const fill = defineStep({
           const levelsToDraw = params.cumulative ? [...levelTone.keys()].filter((j) => j <= level && !(params.skipLightest && j <= 1)) : [level];
           for (const j of levelsToDraw) {
             const t = levelTone.get(j) ?? toneOf(f);
-            const { spacing, angle } = bandPattern(j, t, count, params);
+            const { spacing, angle: own } = bandPattern(j, t, count, params);
+            const angle = own + turn;
             const rings = f.geometry.coordinates;
             const paths = params.kind === "dots" ? dots(rings, spacing, angle, (params.dotSize / 2) * Math.sqrt(t)) : hatch(rings, spacing, angle);
             for (const path of paths) out.push(line(path, level));

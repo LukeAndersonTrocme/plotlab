@@ -1,4 +1,4 @@
-import { checkChain, removeStep, STAGE_WORDS, type ChainResult, type Recipe, type StageKind, type StepRegistry } from "@plotlab/engine";
+import { checkChain, lanesOf, removeStep, STAGE_WORDS, type ChainResult, type Recipe, type StageKind, type StepRegistry } from "@plotlab/engine";
 
 /**
  * The step strip (#66): one box per step plus the source, each showing a thumbnail of that
@@ -54,13 +54,53 @@ export interface StripBox {
    * A stage-changing step can't be switched off, but one that is off can be tried back on.
    */
   bypass: { ok: true } | { ok: false; reason: string } | null;
+  /**
+   * In a split chain (CMYK lanes): "split" for the step that splits the picture, "lane" for the
+   * steps in the lanes. Both show each ink as a 2×2 thumbnail. null elsewhere.
+   */
+  lane: "split" | "lane" | null;
+}
+
+/**
+ * The Stack box's key (thumbnail and selection): all the inks together, where the lanes merge.
+ * "@" can't start a step id (ids are made from step names), so it never clashes with one.
+ */
+export const STACK_KEY = "@stack";
+
+/** The lane row of a split chain: which inks, whether they're linked, and where the Stack box goes. */
+export interface StripLanes {
+  /** Layer ids, in the 2×2's order (C top left, M, Y, K). */
+  layers: string[];
+  names: string[];
+  linked: boolean;
+  /** Chain position of the last step in the lanes: the Stack box (all inks together) comes after it. */
+  stackAfter: number;
+  /** The recipe's print screen angles switch. */
+  screenAngles: boolean;
+}
+
+/** The lane row, or null when the chain isn't split (a view of one chain: `lanesOf`, ADR 0009). */
+export function stripLanes(recipe: Recipe, registry: StepRegistry): StripLanes | null {
+  const v = lanesOf(recipe, registry);
+  if (v.split === null) return null;
+  const inks = registry.get(recipe.steps[v.split]!.step)?.layerInks ?? {};
+  return {
+    layers: v.layers,
+    names: v.layers.map((l) => inks[l]?.name ?? l),
+    linked: v.linked,
+    stackAfter: (v.stack[0] ?? recipe.steps.length) - 1,
+    screenAngles: recipe.screenAngles === true,
+  };
 }
 
 export function stripBoxes(recipe: Recipe, registry: StepRegistry, run: { steps: ReadonlyArray<{ index: number }>; stale: readonly number[] }): StripBox[] {
   const ran = new Set(run.steps.map((s) => s.index));
   const firstStale = run.stale.length ? Math.min(...run.stale) : Infinity;
+  const lanes = lanesOf(recipe, registry);
+  const merge = lanes.stack[0] ?? recipe.steps.length;
+  const laneAt = (i: number): StripBox["lane"] => (lanes.split === null ? null : i === lanes.split ? "split" : i > lanes.split && i < merge ? "lane" : null);
   const boxes: StripBox[] = [
-    { key: "source", index: -1, title: "Source", icon: SOURCE_ICON, input: recipe.input, output: recipe.input, enabled: true, status: "ran", bypass: null },
+    { key: "source", index: -1, title: "Source", icon: SOURCE_ICON, input: recipe.input, output: recipe.input, enabled: true, status: "ran", bypass: null, lane: null },
   ];
   recipe.steps.forEach((rs, index) => {
     const def = registry.get(rs.step);
@@ -76,7 +116,7 @@ export function stripBoxes(recipe: Recipe, registry: StepRegistry, run: { steps:
             ok: false as const,
             reason: `Can't switch off ${title} here: it turns ${STAGE_WORDS[input]} into ${STAGE_WORDS[output]}. Only steps that keep the same kind of data can be switched off.`,
           };
-    boxes.push({ key: rs.id, index, title, icon: stepIcon(rs.step), input, output, enabled, status, bypass });
+    boxes.push({ key: rs.id, index, title, icon: stepIcon(rs.step), input, output, enabled, status, bypass, lane: laneAt(index) });
   });
   return boxes;
 }
