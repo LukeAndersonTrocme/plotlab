@@ -17,7 +17,7 @@ import { defaultLocalStorage, openLibrary, type Checkpoint, type Library, type P
 const registry = createRegistry();
 /** Strip thumbnails on the phone, in CSS px. */
 const PHONE_THUMB = 64;
-const NOTE = "Viewing only. To change a recipe, open plotlab on a laptop or another wide screen.";
+const NOTE = "Viewing only: nothing here changes your projects, except Open a bundle, which adds one. To change a recipe, open plotlab on a laptop or another wide screen.";
 const errText = (e: unknown) => (e instanceof Error ? e.message : String(e));
 
 /** True on phone-sized screens; follows turning the phone or resizing the window. */

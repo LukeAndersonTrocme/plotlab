@@ -28,7 +28,8 @@ import { StageView } from "./StageView.tsx";
 import { CompareBar, CompareCanvas, shiftHint, type BandOption } from "./Compare.tsx";
 import { StepList, type SidebarCards } from "./StepList.tsx";
 import { CheckpointSidebar } from "./CheckpointSidebar.tsx";
-import { openBundleFile } from "./BundleControls.tsx";
+import { openBundleFile, STILL_LOADING } from "./BundleControls.tsx";
+import { download } from "./download.ts";
 import type { ImportResult } from "./bundle.ts";
 import { PhoneViewer, usePhoneWidth } from "./PhoneViewer.tsx";
 import { keepEditor } from "./phone.ts";
@@ -54,14 +55,6 @@ const decodeStored = (p: ProjectStore, s: StoredSource, warn?: (m: string) => vo
 /** The label and file stem for a project's image ("sample" keeps its special wording). */
 const nameOf = (p: ProjectStore) => (p.name === SAMPLE_NAME ? "sample" : p.name);
 const errText = (e: unknown) => (e instanceof Error ? e.message : String(e));
-
-function download(name: string, data: string | Uint8Array, type: string) {
-  const a = document.createElement("a");
-  a.href = URL.createObjectURL(new Blob([data], { type }));
-  a.download = name;
-  a.click();
-  setTimeout(() => URL.revokeObjectURL(a.href), 1000);
-}
 
 /**
  * Phone-sized screens get the viewer only (#74); the editor doesn't even mount there, so
@@ -500,11 +493,13 @@ function Editor(props: { hidden: boolean }) {
   }, [stepIds]);
 
   const loadFile = async (file: File) => {
-    if (!ready) return;
+    // A dropped bundle: opened, or told why not (never a silent no-op).
     if (/\.zip$/i.test(file.name)) {
-      if (library) await openBundleFile(library, file).then((o) => bundleOpened(o.result, o.message), (e) => setNotice(errText(e)));
+      if (!ready || !library) return setNotice(STILL_LOADING);
+      await openBundleFile(library, file).then((o) => bundleOpened(o.result, o.message), (e) => setNotice(errText(e)));
       return;
     }
+    if (!ready) return;
     preSplit.current = null;
     if (file.name.endsWith(".json")) {
       try {

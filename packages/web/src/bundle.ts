@@ -16,7 +16,7 @@ import { setupSummary } from "./setup.ts";
 import { BundleError, folderName, readBundle, writeBundle } from "./storage/bundle.ts";
 import { sha256Hex, type Checkpoint, type Library, type ProjectInfo, type ProjectStore } from "./storage/index.ts";
 
-export { BundleError, MAX_BUNDLE_BYTES } from "./storage/bundle.ts";
+export { BundleError, MAX_BUNDLE_BYTES, sizeLimitText } from "./storage/bundle.ts";
 
 /** The checkpoint that keeps a bundle's settings when the project here has its own. */
 export const FROM_BUNDLE = "From bundle";

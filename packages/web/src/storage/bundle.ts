@@ -17,7 +17,9 @@ import { strFromU8, strToU8, unzipSync, zipSync, type Zippable } from "fflate";
 import type { ProjectStore, Source } from "./types.ts";
 
 /** The most a bundle may unpack to. Bigger ones are refused, so a broken or hostile file can't fill memory. */
-export const MAX_BUNDLE_BYTES = 200 * 1024 * 1024;
+export const MAX_BUNDLE_BYTES = 200e6;
+/** A size limit as the messages say it, e.g. "200 MB" (decimal MB, like the cap). */
+export const sizeLimitText = (bytes: number) => `${Math.round(bytes / 1e6)} MB`;
 
 /** A bundle that can't be written or read. The message is in plain words, for the screen. */
 export class BundleError extends Error {
@@ -115,7 +117,7 @@ const junk = (path: string) => path.endsWith("/") || path.startsWith("__MACOSX/"
  */
 export function readBundle(bytes: Uint8Array, opts: { fileName: string; maxBytes?: number }): ParsedBundle {
   const max = opts.maxBytes ?? MAX_BUNDLE_BYTES;
-  const tooBig = () => new BundleError(`${opts.fileName} is too big to open (over ${Math.round(max / 1e6)} MB unpacked).`);
+  const tooBig = () => new BundleError(`${opts.fileName} is too big to open (over ${sizeLimitText(max)} unpacked).`);
   if (bytes.length > max) throw tooBig();
   let entries: Record<string, Uint8Array>;
   try {

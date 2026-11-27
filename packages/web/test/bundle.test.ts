@@ -3,7 +3,7 @@ import { strToU8, unzipSync, zipSync } from "fflate";
 import { loadRecipe } from "@plotlab/engine";
 import { createRegistry } from "@plotlab/steps";
 import { memoryLibrary, sha256Hex, type Checkpoint, type Library, type ProjectStore } from "../src/storage/index.ts";
-import { BundleError, readBundle, writeBundle } from "../src/storage/bundle.ts";
+import { BundleError, MAX_BUNDLE_BYTES, readBundle, sizeLimitText, writeBundle } from "../src/storage/bundle.ts";
 import { bundleReadme, exportProject, FROM_BUNDLE, importBundle, importSummary } from "../src/bundle.ts";
 import { createCheckpoint, listForProject } from "../src/checkpoints.ts";
 import { defaultRecipe } from "../src/defaults.ts";
@@ -97,6 +97,12 @@ describe("bundle format (storage/bundle.ts)", () => {
     const zip = zipSync({ "a/recipe.json": json({}), "a/source.png": new Uint8Array(5000) });
     expect(() => readBundle(zip, { fileName: "a.zip", maxBytes: 1000 })).toThrow(/too big/);
     expect(() => readBundle(new Uint8Array(2000), { fileName: "a.zip", maxBytes: 1000 })).toThrow(/too big/);
+  });
+
+  it("the cap and its message agree: 200 MB", () => {
+    expect(MAX_BUNDLE_BYTES).toBe(200e6);
+    expect(sizeLimitText(MAX_BUNDLE_BYTES)).toBe("200 MB");
+    expect(() => readBundle(new Uint8Array(MAX_BUNDLE_BYTES + 1), { fileName: "big.zip" })).toThrow("big.zip is too big to open (over 200 MB unpacked).");
   });
 });
 
