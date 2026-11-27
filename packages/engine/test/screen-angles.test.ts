@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { loadRecipe, Pipeline, printScreenAngle, type Geometry, type RawImage } from "../src/index.ts";
+import { loadRecipe, Pipeline, printScreenAngle, unlinkLanes, type Geometry, type RawImage } from "../src/index.ts";
 import { createRegistry } from "../../steps/src/index.ts";
 
 const reg = createRegistry();
@@ -100,5 +100,17 @@ describe("Fill with settings for one ink (Independent inks)", () => {
     // Y isn't filled: only its band outlines (polygons) are left, no hatch lines.
     expect(directions(some, "Y")).toEqual([]);
     expect(some.layers.find((l) => l.id === "Y")!.features.features.every((f) => f.geometry.type === "Polygon")).toBe(true);
+  });
+});
+
+describe("unlinking the inks changes nothing in the output", () => {
+  it("each ink's own copy of the settings draws exactly the same lines, screen angles and all", async () => {
+    const linked = recipe(true);
+    const u = unlinkLanes(linked, reg);
+    if ("reason" in u) throw new Error(u.reason);
+    expect(u.recipe.steps.find((s) => s.step === "fill")!.layerParams?.M).toBeDefined();
+    const a = (await new Pipeline(reg).run(img, linked)).output as Geometry;
+    const b = (await new Pipeline(reg).run(img, u.recipe)).output as Geometry;
+    expect(b.layers).toEqual(a.layers);
   });
 });

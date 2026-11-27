@@ -55,6 +55,9 @@ still to be argued over with Nick. Change a term here first, then rename it ever
 | **Flatten** | Turn layers back into an image to keep processing | flatten | rasterize |
 | **Preset** | A saved piece of recipe (one step or a short chain). Picking one replaces the steps; it may also switch the output target (e.g. a print-only look). A preset without a target keeps the current one | a recipe, a look | template |
 | **Seed** | Number that fixes a step's randomness so it can be reproduced | | RNG seed |
+| **Lane** | One ink's row of steps after a split (CMYK): the steps that act on that ink, with its settings. A view of the one recipe, not a copy | the cyan, a plate's steps | per-layer projection |
+| **Linked / Independent inks** | Linked: one set of steps and settings drives every ink. Independent: each ink has its own steps and settings (pixelated magenta, stippled yellow). Linking again copies one lane to all and saves a checkpoint first | same for all / each its own | shared / per-layer params |
+| **Stack** | Where the lanes merge: all the inks together, in pass order (lane order is the pass order) | the print, all inks | composite |
 
 ## Open terminology questions
 
