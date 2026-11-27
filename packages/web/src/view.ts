@@ -51,9 +51,30 @@ export interface ViewState {
   laneView: "all" | string;
   /** The lane the selected step was picked in: the sidebar edits that ink's settings. Null outside the lanes. Not saved. */
   lane: string | null;
+  /** CMYK views (`inkview.ts`): the inks stacked on one paper, or four panels, one per ink. Not saved. */
+  inkPanels: InkPanels;
+  /** Looking at one ink's step: the other inks faintly underneath (true), or that ink alone. Not saved. */
+  otherInks: boolean;
+  /** How the stacked inks mix on the canvas: see-through (multiply), or opaque in pass order. Not saved; never the export. */
+  inkMix: InkMix;
 }
 
-export const initialView: ViewState = { mode: "design", selection: RESULT, thumb: THUMB.default, pins: [], solo: null, compare: null, laneView: "all", lane: null };
+export type InkPanels = "stacked" | "four";
+export type InkMix = "see-through" | "opaque";
+
+export const initialView: ViewState = {
+  mode: "design",
+  selection: RESULT,
+  thumb: THUMB.default,
+  pins: [],
+  solo: null,
+  compare: null,
+  laneView: "all",
+  lane: null,
+  inkPanels: "stacked",
+  otherInks: true,
+  inkMix: "see-through",
+};
 
 const clampThumb = (px: number) => Math.round(Math.min(THUMB.max, Math.max(THUMB.min, px)));
 
@@ -120,6 +141,21 @@ export function clickLaneBox(v: ViewState, id: string, layer: string): ViewState
   const sel = stepSelection(id);
   if (v.mode === "design" && sameSelection(v.selection, sel) && v.lane === layer) return select(v, RESULT);
   return { ...select(v, sel), lane: layer };
+}
+
+/** Stacked / Four panels, above the canvas (only while the picture is split). */
+export function setInkPanels(v: ViewState, inkPanels: InkPanels): ViewState {
+  return v.inkPanels === inkPanels ? v : { ...v, inkPanels };
+}
+
+/** Show other inks: faintly underneath one ink's step, or not at all. */
+export function setOtherInks(v: ViewState, otherInks: boolean): ViewState {
+  return v.otherInks === otherInks ? v : { ...v, otherInks };
+}
+
+/** See-through / Opaque, in the Stack panel: only how the canvas mixes the inks. */
+export function setInkMix(v: ViewState, inkMix: InkMix): ViewState {
+  return v.inkMix === inkMix ? v : { ...v, inkMix };
 }
 
 /** Clicking what's already selected (in Design) goes back to the result. */

@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { addBand, addBox, dragSplit, makeCompare, MAX_STRIPS, moveLens, setLayout, type Compare } from "../src/compare.ts";
-import { clickLaneBox, showLanes, lookingBand, canvasTarget, clickBox, compareTargetsOf, readThumbSize, setCompare, toggleCompare, resizeThumbs, THUMB, writeThumbSize, fitSelection, fitView, fromViewBlock, initialView, isPinned, openSetup, pin, RESULT, select, setMode, sidebarSteps, SOURCE, stepSelection, toggleSelect, togglePin, toggleSolo, toViewBlock, unpin, VIEW_BLOCK_VERSION, type ViewState } from "../src/view.ts";
+import { clickLaneBox, setInkMix, setInkPanels, setOtherInks, showLanes, lookingBand, canvasTarget, clickBox, compareTargetsOf, readThumbSize, setCompare, toggleCompare, resizeThumbs, THUMB, writeThumbSize, fitSelection, fitView, fromViewBlock, initialView, isPinned, openSetup, pin, RESULT, select, setMode, sidebarSteps, SOURCE, stepSelection, toggleSelect, togglePin, toggleSolo, toViewBlock, unpin, VIEW_BLOCK_VERSION, type ViewState } from "../src/view.ts";
 
 const at = (patch: Partial<ViewState>): ViewState => ({ ...initialView, ...patch });
 /** Only the step ids matter to the view. */
@@ -450,5 +450,33 @@ describe("view state: CMYK lanes (Independent inks)", () => {
   });
   it("is only the view: not saved in the view block", () => {
     expect(Object.keys(toViewBlock(clickLaneBox(showLanes(initialView, "M"), "centerline", "M")))).toEqual(["version", "pins", "compare"]);
+  });
+});
+
+describe("view state: CMYK views (four panels, other inks, see-through or opaque)", () => {
+  it("starts stacked, with the other inks faintly underneath, and see-through inks", () => {
+    expect(initialView).toMatchObject({ inkPanels: "stacked", otherInks: true, inkMix: "see-through" });
+  });
+  it("each toggle changes only itself, and the same value again changes nothing", () => {
+    const four = setInkPanels(initialView, "four");
+    expect(four).toEqual({ ...initialView, inkPanels: "four" });
+    expect(setInkPanels(four, "four")).toBe(four);
+    const alone = setOtherInks(initialView, false);
+    expect(alone).toEqual({ ...initialView, otherInks: false });
+    expect(setOtherInks(alone, false)).toBe(alone);
+    const opaque = setInkMix(initialView, "opaque");
+    expect(opaque).toEqual({ ...initialView, inkMix: "opaque" });
+    expect(setInkMix(opaque, "opaque")).toBe(opaque);
+  });
+  it("keeps across selections and modes", () => {
+    let v = setInkMix(setOtherInks(setInkPanels(initialView, "four"), false), "opaque");
+    v = setMode(select(v, stepSelection("centerline")), "plot");
+    expect(setMode(v, "design")).toMatchObject({ inkPanels: "four", otherInks: false, inkMix: "opaque" });
+  });
+  it("is only the view: not saved in the view block, and never changes what the worker draws", () => {
+    const v = setInkMix(setOtherInks(setInkPanels(initialView, "four"), false), "opaque");
+    expect(Object.keys(toViewBlock(v))).toEqual(["version", "pins", "compare"]);
+    expect(canvasTarget(v, r)).toBe(canvasTarget(initialView, r));
+    expect(compareTargetsOf(v, r)).toEqual(compareTargetsOf(initialView, r));
   });
 });
