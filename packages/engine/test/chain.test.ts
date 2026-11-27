@@ -21,7 +21,7 @@ describe("checkChain", () => {
   });
   it("a layer step may follow a line step that left some layers as they were (one ink each, ADR 0009)", () => {
     const r = loadRecipe(
-      { schemaVersion: 2, paper: { widthMm: 100, heightMm: 100 }, inks: [{ id: "k", color: "#000" }], steps: [{ step: "cmyk" }, { step: "stipple", layers: ["Y"] }, { step: "pixelate", layers: ["M"] }, { step: "centerline" }, { step: "order" }] },
+      { schemaVersion: 2, paper: { widthMm: 100, heightMm: 100 }, inks: [{ id: "k", color: "#000" }], steps: [{ step: "cmyk" }, { step: "stipple", layers: ["Y"] }, { step: "pixelate", layers: ["M"] }, { step: "centerline", layers: ["C", "M", "K"] }, { step: "order" }] },
       reg,
     ).recipe;
     expect(checkChain("image", r.steps, reg)).toEqual([]);
@@ -44,6 +44,42 @@ describe("checkChain", () => {
     });
     it("a layer step after the lines must name inks that are still layers", () => {
       refused(["cmyk", { step: "centerline", layers: ["C", "M", "K"] }, { step: "pixelate", layers: ["M"] }, { step: "stipple", layers: ["Y"] }, "order"], 2, /Pixelate needs M as layers, but at that point only Y is still layers; the others are lines/);
+    });
+    it("loadRecipe gives only the real error, not a follow-on one about Stroke order", () => {
+      for (const list of [
+        ["threshold", { step: "centerline", layers: ["threshold"] }, "pixelate", "order"],
+        ["cmyk", { step: "stipple", layers: ["Y"] }, { step: "centerline", layers: ["C", "M", "K"] }, { step: "pixelate", layers: ["M"] }, "order"],
+      ]) {
+        const err = (() => {
+          try {
+            loadRecipe(raw(list), reg);
+          } catch (e) {
+            return e as { issues: Array<{ index: number }> };
+          }
+        })();
+        expect(err?.issues.map((e) => e.index), JSON.stringify(list)).toEqual([list.length - 2]);
+      }
+    });
+    describe("a layer step that runs while some inks are lines keeps the chain at lines (review r2)", () => {
+      it("(f) a whole-chain line step after it is refused", () => {
+        refused(["cmyk", { step: "stipple", layers: ["Y"] }, { step: "pixelate", layers: ["M"] }, "centerline", "order"], 3, /Centerline acts on every ink, but some are already lines/);
+      });
+      it("(g) a layer step on an ink that is already lines is refused", () => {
+        refused(["cmyk", { step: "stipple", layers: ["Y"] }, { step: "pixelate", layers: ["M"] }, { step: "pixelate", layers: ["Y"] }, { step: "centerline", layers: ["C", "M", "K"] }, "order"], 3, /Pixelate needs Y as layers, but at that point only C, M and K are still layers/);
+      });
+      it("(h) a whole-chain layer step after it is refused", () => {
+        refused(["cmyk", { step: "stipple", layers: ["Y"] }, { step: "pixelate", layers: ["M"] }, "pixelate", { step: "centerline", layers: ["C", "M", "K"] }, "order"], 3, /Pixelate acts on every ink, but some are already lines/);
+      });
+      it("(e) Stroke order still follows it: an ink may stop at layers", () => {
+        const list = ["cmyk", { step: "centerline", layers: ["C", "M", "K"] }, { step: "pixelate", layers: ["Y"] }, "order"];
+        expect(checkChain("image", steps(list), reg)).toEqual([]);
+        expect(() => loadRecipe(raw(list), reg)).not.toThrow();
+      });
+      it("(i) Fill and a later line step still follow it", () => {
+        const list = ["cmyk", { step: "centerline", layers: ["C", "M", "K"] }, { step: "pixelate", layers: ["Y"] }, "fill", { step: "stipple", layers: ["Y"] }, "order"];
+        expect(checkChain("image", steps(list), reg)).toEqual([]);
+        expect(() => loadRecipe(raw(list), reg)).not.toThrow();
+      });
     });
     it("a whole-chain layer step after some lines is refused (it would only reach some inks)", () => {
       refused(["cmyk", { step: "stipple", layers: ["Y"] }, "centerline", "order"], 2, /Centerline acts on every ink, but some are already lines at that point. Name the inks that are still layers \(C, M and K\)/);

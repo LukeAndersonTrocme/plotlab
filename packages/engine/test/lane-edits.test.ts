@@ -243,3 +243,14 @@ describe("resetLaneStep: Defaults for this step, from a lane (review r1)", () =>
     expect(resetLaneStep(r, reg, "order", "M")).toEqual({ reason: expect.stringMatching(/isn't in the M lane/) });
   });
 });
+
+describe("a layer step between line steps runs (review r2)", () => {
+  it("(i) cmyk → centerline[C,M,K] → pixelate[Y] → fill → stipple[Y] → order plots every ink", async () => {
+    const r = recipe(["cmyk", { step: "centerline", layers: ["C", "M", "K"] }, { step: "pixelate", layers: ["Y"] }, "fill", { step: "stipple", layers: ["Y"] }, "order"]);
+    const W = 40;
+    const data = new Float32Array(W * W * 3).map((_, i) => ((i % 3) + ((i / 3) % W) / W) / 3);
+    const { plot } = await new Pipeline(reg).run({ width: W, height: W, channels: 3, data } as RawImage, { ...r, workingMmPerPx: 2.5 });
+    expect(plot?.layers.find((l) => l.id === "Y")?.paths.length).toBeGreaterThan(0);
+    expect(plot?.rasterLayers?.layers ?? []).toEqual([]);
+  });
+});

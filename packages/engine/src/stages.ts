@@ -48,6 +48,10 @@ export const fitsStage = (stage: ChainStage, def: AnyStep, rs: Pick<RecipeStep, 
 /** Where the chain is after the (switched-on) step `rs`. */
 export function stageAfter(stage: ChainStage, def: AnyStep, rs: Pick<RecipeStep, "layers">): ChainStage {
   const sel = selector(rs);
+  // A layer step on the layers that lines still carry: the chain still has lines, with the
+  // same layers left (a layers → layers step changes them in place; it never takes the kind
+  // from its output). The same when it didn't fit, so one bad step gives one error.
+  if (def.runLayer && def.output === "layers" && stage.kind === "geometry") return stage;
   if (def.runLayer && def.output === "geometry") {
     // The layers a line step leaves: only knowable when it names them and the ids are known.
     const left = stage.layers && sel ? stage.layers.filter((id) => !sel.includes(id)) : [];
