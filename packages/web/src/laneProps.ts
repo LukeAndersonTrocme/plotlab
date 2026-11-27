@@ -52,6 +52,7 @@ export function laneProps(d: LaneDeps): {
   // The ink whose settings the sidebar edits: the lane the selected step was picked in, while that lane is independent.
   const picked = view.lane && selected >= 0 && rows ? lanesOf(recipe, registry).lanes.find((x) => x.layer === view.lane) : undefined;
   const lane = picked && !picked.linked && picked.steps.some((x) => x.index === selected) ? { layer: picked.layer, name: lanes!.names[lanes!.layers.indexOf(picked.layer)] ?? picked.layer } : null;
+  const firstLane = lanes ? laneOrder(lanes.layers, plot, recipe.passOrder)[0] : undefined;
   const edit = (res: ChainResult, then: (r: Recipe) => void) => ("reason" in res ? d.setNotice(res.reason) : then(res.recipe));
   return {
     lanes,
@@ -74,12 +75,18 @@ export function laneProps(d: LaneDeps): {
       },
       onUnlink: () =>
         edit(unlinkLanes(recipe, registry), (r) => {
+          // A selected step in the lanes is now picked in a lane (the one shown, else the first),
+          // so its card edits that ink rather than settings every ink's own copy hides.
+          const v = d.currentView();
+          const at = selectedIndex(v, r);
+          const into = lanesOf(r, registry).lanes.find((l) => l.layer === (v.laneView !== "all" ? v.laneView : firstLane));
+          if (at >= 0 && into?.steps.some((x) => x.index === at)) d.changeView({ ...v, lane: into.layer });
           d.apply(r, false);
           d.setNotice("Independent: each ink has its own copy of the steps and settings now. A + in a lane adds a step for that ink only; Linked puts them back together.");
         }),
       onLink: d.link,
       linkWarning: (layer) => linkWarning(recipe, registry, layer),
-      linkLane: view.lane ?? (lanes ? laneOrder(lanes.layers, plot, recipe.passOrder)[0] : undefined) ?? "C",
+      linkLane: view.lane ?? firstLane ?? "C",
     },
     sidebar: {
       lane,

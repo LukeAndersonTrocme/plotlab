@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { addInLane, lanesOf, loadRecipe, unlinkLanes, type Ink, type Plot, type Recipe } from "@plotlab/engine";
 import { createRegistry } from "@plotlab/steps";
-import { laneAddMenu, laneBoxes, laneKey, laneOrder, laneRows, moveLane, parseLaneKey, stackRows } from "../src/lanes.ts";
+import { allInks, unlinkedNotice, laneAddMenu, laneBoxes, laneKey, laneOrder, laneRows, moveLane, parseLaneKey, stackRows } from "../src/lanes.ts";
 
 const reg = createRegistry();
 const recipe = (steps: string[]): Recipe =>
@@ -99,5 +99,23 @@ describe("independent lanes in the strip", () => {
     const end = laneAddMenu(r, reg, "Y", 1);
     expect(end.options.map((o) => o.id)).toEqual(["fill"]);
     expect(lanesOf(r, reg).lanes.length).toBe(4);
+  });
+});
+
+describe("final review: cards without a lane, and silent unlinking", () => {
+  it("allInks: a step in the lanes whose inks have their own settings", () => {
+    const linked = recipe(["cmyk", "levels", "bands", "fill", "order"]);
+    expect(allInks(linked, reg, "fill")).toBe(false);
+    const u = ok(unlinkLanes(linked, reg)).recipe;
+    expect(allInks(u, reg, "fill")).toBe(true);
+    expect(allInks(u, reg, "order")).toBe(false);
+    expect(allInks(u, reg, "cmyk")).toBe(false);
+  });
+  it("unlinkedNotice: says so when an edit makes linked inks independent, and only then", () => {
+    const linked = recipe(["cmyk", "levels", "bands", "fill", "order"]);
+    const own = { ...linked, steps: linked.steps.map((s) => (s.step === "levels" ? { ...s, layerParams: { C: { count: 3 } } } : s)) };
+    expect(unlinkedNotice(linked, own, reg)).toMatch(/Independent: Cyan now has its own steps or settings/);
+    expect(unlinkedNotice(own, own, reg)).toBeNull();
+    expect(unlinkedNotice(linked, linked, reg)).toBeNull();
   });
 });

@@ -5,9 +5,11 @@ import {
   moveStep,
   removeStep,
   resetParam,
+  resetAllInks,
   resetLaneStep,
   resetStep,
   setLaneParam,
+  validated,
   type AnyStep,
   type LayerInfo,
   type ParamDecl,
@@ -21,6 +23,7 @@ import { ParamControl } from "./ParamControl.tsx";
 import { splitSettings } from "./settings.ts";
 import type { InspectTarget, StepInfo } from "./protocol.ts";
 import { removeCheck, STAGE_NAMES, toggleBypass } from "./strip.ts";
+import { allInks, unlinkedNotice } from "./lanes.ts";
 
 /** Which cards the sidebar shows, by chain position (from `sidebarSteps` in view.ts). */
 export interface SidebarCards {
@@ -68,13 +71,26 @@ export function StepList(props: {
   const [dragFrom, setDragFrom] = useState<number | null>(null);
   const [editing, setEditing] = useState<Record<number, string | null>>({});
 
+  /** Apply an edit; when it turns linked inks independent, say so (as Independent does). */
+  const change = (next: Recipe, proxy: boolean, step?: AnyStep) => {
+    props.onChange(next, proxy, step);
+    const note = unlinkedNotice(recipe, next, registry);
+    if (note && !proxy) props.onNotice(note);
+  };
   const commit = (res: { recipe: Recipe } | { reason: string }) => {
     if ("reason" in res) props.onNotice(res.reason);
-    else props.onChange(res.recipe, false);
+    else change(res.recipe, false);
   };
   const patchStep = (index: number, patch: Partial<RecipeStep>, proxy: boolean) => {
     const steps = recipe.steps.map((s, i) => (i === index ? { ...s, ...patch } : s));
-    props.onChange({ ...recipe, steps }, proxy, registry.get(recipe.steps[index]!.step));
+    const def = registry.get(recipe.steps[index]!.step);
+    // Which inks a step applies to goes through the chain rules, like moving it: the chain and
+    // every ink's lane must still work.
+    if ("layers" in patch) {
+      const res = validated(recipe, steps, registry, `${def?.title ?? "This step"} can't apply to just those: `);
+      if ("reason" in res) return props.onNotice(res.reason);
+    }
+    change({ ...recipe, steps }, proxy, def);
   };
   /** The lane the card at `index` edits: only the card being looked at, picked in a lane. */
   const laneAt = (index: number) => (props.lane && props.cards?.looking === index ? props.lane : null);
@@ -84,9 +100,10 @@ export function StepList(props: {
     if (layer === null) {
       // From a lane: that ink's settings when it's independent. Else a linked edit: the shared
       // settings, written once for every ink (lanes, #66).
+      // With no lane, on independent inks: every ink (their own copies too).
       const res = setLaneParam(recipe, registry, rs.id, name, value, laneAt(index)?.layer ?? null);
       if ("reason" in res) props.onNotice(res.reason);
-      else props.onChange(res.recipe, proxy, registry.get(rs.step));
+      else change(res.recipe, proxy, registry.get(rs.step));
     } else patchStep(index, { layerParams: { ...rs.layerParams, [layer]: { ...rs.layerParams?.[layer], [name]: value } } }, proxy);
   };
   /** Whether Switch off / on works for the step at `index` (the same rule as the strip's toggle). */
@@ -122,8 +139,10 @@ export function StepList(props: {
     // In a lane every setting is the ink's own: changed means not the default.
     const changedHere = (name: string, decl: ParamDecl) =>
       lane ? isChanged(decl, values[name]) : layer === null ? isChanged(decl, rs.params[name]) : rs.layerParams?.[layer]?.[name] !== undefined;
+    // No lane and no "Settings for" ink, on independent inks: the card edits every ink.
+    const everyInk = !lane && editing[index] == null && allInks(recipe, registry, rs.id);
     const resetHere = (name: string) =>
-      lane
+      lane || everyInk
         ? setParam(index, name, (def.params[name] as ParamDecl).default, false)
         : props.onChange(resetParam(recipe, index, name, registry, layer ?? undefined), false);
     const stepChanged =
@@ -199,9 +218,11 @@ export function StepList(props: {
             {stepChanged && (
               <button
                 className="icon"
-                title={lane ? `Defaults for this step, for ${lane.name} only: put its settings back (keeps the seed); the other inks keep theirs` : "Defaults for this step: put every setting back (keeps the seed)"}
+                title={lane ? `Defaults for this step, for ${lane.name} only: put its settings back (keeps the seed); the other inks keep theirs` : everyInk ? "Defaults for this step, for every ink: put each ink's settings back (keeps the seed); the inks stay independent" : "Defaults for this step: put every setting back (keeps the seed)"}
                 aria-label={`Defaults for ${def.title}`}
-                onClick={() => (lane ? commit(resetLaneStep(recipe, registry, rs.id, lane.layer)) : props.onChange(resetStep(recipe, index, registry), false))}
+                onClick={() =>
+                  lane ? commit(resetLaneStep(recipe, registry, rs.id, lane.layer)) : everyInk ? commit(resetAllInks(recipe, registry, rs.id)) : props.onChange(resetStep(recipe, index, registry), false)
+                }
               >
                 ↺
               </button>
@@ -271,6 +292,7 @@ export function StepList(props: {
             onChange={(patch) => patchStep(index, patch, false)}
           />
         )}
+        {enabled && everyInk && <p className="hint all-inks-note">Settings for all inks: each ink's own settings change together. To change one ink, pick its box in a lane.</p>}
         {enabled && (() => {
           const control = (name: string) =>
             isVisible(def.params, name, values) ? (

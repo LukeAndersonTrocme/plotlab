@@ -89,7 +89,8 @@ export function lanesOf(recipe: Recipe, registry: StepRegistry): LaneView {
  * Change one setting of the step `stepId` from a lane. A linked edit (or `lane` null: the
  * shared settings) writes the step's `params` once; an edit in an independent lane (one with
  * its own selector or settings) writes that layer's `layerParams` entry. A step that isn't
- * in the named lane (a trunk step, or one narrowed to other inks) is refused.
+ * in the named lane (a trunk step, or one narrowed to other inks) is refused. With no lane, on
+ * a step in the lanes, it is every ink: the shared setting and each ink's own copy of it.
  */
 export function setLaneParam(recipe: Recipe, registry: StepRegistry, stepId: string, name: string, value: unknown, lane: string | null): ChainResult {
   const index = recipe.steps.findIndex((s) => s.id === stepId);
@@ -105,9 +106,15 @@ export function setLaneParam(recipe: Recipe, registry: StepRegistry, stepId: str
     // The lane's own state: a lane with its own settings keeps them; a linked lane edits the shared ones.
     own = actsPerLayer(def) && !l.linked;
   }
-  const next: RecipeStep = own && lane !== null
+  let next: RecipeStep = own && lane !== null
     ? { ...rs, layerParams: { ...rs.layerParams, [lane]: { ...rs.layerParams?.[lane], [name]: value } } }
     : { ...rs, params: { ...rs.params, [name]: value } };
+  // No lane, on a step in the lanes of a split picture: every ink. An ink's own copy of this
+  // setting (Independent) would hide the shared one, so it changes too.
+  if (lane === null && actsPerLayer(def) && rs.layerParams && lanesOf(recipe, registry).lanes.some((l) => l.steps.some((x) => x.id === stepId))) {
+    const layerParams = Object.fromEntries(Object.entries(rs.layerParams).map(([l, o]) => [l, name in o ? { ...o, [name]: value } : o]));
+    next = { ...next, layerParams };
+  }
   return { recipe: { ...recipe, steps: recipe.steps.map((s, i) => (i === index ? next : s)) } };
 }
 
