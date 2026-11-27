@@ -23,7 +23,8 @@ import { ParamControl } from "./ParamControl.tsx";
 import { splitSettings } from "./settings.ts";
 import type { InspectTarget, StepInfo } from "./protocol.ts";
 import { bypassRule, removeCheck, STAGE_NAMES, toggleBypass } from "./strip.ts";
-import { allInks, unlinkedNotice } from "./lanes.ts";
+import { allInks, laneNudge, unlinkedNotice } from "./lanes.ts";
+import { movedText, nudge } from "./gaps.ts";
 
 /** Which cards the sidebar shows, by chain position (from `sidebarSteps` in view.ts). */
 export interface SidebarCards {
@@ -70,6 +71,8 @@ export function StepList(props: {
   const { recipe, registry } = props;
   const [dragFrom, setDragFrom] = useState<number | null>(null);
   const [editing, setEditing] = useState<Record<number, string | null>>({});
+  /** What the last Move left / Move right did, for screen readers. */
+  const [said, setSaid] = useState("");
 
   /** Apply an edit; when it turns linked inks independent, say so (as Independent does). */
   const change = (next: Recipe, proxy: boolean, step?: AnyStep) => {
@@ -106,6 +109,19 @@ export function StepList(props: {
       if ("reason" in res) props.onNotice(res.reason);
       else change(res.recipe, proxy, registry.get(rs.step));
     } else patchStep(index, { layerParams: { ...rs.layerParams, [layer]: { ...rs.layerParams?.[layer], [name]: value } } }, proxy);
+  };
+  /**
+   * Move left / Move right on the focused card (for touch, and anyone not dragging): the strip's
+   * keyboard move, by the same rule (in a lane, along that lane through the lane guard).
+   */
+  const moveBy = (index: number, dir: -1 | 1) => {
+    const rs = recipe.steps[index]!;
+    const title = registry.get(rs.step)?.title ?? rs.step;
+    const lane = laneAt(index);
+    const res = lane ? laneNudge(recipe, registry, rs.id, lane.layer, dir) : nudge(recipe, registry, index, dir);
+    if ("reason" in res) return props.onNotice(res.reason);
+    change(res.recipe, false);
+    setSaid(movedText(title, res.to, lane?.name));
   };
   /** Layers arriving at step `index`: the output of the last step before it that ran. */
   const inputLayers = (index: number): LayerInfo[] => [...props.steps].reverse().find((s) => s.index < index)?.layers ?? [];
@@ -190,17 +206,21 @@ export function StepList(props: {
             </span>
           )}
           <span className="card-tools">
-            <button className="icon" aria-label={`Move ${def.title} up`} disabled={index === 0} onClick={() => commit(moveStep(recipe, index, index - 1, registry))}>
-              ↑
-            </button>
-            <button
-              className="icon"
-              aria-label={`Move ${def.title} down`}
-              disabled={index === recipe.steps.length - 1}
-              onClick={() => commit(moveStep(recipe, index, index + 1, registry))}
-            >
-              ↓
-            </button>
+            {!focused && (
+              <>
+                <button className="icon" aria-label={`Move ${def.title} up`} disabled={index === 0} onClick={() => commit(moveStep(recipe, index, index - 1, registry))}>
+                  ↑
+                </button>
+                <button
+                  className="icon"
+                  aria-label={`Move ${def.title} down`}
+                  disabled={index === recipe.steps.length - 1}
+                  onClick={() => commit(moveStep(recipe, index, index + 1, registry))}
+                >
+                  ↓
+                </button>
+              </>
+            )}
             {!focused && (
               <input
                 type="checkbox"
@@ -252,6 +272,12 @@ export function StepList(props: {
         {focused && (
           <>
             <div className="step-actions">
+              <button className="move-left" title={`Move ${def.title} one place left in the ${laneAt(index) ? `${laneAt(index)!.name} lane` : "recipe strip"} (Alt+← on its box)`} onClick={() => moveBy(index, -1)}>
+                Move left
+              </button>
+              <button className="move-right" title={`Move ${def.title} one place right in the ${laneAt(index) ? `${laneAt(index)!.name} lane` : "recipe strip"} (Alt+→ on its box)`} onClick={() => moveBy(index, 1)}>
+                Move right
+              </button>
               <button
                 disabled={!bypass.ok}
                 title={bypass.ok ? (enabled ? "Skip this step and see what the chain does without it" : "Put this step back in the chain") : bypass.reason}
@@ -340,6 +366,9 @@ export function StepList(props: {
     const count = c.pinned.length + (c.lookingPinned ? 1 : 0);
     return (
       <div className="steps">
+        <span className="sr-only" role="status">
+          {said}
+        </span>
         {c.looking !== null && card(c.looking)}
         <div className="side-label pinned-label">
           Pinned{count > 0 && <span className="num">{count}</span>}

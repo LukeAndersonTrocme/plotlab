@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { shortcut, type KeyPress } from "../src/keys.ts";
+import { shortcut, trapTab, type KeyPress } from "../src/keys.ts";
 
 const press = (key: string, mods: Partial<KeyPress> = {}): KeyPress => ({ key, metaKey: false, ctrlKey: false, shiftKey: false, altKey: false, repeat: false, typing: false, menu: false, ...mods });
 
@@ -41,5 +41,22 @@ describe("keyboard shortcuts", () => {
     expect(shortcut(press("a", { metaKey: true }))).toBeNull();
     expect(shortcut(press("s", { metaKey: true, altKey: true }))).toBeNull();
     expect(shortcut(press("Escape"))).toBeNull();
+  });
+});
+
+describe("trapTab: Tab stays inside a modal dialog", () => {
+  const items = ["close", "a", "b"];
+  it("Tab on the last goes round to the first; Shift+Tab on the first goes to the last", () => {
+    expect(trapTab(items, "b", false)).toBe("close");
+    expect(trapTab(items, "close", true)).toBe("b");
+  });
+  it("in between, the browser's own Tab does it", () => {
+    expect(trapTab(items, "a", false)).toBeNull();
+    expect(trapTab(items, "a", true)).toBeNull();
+  });
+  it("focus on the dialog itself, or outside it, comes back in", () => {
+    expect(trapTab(items, null, false)).toBe("close");
+    expect(trapTab(items, null, true)).toBe("b");
+    expect(trapTab([], null, false)).toBeNull();
   });
 });
