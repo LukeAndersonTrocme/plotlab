@@ -9,6 +9,8 @@ export interface RunState {
   working: { width: number; height: number; mmPerPx: number } | null;
   steps: StepInfo[];
   stale: number[];
+  /** The stale steps by id: the strip's statuses follow ids, so a reorder can't borrow another step's. */
+  staleIds: string[];
   rasterLayers: RasterView[];
   inspected: InspectView | null;
   /** Compare stages: one view per strip, from the same run as the canvas; null when not comparing. */
@@ -32,6 +34,7 @@ export const EMPTY_RUN: RunState = {
   working: null,
   steps: [],
   stale: [],
+  staleIds: [],
   rasterLayers: [],
   inspected: null,
   compared: null,

@@ -9,13 +9,15 @@ const recipe = (steps: Array<string | { step: string; enabled?: boolean }>): Rec
     { schemaVersion: 3, paper: { widthMm: 210, heightMm: 297 }, inks: [{ id: "k", color: "#000" }], steps: steps.map((s) => (typeof s === "string" ? { step: s } : s)) },
     reg,
   ).recipe;
-const ran = (...indices: number[]) => ({ steps: indices.map((index) => ({ index })), stale: [] as number[] });
+/** A run in which the steps at `indices` of `r` ran (statuses follow step ids, not places). */
+const ranIn = (r: Recipe, ...indices: number[]) => ({ steps: indices.map((i) => ({ id: r.steps[i]!.id })), staleIds: [] as string[] });
+const ran = (...ids: string[]) => ({ steps: ids.map((id) => ({ id })), staleIds: [] as string[] });
 
 describe("strip boxes", () => {
   const r = recipe(["tone", "levels", "bands", "fill", "order"]);
 
   it("one box for the source, then one per step, keyed by step id", () => {
-    const boxes = stripBoxes(r, reg, ran(0, 1, 2, 3, 4));
+    const boxes = stripBoxes(r, reg, ranIn(r, 0, 1, 2, 3, 4));
     expect(boxes.map((b) => b.key)).toEqual(["source", "tone", "levels", "bands", "fill", "order"]);
     expect(boxes.map((b) => b.index)).toEqual([-1, 0, 1, 2, 3, 4]);
     expect(boxes[0]).toMatchObject({ title: "Source", input: "image", output: "image", bypass: null });
@@ -27,7 +29,7 @@ describe("strip boxes", () => {
   });
 
   it("steps that keep their stage can be switched off; the others say why not", () => {
-    const boxes = stripBoxes(r, reg, ran(0, 1, 2, 3, 4));
+    const boxes = stripBoxes(r, reg, ranIn(r, 0, 1, 2, 3, 4));
     const levels = boxes.find((b) => b.key === "levels")!;
     expect(levels.bypass).toEqual({ ok: true });
     const tone = boxes.find((b) => b.key === "tone")!;
@@ -36,18 +38,36 @@ describe("strip boxes", () => {
   });
 
   it("a switched-off step is marked off", () => {
-    const boxes = stripBoxes(recipe(["tone", { step: "levels", enabled: false }, "bands"]), reg, ran(0, 2));
+    const boxes = stripBoxes(recipe(["tone", { step: "levels", enabled: false }, "bands"]), reg, ran("tone", "bands"));
     expect(boxes.map((b) => b.status)).toEqual(["ran", "ran", "off", "ran"]);
   });
 
   it("an on-demand step that hasn't run, and what follows it, wait (they show traced order)", () => {
-    const boxes = stripBoxes(recipe(["threshold", "centerline", "order"]), reg, { steps: [{ index: 0 }, { index: 1 }], stale: [2] });
+    const boxes = stripBoxes(recipe(["threshold", "centerline", "order"]), reg, { steps: [{ id: "threshold" }, { id: "centerline" }], staleIds: ["order"] });
     expect(boxes.map((b) => b.status)).toEqual(["ran", "ran", "ran", "waiting"]);
   });
 
   it("steps not reached (an error earlier) are not shown as up to date", () => {
-    const boxes = stripBoxes(recipe(["threshold", "centerline", "order"]), reg, ran(0));
+    const boxes = stripBoxes(recipe(["threshold", "centerline", "order"]), reg, ran("threshold"));
     expect(boxes.map((b) => b.status)).toEqual(["ran", "ran", "none", "none"]);
+  });
+
+  it("statuses follow step ids: right after a reorder, before the next run, no box shows another step's status", () => {
+    // The last run: Ink density ran, then an error at Levels, so Bands and Fill weren't reached.
+    const before = recipe(["tone", "levels", "bands", "fill"]);
+    const last = ranIn(before, 0);
+    expect(stripBoxes(before, reg, last).map((b) => [b.key, b.status])).toEqual([["source", "ran"], ["tone", "ran"], ["levels", "none"], ["bands", "none"], ["fill", "none"]]);
+    // Bands dragged in front of Ink density: the run hasn't caught up, but each box keeps its own status.
+    const after = { ...before, steps: [before.steps[2]!, before.steps[0]!, before.steps[1]!, before.steps[3]!] };
+    expect(stripBoxes(after, reg, last).map((b) => [b.key, b.status])).toEqual([["source", "ran"], ["bands", "none"], ["tone", "ran"], ["levels", "none"], ["fill", "none"]]);
+  });
+
+  it("waiting follows the stale step by id, and the steps now after it", () => {
+    const r = recipe(["tone", "levels", "bands", "fill", "order"]);
+    // Levels was stale (needs a Run) in the last run; Ink density ran.
+    const last = { steps: [{ id: "tone" }], staleIds: ["levels"] };
+    const moved = { ...r, steps: [r.steps[1]!, r.steps[0]!, ...r.steps.slice(2)] };
+    expect(stripBoxes(moved, reg, last).map((b) => b.status)).toEqual(["ran", "waiting", "ran", "waiting", "waiting", "waiting"]);
   });
 });
 
@@ -90,6 +110,25 @@ describe("switching a stage-changing step back on", () => {
     // ...and then, being on, it can't be switched off again.
     expect(toggleBypass(on.recipe, 3, reg)).toEqual({ reason: expect.stringMatching(/Can't switch off Stroke order/) });
   });
+});
+
+describe("one bypass rule for the strip and the sidebar", () => {
+  // The strip's toggle shows box.bypass; the sidebar's checkbox and Switch off use toggleBypass.
+  const agree = (r: Recipe) =>
+    stripBoxes(r, reg, ran()).slice(1).forEach((b) => {
+      const res = toggleBypass(r, b.index, reg);
+      expect([b.key, b.bypass!.ok]).toEqual([b.key, "recipe" in res]);
+      if (!b.bypass!.ok && "reason" in res) expect(b.bypass!.reason).toBe(res.reason);
+    });
+
+  it("agree on every step of the default chain, Stroke order included", () => agree(recipe(["threshold", "centerline", "order"])));
+  it("agree on a switched-off Stroke order", () => agree(recipe(["tone", "bands", "fill", { step: "order", enabled: false }])));
+  it("agree where switching a step back on would break the chain: both refuse, with the same reason", () => {
+    const r = recipe([{ step: "pixelate", enabled: false }, "tone"]);
+    agree(r);
+    expect(stripBoxes(r, reg, ran())[1]!.bypass).toEqual({ ok: false, reason: expect.stringMatching(/Turning on Pixelate would break the chain/) });
+  });
+  it("agree on a split chain", () => agree(recipe(["reaction", "cmyk", "levels", "bands", "fill", "order"])));
 });
 
 describe("removeCheck: whether Remove works on a step", () => {
@@ -151,6 +190,6 @@ describe("toggleBypass keeps every lane working (review r1)", () => {
       },
       reg,
     ).recipe;
-    expect(toggleBypass(r, 2, reg)).toEqual({ reason: expect.stringMatching(/Turning on Fill would break the chain: Fill works on Y's lines, but in the Y lane it isn't lines yet/) });
+    expect(toggleBypass(r, 2, reg)).toEqual({ reason: expect.stringMatching(/Turning on Fill would break the chain: Fill works on Yellow's lines, but in the Yellow lane it isn't lines yet/) });
   });
 });

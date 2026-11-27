@@ -93,48 +93,63 @@ export function stripLanes(recipe: Recipe, registry: StepRegistry): StripLanes |
   };
 }
 
-export function stripBoxes(recipe: Recipe, registry: StepRegistry, run: { steps: ReadonlyArray<{ index: number }>; stale: readonly number[] }): StripBox[] {
-  const ran = new Set(run.steps.map((s) => s.index));
-  const firstStale = run.stale.length ? Math.min(...run.stale) : Infinity;
+/**
+ * The last run, as the strip reads it: which steps ran and which on-demand steps are stale,
+ * by step id. Ids, not places, so right after a reorder (before the next run) each box keeps
+ * its own status rather than the one of the step that used to be at its place.
+ */
+export interface StripRun {
+  steps: ReadonlyArray<{ id: string }>;
+  staleIds: readonly string[];
+}
+
+export function stripBoxes(recipe: Recipe, registry: StepRegistry, run: StripRun): StripBox[] {
+  const ran = new Set(run.steps.map((s) => s.id));
+  const staleIds = new Set(run.staleIds);
   const lanes = lanesOf(recipe, registry);
   const merge = lanes.stack[0] ?? recipe.steps.length;
   const laneAt = (i: number): StripBox["lane"] => (lanes.split === null ? null : i === lanes.split ? "split" : i > lanes.split && i < merge ? "lane" : null);
   const boxes: StripBox[] = [
     { key: "source", index: -1, title: "Source", icon: SOURCE_ICON, input: recipe.input, output: recipe.input, enabled: true, status: "ran", bypass: null, lane: null },
   ];
+  /** A stale step has come at or before this place (in the chain as it is now). */
+  let waiting = false;
   recipe.steps.forEach((rs, index) => {
     const def = registry.get(rs.step);
     const title = def?.title ?? rs.step;
     const input = (def?.input ?? "image") as StageKind;
     const output = (def?.output ?? input) as StageKind;
     const enabled = rs.enabled !== false;
-    const status: BoxStatus = !enabled ? "off" : ran.has(index) ? "ran" : index >= firstStale ? "waiting" : "none";
-    const bypass =
-      input === output || !enabled
-        ? { ok: true as const }
-        : {
-            ok: false as const,
-            reason: `Can't switch off ${title} here: it turns ${STAGE_WORDS[input]} into ${STAGE_WORDS[output]}. Only steps that keep the same kind of data can be switched off.`,
-          };
-    boxes.push({ key: rs.id, index, title, icon: stepIcon(rs.step), input, output, enabled, status, bypass, lane: laneAt(index) });
+    waiting ||= staleIds.has(rs.id);
+    const status: BoxStatus = !enabled ? "off" : ran.has(rs.id) ? "ran" : waiting ? "waiting" : "none";
+    boxes.push({ key: rs.id, index, title, icon: stepIcon(rs.step), input, output, enabled, status, bypass: bypassRule(recipe, index, registry), lane: laneAt(index) });
   });
   return boxes;
 }
 
 /**
- * Switch a step off (bypass) or back on: the strip's toggle and the sidebar's Switch off both
- * use this. Steps that change stage can't be switched off; nor can a step go on where it doesn't fit.
+ * Switch a step off (bypass) or back on: the one rule behind the strip's toggle and the
+ * sidebar's checkbox and Switch off (`bypassRule`). A stage-changing step can't be switched off
+ * (Stroke order included: it turns lines into a plot), but one that is off can be tried back on;
+ * either way the chain, and every ink's lane, must still fit.
  */
 export function toggleBypass(recipe: Recipe, index: number, registry: StepRegistry): ChainResult {
   const rs = recipe.steps[index];
   const def = rs && registry.get(rs.step);
   if (!rs || !def) return { reason: `There is no step ${index + 1}.` };
-  const box = stripBoxes(recipe, registry, { steps: [], stale: [] })[index + 1]!;
-  if (box.bypass && !box.bypass.ok) return { reason: box.bypass.reason };
   const on = rs.enabled === false;
+  const input = def.input as StageKind, output = def.output as StageKind;
+  if (input !== output && !on) {
+    return { reason: `Can't switch off ${def.title} here: it turns ${STAGE_WORDS[input]} into ${STAGE_WORDS[output]}. Only steps that keep the same kind of data can be switched off.` };
+  }
   const steps = recipe.steps.map((s, i) => (i === index ? { ...s, enabled: on, offForEntry: undefined } : s));
-  // The same rule as moving or removing: the chain, and every ink's lane, still fit.
   return validated(recipe, steps, registry, `${on ? "Turning on" : "Switching off"} ${def.title} would break the chain: `);
+}
+
+/** Whether the bypass toggle works on the step at `index`, and why not (`toggleBypass`'s rule). */
+export function bypassRule(recipe: Recipe, index: number, registry: StepRegistry): { ok: true } | { ok: false; reason: string } {
+  const res = toggleBypass(recipe, index, registry);
+  return "reason" in res ? { ok: false, reason: res.reason } : { ok: true };
 }
 
 /** Whether Remove works on the step at `index`, and why not (it would break the chain). */

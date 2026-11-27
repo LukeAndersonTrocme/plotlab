@@ -1,4 +1,4 @@
-import { addInLane, lanesOf, laneIssues, type PassOrder, type Plot, type Recipe, type StageKind, type StepRegistry } from "@plotlab/engine";
+import { addInLane, inkName, lanesOf, laneIssues, moveInLane, type PassOrder, type Plot, type Recipe, type StageKind, type StepRegistry } from "@plotlab/engine";
 import type { PlotEstimate } from "@plotlab/machines";
 import type { AddMenu, AddOption } from "./gaps.ts";
 import { movePass, orderedPasses, passBoxes } from "./plotmode.ts";
@@ -77,10 +77,9 @@ export function stackRows(layers: string[], names: string[], plot: Plot | null, 
 type Run = Parameters<typeof stripBoxes>[2];
 
 /** The boxes of lane `layer`: each lane step's strip box, keyed by step and ink. */
-export function laneBoxes(recipe: Recipe, registry: StepRegistry, run: Run, layer: string): StripBox[] {
+export function laneBoxes(recipe: Recipe, registry: StepRegistry, run: Run, layer: string, boxes = stripBoxes(recipe, registry, run)): StripBox[] {
   const lane = lanesOf(recipe, registry).lanes.find((l) => l.layer === layer);
   if (!lane) return [];
-  const boxes = stripBoxes(recipe, registry, run);
   return lane.steps.map((s) => ({ ...boxes[s.index + 1]!, key: laneKey(s.id, layer), lane: "lane" as const }));
 }
 
@@ -96,7 +95,40 @@ export function laneRows(recipe: Recipe, registry: StepRegistry, run: Run, plot:
   if (v.split === null) return [];
   const inks = registry.get(recipe.steps[v.split]!.step)?.layerInks ?? {};
   const order = laneOrder(v.layers, plot, recipe.passOrder).filter((l) => show === "all" || l === show);
-  return order.map((layer) => ({ layer, name: inks[layer]?.name ?? layer, boxes: laneBoxes(recipe, registry, run, layer) }));
+  const boxes = stripBoxes(recipe, registry, run);
+  return order.map((layer) => ({ layer, name: inks[layer]?.name ?? layer, boxes: laneBoxes(recipe, registry, run, layer, boxes) }));
+}
+
+/**
+ * The chain positions the strip's own row leaves out: with Independent inks the lane steps are
+ * in the lane rows instead (the split and the stack stay in the row). Empty otherwise.
+ */
+export function stripHidden(recipe: Recipe, registry: StepRegistry): Set<number> {
+  const v = lanesOf(recipe, registry);
+  if (v.split === null || v.linked) return new Set();
+  const merge = v.stack[0] ?? recipe.steps.length;
+  const out = new Set<number>();
+  for (let i = v.split + 1; i < merge; i++) out.add(i);
+  return out;
+}
+
+/**
+ * A keyboard move inside an Independent lane: step `stepId` one place along lane `layer`,
+ * through the lane guard the drag uses (`moveInLane`), so a refusal has the drag's reason.
+ * `to` is its new place in the lane.
+ */
+export function laneNudge(recipe: Recipe, registry: StepRegistry, stepId: string, layer: string, dir: -1 | 1): { recipe: Recipe; to: number } | { reason: string } {
+  const v = lanesOf(recipe, registry);
+  const lane = v.lanes.find((l) => l.layer === layer);
+  const pos = lane?.steps.findIndex((s) => s.id === stepId) ?? -1;
+  if (!lane || pos < 0) return { reason: `That step isn't in the ${inkName(recipe, registry, layer)} lane.` };
+  const to = pos + dir;
+  if (to < 0 || to >= lane.steps.length) {
+    const s = lane.steps[pos]!;
+    return { reason: `${registry.get(s.step)?.title ?? s.step} is already ${dir < 0 ? "first" : "last"} in the ${inkName(recipe, registry, layer)} lane.` };
+  }
+  const res = moveInLane(recipe, registry, stepId, layer, to);
+  return "reason" in res ? res : { recipe: res.recipe, to };
 }
 
 /** What lane `layer` has at its gap `at`: layers until a line step there has made its lines. */

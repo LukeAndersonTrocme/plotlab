@@ -1,7 +1,8 @@
 import { describe, expect, it } from "vitest";
 import { checkChain, lanesOf, loadRecipe, type Recipe } from "@plotlab/engine";
 import { createRegistry } from "@plotlab/steps";
-import { addAt, addMenu, dragHint, dropGaps, moveToGap, stageAt } from "../src/gaps.ts";
+import { addAt, addMenu, dragHint, dropGaps, liveMenu, movedText, moveToGap, nudge, shownPlace, stageAt } from "../src/gaps.ts";
+import { createHistory, commit, redo, undo } from "../src/history.ts";
 
 const reg = createRegistry();
 const recipe = (steps: Array<string | { step: string; enabled?: boolean }>, input?: "image" | "layers" | "geometry"): Recipe =>
@@ -211,5 +212,72 @@ describe("Separate CMYK in the \"+\" right after the source: a split", () => {
     const res = addAt(r, reg, 0, "cmyk");
     if ("reason" in res) throw new Error(res.reason);
     expect(addMenu(res.recipe, reg, 0).options.find((x) => x.id === "cmyk")).toBeUndefined();
+  });
+});
+
+describe("nudge: a keyboard move one place left or right, by the drag's rule", () => {
+  const r = recipe(["tone", "levels", "pixelate", "bands", "order"]);
+
+  it("moves right into the gap past its neighbour, and says where it went", () => {
+    const res = nudge(r, reg, 1, 1);
+    if ("reason" in res) throw new Error(res.reason);
+    expect([res.gap, res.to]).toEqual([3, 2]);
+    expect(ids(res.recipe)).toEqual(["tone", "pixelate", "levels", "bands", "order"]);
+  });
+
+  it("moves left", () => {
+    const res = nudge(r, reg, 2, -1);
+    if ("reason" in res) throw new Error(res.reason);
+    expect([res.gap, res.to]).toEqual([1, 1]);
+    expect(ids(res.recipe)).toEqual(["tone", "pixelate", "levels", "bands", "order"]);
+  });
+
+  it("refuses with the reason the drag shows on that gap", () => {
+    const why = dropGaps(r, reg, 0).find((g) => g.gap === 2)!.reason!;
+    expect(why).toBeTruthy();
+    expect(nudge(r, reg, 0, 1)).toEqual({ reason: why });
+  });
+
+  it("says so at either end", () => {
+    expect(nudge(r, reg, 0, -1)).toEqual({ reason: "Ink density is already the first step." });
+    expect(nudge(r, reg, 4, 1)).toEqual({ reason: "Stroke order is already the last step." });
+  });
+
+  it("won't cross steps the strip's row doesn't show (Independent lanes), and counts only the shown places", () => {
+    // Say positions 2 and 3 are lane steps, shown in the lane rows instead.
+    const hidden = new Set([2, 3]);
+    expect(nudge(r, reg, 1, 1, hidden)).toEqual({ reason: "Levels can't move across the ink lanes: each ink's steps are in its own row, and move along it." });
+    expect(nudge(r, reg, 4, -1, hidden)).toEqual({ reason: expect.stringMatching(/^Stroke order can't move across the ink lanes/) });
+    expect([0, 1, 4].map((i) => shownPlace(i, hidden))).toEqual([0, 1, 2]);
+    expect(shownPlace(3)).toBe(3);
+  });
+
+  it("the announcement names the step and its new place", () => {
+    expect(movedText("Hatch", 2)).toBe("Moved Hatch to position 3.");
+    expect(movedText("Pixelate", 0, "Magenta")).toBe("Moved Pixelate to position 1 in the Magenta lane.");
+  });
+});
+
+describe("an open + menu and Undo", () => {
+  it("stays open while the recipe it was opened on is shown, and closes once it isn't (Undo, Redo or any edit)", () => {
+    const menu = { gap: 3, recipe: base };
+    expect(liveMenu(menu, base)).toBe(menu);
+    // Undo took Stroke order away: gap 3 would point past the end of the steps.
+    const undone = recipe(["threshold", "centerline"]);
+    expect(liveMenu(menu, undone)).toBeNull();
+    expect(liveMenu(null, base)).toBeNull();
+  });
+
+  it("Undo then Redo doesn't bring it back: the strip keeps what liveMenu leaves (Redo restores the very same recipe)", () => {
+    const added = recipe(["threshold", "pixelate", "centerline", "order"]);
+    let h = commit(createHistory(base), added);
+    let menu = liveMenu({ gap: 4, recipe: h.present }, h.present);
+    expect(menu).not.toBeNull();
+    h = undo(h);
+    menu = liveMenu(menu, h.present);
+    expect(menu).toBeNull();
+    h = redo(h);
+    expect(h.present).toBe(added);
+    expect(liveMenu(menu, h.present)).toBeNull();
   });
 });

@@ -22,8 +22,9 @@ import { LayerScope } from "./LayerScope.tsx";
 import { ParamControl } from "./ParamControl.tsx";
 import { splitSettings } from "./settings.ts";
 import type { InspectTarget, StepInfo } from "./protocol.ts";
-import { removeCheck, STAGE_NAMES, toggleBypass } from "./strip.ts";
-import { allInks, unlinkedNotice } from "./lanes.ts";
+import { bypassRule, removeCheck, STAGE_NAMES, toggleBypass } from "./strip.ts";
+import { allInks, laneNudge, stripHidden, unlinkedNotice } from "./lanes.ts";
+import { movedText, nudge, shownPlace } from "./gaps.ts";
 
 /** Which cards the sidebar shows, by chain position (from `sidebarSteps` in view.ts). */
 export interface SidebarCards {
@@ -52,7 +53,8 @@ export function StepList(props: {
   onBranch: ((index: number) => void) | null;
   registry: StepRegistry;
   steps: StepInfo[];
-  stale: number[];
+  /** On-demand steps that need a Run, by step id (`RunState.staleIds`): follows the step through a reorder. */
+  staleIds: string[];
   error: { message: string; index?: number } | null;
   inspect: InspectTarget;
   onInspect: (t: InspectTarget) => void;
@@ -70,6 +72,8 @@ export function StepList(props: {
   const { recipe, registry } = props;
   const [dragFrom, setDragFrom] = useState<number | null>(null);
   const [editing, setEditing] = useState<Record<number, string | null>>({});
+  /** What the last Move left / Move right did, for screen readers. */
+  const [said, setSaid] = useState("");
 
   /** Apply an edit; when it turns linked inks independent, say so (as Independent does). */
   const change = (next: Recipe, proxy: boolean, step?: AnyStep) => {
@@ -107,10 +111,26 @@ export function StepList(props: {
       else change(res.recipe, proxy, registry.get(rs.step));
     } else patchStep(index, { layerParams: { ...rs.layerParams, [layer]: { ...rs.layerParams?.[layer], [name]: value } } }, proxy);
   };
-  /** Whether Switch off / on works for the step at `index` (the same rule as the strip's toggle). */
-  const bypassCheck = (index: number): { ok: true } | { ok: false; reason: string } => {
-    const res = toggleBypass(recipe, index, registry);
-    return "reason" in res ? { ok: false, reason: res.reason } : { ok: true };
+  /**
+   * Move left / Move right on the focused card (for touch, and anyone not dragging): the strip's
+   * keyboard move, by the same rule (in a lane, along that lane through the lane guard).
+   */
+  const moveBy = (index: number, dir: -1 | 1) => {
+    const rs = recipe.steps[index]!;
+    const title = registry.get(rs.step)?.title ?? rs.step;
+    const lane = laneAt(index);
+    if (lane) {
+      const res = laneNudge(recipe, registry, rs.id, lane.layer, dir);
+      if ("reason" in res) return props.onNotice(res.reason);
+      change(res.recipe, false);
+      return setSaid(movedText(title, res.to, lane.name));
+    }
+    // As in the strip's row: not across the Independent lanes, and counting the boxes it shows.
+    const hidden = stripHidden(recipe, registry);
+    const res = nudge(recipe, registry, index, dir, hidden);
+    if ("reason" in res) return props.onNotice(res.reason);
+    change(res.recipe, false);
+    setSaid(movedText(title, shownPlace(res.to, hidden)));
   };
   /** Layers arriving at step `index`: the output of the last step before it that ran. */
   const inputLayers = (index: number): LayerInfo[] => [...props.steps].reverse().find((s) => s.index < index)?.layers ?? [];
@@ -148,11 +168,12 @@ export function StepList(props: {
         : props.onChange(resetParam(recipe, index, name, registry, layer ?? undefined), false);
     const stepChanged =
       Object.keys(rs.layerParams ?? {}).length > 0 || Object.entries(def.params).some(([n, d]) => isChanged(d as ParamDecl, rs.params[n]));
-    const stale = props.stale.includes(index);
-    const ran = props.steps.some((s) => s.index === index);
+    // By step id, like the strip's boxes: right after a reorder the last run's places are someone else's.
+    const stale = props.staleIds.includes(rs.id);
+    const ran = props.steps.some((s) => s.id === rs.id);
     const pinned = props.pins.includes(rs.id);
     const focused = props.cards?.looking === index;
-    const bypass = bypassCheck(index);
+    const bypass = bypassRule(recipe, index, registry); // the strip toggle's rule too
     const remove = removeCheck(recipe, index, registry);
     items.push(
       <div
@@ -195,17 +216,21 @@ export function StepList(props: {
             </span>
           )}
           <span className="card-tools">
-            <button className="icon" aria-label={`Move ${def.title} up`} disabled={index === 0} onClick={() => commit(moveStep(recipe, index, index - 1, registry))}>
-              ↑
-            </button>
-            <button
-              className="icon"
-              aria-label={`Move ${def.title} down`}
-              disabled={index === recipe.steps.length - 1}
-              onClick={() => commit(moveStep(recipe, index, index + 1, registry))}
-            >
-              ↓
-            </button>
+            {!focused && (
+              <>
+                <button className="icon" aria-label={`Move ${def.title} up`} disabled={index === 0} onClick={() => commit(moveStep(recipe, index, index - 1, registry))}>
+                  ↑
+                </button>
+                <button
+                  className="icon"
+                  aria-label={`Move ${def.title} down`}
+                  disabled={index === recipe.steps.length - 1}
+                  onClick={() => commit(moveStep(recipe, index, index + 1, registry))}
+                >
+                  ↓
+                </button>
+              </>
+            )}
             {!focused && (
               <input
                 type="checkbox"
@@ -279,6 +304,12 @@ export function StepList(props: {
                   Take out of {lane.name}
                 </button>
               )}
+              <button className="move-left" title={`Move ${def.title} one place left in the ${laneAt(index) ? `${laneAt(index)!.name} lane` : "recipe strip"} (Alt+← on its box)`} onClick={() => moveBy(index, -1)}>
+                Move left
+              </button>
+              <button className="move-right" title={`Move ${def.title} one place right in the ${laneAt(index) ? `${laneAt(index)!.name} lane` : "recipe strip"} (Alt+→ on its box)`} onClick={() => moveBy(index, 1)}>
+                Move right
+              </button>
             </div>
             {lane && !layerStep && <p className="hint lane-note">Settings for {lane.name} only.</p>}
             {!remove.ok && <p className="reason">{remove.reason}</p>}
@@ -345,6 +376,9 @@ export function StepList(props: {
     const count = c.pinned.length + (c.lookingPinned ? 1 : 0);
     return (
       <div className="steps">
+        <span className="sr-only" role="status">
+          {said}
+        </span>
         {c.looking !== null && card(c.looking)}
         <div className="side-label pinned-label">
           Pinned{count > 0 && <span className="num">{count}</span>}

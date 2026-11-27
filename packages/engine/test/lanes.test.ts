@@ -108,8 +108,8 @@ describe("setLaneParam: linked edits", () => {
   });
   it("refuses a step that isn't in that lane: a trunk step, or one narrowed to other inks; and an unknown lane", () => {
     const r2 = recipe(["reaction", "cmyk", { step: "pixelate", layers: ["K"] }, "bands"]);
-    expect(setLaneParam(r2, reg, "reaction", "scale", 3, "C")).toEqual({ reason: expect.stringMatching(/isn't in the C lane/) });
-    expect(setLaneParam(r2, reg, "pixelate", "cellMm", 3, "C")).toEqual({ reason: expect.stringMatching(/Pixelate isn't in the C lane/) });
+    expect(setLaneParam(r2, reg, "reaction", "scale", 3, "C")).toEqual({ reason: expect.stringMatching(/isn't in the Cyan lane/) });
+    expect(setLaneParam(r2, reg, "pixelate", "cellMm", 3, "C")).toEqual({ reason: expect.stringMatching(/Pixelate isn't in the Cyan lane/) });
     expect("recipe" in setLaneParam(r2, reg, "pixelate", "cellMm", 3, "K")).toBe(true);
     expect(setLaneParam(r2, reg, "bands", "simplify", 1, "Z")).toEqual({ reason: expect.stringMatching(/no Z lane/) });
     // The shared settings (lane null) of a trunk step are fine.

@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
-import { addInLane, lanesOf, loadRecipe, unlinkLanes, type Ink, type Plot, type Recipe } from "@plotlab/engine";
+import { addInLane, lanesOf, loadRecipe, moveInLane, unlinkLanes, type Ink, type Plot, type Recipe } from "@plotlab/engine";
 import { createRegistry } from "@plotlab/steps";
-import { allInks, unlinkedNotice, laneAddMenu, laneBoxes, laneKey, laneOrder, laneRows, moveLane, parseLaneKey, stackRows } from "../src/lanes.ts";
+import { allInks, unlinkedNotice, laneAddMenu, laneBoxes, laneKey, laneNudge, laneOrder, stripHidden, laneRows, moveLane, parseLaneKey, stackRows } from "../src/lanes.ts";
 
 const reg = createRegistry();
 const recipe = (steps: string[]): Recipe =>
@@ -72,22 +72,44 @@ describe("independent lanes in the strip", () => {
     r = ok(addInLane(r, reg, "M", "pixelate", 0)).recipe;
     return r;
   };
+  it("a keyboard move in a lane goes one place along it, through the lane guard", () => {
+    const r = ok(addInLane(mixed(), reg, "M", "levels", 0)).recipe;
+    const lane = (x: Recipe) => lanesOf(x, reg).lanes.find((l) => l.layer === "M")!.steps.map((s) => s.step);
+    expect(lane(r)).toEqual(["levels", "pixelate", "centerline"]);
+    const res = laneNudge(r, reg, "pixelate", "M", -1);
+    if ("reason" in res) throw new Error(res.reason);
+    expect(res.to).toBe(0);
+    expect(lane(res.recipe)).toEqual(["pixelate", "levels", "centerline"]);
+    // Past Centerline it would get lines: refused with the drag's reason (moveInLane).
+    const no = moveInLane(r, reg, "pixelate", "M", 2);
+    expect("reason" in no).toBe(true);
+    expect(laneNudge(r, reg, "pixelate", "M", 1)).toEqual(no);
+    expect(laneNudge(r, reg, "levels", "M", -1)).toEqual({ reason: "Levels is already first in the Magenta lane." });
+    // One form for the lane's name in every refusal: the ink's name, like the lane guard's own.
+    expect("reason" in no && no.reason).toMatch(/in the Magenta lane/);
+    expect(laneNudge(r, reg, "centerline", "M", 1)).toEqual({ reason: "Centerline is already last in the Magenta lane." });
+  });
+  it("the strip's own row leaves out the lane steps only while the inks are independent", () => {
+    expect([...stripHidden(mixed(), reg)]).toEqual([1, 2]);
+    expect([...stripHidden(recipe(["cmyk", "centerline", "order"]), reg)]).toEqual([]);
+    expect([...stripHidden(recipe(["threshold", "centerline", "order"]), reg)]).toEqual([]);
+  });
   it("each lane's boxes are keyed by step and ink, with their chain position", () => {
     const r = mixed();
-    const boxes = laneBoxes(r, reg, { steps: [], stale: [] }, "M");
+    const boxes = laneBoxes(r, reg, { steps: [], staleIds: [] }, "M");
     expect(boxes.map((b) => [b.key, b.index, b.title])).toEqual([
       ["pixelate@M", 1, "Pixelate"],
       ["centerline@M", 2, "Centerline"],
     ]);
-    expect(laneBoxes(r, reg, { steps: [], stale: [] }, "C").map((b) => b.key)).toEqual(["centerline@C"]);
+    expect(laneBoxes(r, reg, { steps: [], staleIds: [] }, "C").map((b) => b.key)).toEqual(["centerline@C"]);
   });
   it("rows come in pass order: all four, or the one ink chosen", () => {
     const r = mixed();
-    const all = laneRows(r, reg, { steps: [], stale: [] }, plotOf(["Y", "M", "C", "K"]), "all");
+    const all = laneRows(r, reg, { steps: [], staleIds: [] }, plotOf(["Y", "M", "C", "K"]), "all");
     expect(all.map((l) => l.layer)).toEqual(["Y", "M", "C", "K"]);
     expect(all.map((l) => l.name)).toEqual(["Yellow", "Magenta", "Cyan", "Black"]);
-    expect(laneRows(r, reg, { steps: [], stale: [] }, null, "M").map((l) => l.layer)).toEqual(["M"]);
-    expect(laneRows(recipe(["threshold", "centerline", "order"]), reg, { steps: [], stale: [] }, null, "all")).toEqual([]);
+    expect(laneRows(r, reg, { steps: [], staleIds: [] }, null, "M").map((l) => l.layer)).toEqual(["M"]);
+    expect(laneRows(recipe(["threshold", "centerline", "order"]), reg, { steps: [], staleIds: [] }, null, "all")).toEqual([]);
   });
   it('a lane\'s "+" offers exactly what addInLane takes there, or says why nothing fits', () => {
     const r = mixed();

@@ -75,6 +75,8 @@ export type FromWorker =
       steps: StepInfo[];
       /** On-demand steps that need a Run (their output would be stale). */
       stale: number[];
+      /** The same, by step id (`stale` is by place in this run's recipe). */
+      staleIds: string[];
       /** The image or layers wherever the chain stopped short of lines, to composite under the plot. */
       rasterLayers: RasterView[];
       inspected: InspectView | null;

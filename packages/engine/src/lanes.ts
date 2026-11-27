@@ -48,6 +48,15 @@ export interface LaneView {
   linked: boolean;
 }
 
+/**
+ * The ink name of lane `layer` (glossary: Cyan, Magenta, Yellow, Black): the split step's
+ * default ink name, or the layer id when there is none. Lane messages use it.
+ */
+export function inkName(recipe: Recipe, registry: StepRegistry, layer: string): string {
+  const split = recipe.steps.find((rs) => rs.enabled !== false && isSplitStep(registry.get(rs.step)));
+  return (split && (registry.get(split.step)?.layerInks as Record<string, { name?: string }> | undefined)?.[layer]?.name) || layer;
+}
+
 /** A step that splits the picture into named layers: image → layers, declaring its layers (by their default inks). */
 export function isSplitStep(def: AnyStep | undefined): boolean {
   return !!def && def.input === "image" && def.output === "layers" && Object.keys(def.layerInks ?? {}).length > 1;
@@ -101,8 +110,8 @@ export function setLaneParam(recipe: Recipe, registry: StepRegistry, stepId: str
   let own = false;
   if (lane !== null) {
     const l = lanesOf(recipe, registry).lanes.find((x) => x.layer === lane);
-    if (!l) return { reason: `There is no ${lane} lane: the picture isn't split into that ink.` };
-    if (!l.steps.some((x) => x.id === stepId)) return { reason: `${def.title} isn't in the ${lane} lane, so it can't be changed from there.` };
+    if (!l) return { reason: `There is no ${inkName(recipe, registry, lane)} lane: the picture isn't split into that ink.` };
+    if (!l.steps.some((x) => x.id === stepId)) return { reason: `${def.title} isn't in the ${inkName(recipe, registry, lane)} lane, so it can't be changed from there.` };
     // The lane's own state: a lane with its own settings keeps them; a linked lane edits the shared ones.
     own = actsPerLayer(def) && !l.linked;
   }
@@ -142,17 +151,18 @@ export interface LaneIssue {
 export function laneIssues(recipe: Recipe, registry: StepRegistry): LaneIssue[] {
   const issues: LaneIssue[] = [];
   for (const lane of lanesOf(recipe, registry).lanes) {
+    const ink = inkName(recipe, registry, lane.layer);
     let lines: string | null = null;
     for (const s of lane.steps) {
       const def = registry.get(s.step);
       if (!s.enabled || !def) continue;
       if (def.runLayer && lines !== null) {
-        issues.push({ layer: lane.layer, index: s.index, reason: `${def.title} needs ${lane.layer} as layers, but in the ${lane.layer} lane it's already lines (after ${lines}). Take ${lines} out of the ${lane.layer} lane first, or put ${def.title} before it.` });
+        issues.push({ layer: lane.layer, index: s.index, reason: `${def.title} needs ${ink} as layers, but in the ${ink} lane it's already lines (after ${lines}). Take ${lines} out of the ${ink} lane first, or put ${def.title} before it.` });
         break;
       }
       // A lines step that acts per layer (Fill) would do nothing for an ink that isn't lines yet.
       if (!def.runLayer && def.linesPerLayer && lines === null) {
-        issues.push({ layer: lane.layer, index: s.index, reason: `${def.title} works on ${lane.layer}'s lines, but in the ${lane.layer} lane it isn't lines yet. Take ${def.title} out of the ${lane.layer} lane first, or give the lane a line step (like Centerline) before it.` });
+        issues.push({ layer: lane.layer, index: s.index, reason: `${def.title} works on ${ink}'s lines, but in the ${ink} lane it isn't lines yet. Take ${def.title} out of the ${ink} lane first, or give the lane a line step (like Centerline) before it.` });
         break;
       }
       if (def.runLayer && def.output === "geometry") lines = def.title;

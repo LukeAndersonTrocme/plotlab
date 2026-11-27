@@ -147,7 +147,7 @@ try {
     await page.click(".view-bar button:has-text('Show final')").catch(() => {});
     // "+" after Threshold offers only steps that work on layers; picking one adds a box and selects it.
     await page.click('.strip .gap[data-gap="1"] .plus');
-    await page.waitForSelector(".add-menu[role=menu]");
+    await page.waitForSelector(".add-menu [role=menu]");
     const offered = await page.$$eval(".add-menu [role=menuitem]", (els) => els.map((e) => e.dataset.step).sort());
     check(offered.join(",") === "levels,pixelate", `"+" after Threshold offers only the steps that fit there (${offered.join(", ")})`);
     check(!(await page.$("aside.side select.add-step")), "the sidebar has no separate add-step list");
@@ -204,6 +204,13 @@ try {
     const hint = await page.textContent(".strip-head .strip-hint");
     check(lit.join(",") === "3" && dim > 0, `dragging Levels lights up only the gap it fits in (${lit.join(", ")}; ${dim} dimmed)`);
     check(/Levels can go in 1 other place/.test(hint), `the hint says how many places it can go ("${hint}")`);
+    // Over a dimmed gap the hint says why it can't go there, as text (not only a tooltip).
+    const dimGap = await page.$eval(".strip .gap.drop-no", (e) => ({ gap: e.dataset.gap, title: e.getAttribute("title") }));
+    const d0 = await (await page.$(`.strip .gap[data-gap="${dimGap.gap}"]`)).boundingBox();
+    await page.mouse.move(d0.x + d0.width / 2, d0.y + d0.height / 2, { steps: 6 });
+    await page.waitForFunction((t) => document.querySelector(".strip-head .strip-hint")?.textContent === t, dimGap.title, { timeout: 5_000 }).catch(() => {});
+    const why = await page.textContent(".strip-head .strip-hint");
+    check(!!dimGap.title && why === dimGap.title, `over a dimmed gap the hint shows why ("${why}")`);
     const t0 = await (await page.$('.strip .box[data-key="pixelate"] + .gap')).boundingBox();
     await page.mouse.move(t0.x + t0.width / 2, t0.y + t0.height / 2, { steps: 6 });
     await page.mouse.up();
@@ -213,6 +220,93 @@ try {
       { timeout: 10_000 },
     );
     check(await page.$eval('.strip .box[data-key="levels"]', (e) => e.classList.contains("sel")), "dropping Levels moves it after Pixelate and selects it");
+
+    // Keyboard move: Alt+← on Levels' box moves it back before Pixelate, says so, keeps the focus.
+    const keys = () => page.$$eval(".strip .box", (els) => els.map((e) => e.dataset.key).join(","));
+    await page.focus('.strip .box[data-key="levels"] button.pick');
+    await page.keyboard.press("Alt+ArrowLeft");
+    await page.waitForFunction(() => [...document.querySelectorAll(".strip .box")].map((e) => e.dataset.key).join(",") === "source,threshold,levels,pixelate,centerline,order", null, { timeout: 10_000 }).catch(() => {});
+    const said = await page.textContent(".strip-wrap .sr-only[role=status]");
+    const focusKey = await page.evaluate(() => document.activeElement?.closest(".box")?.dataset.key);
+    check((await keys()) === "source,threshold,levels,pixelate,centerline,order" && said === "Moved Levels to position 2." && focusKey === "levels", `Alt+← moves Levels one place and announces it ("${said}", focus on ${focusKey})`);
+    // A move the chain refuses: the drag's reason, shown; nothing moves.
+    await page.focus('.strip .box[data-key="threshold"] button.pick');
+    await page.keyboard.press("Alt+ArrowRight");
+    await page.waitForFunction(() => [...document.querySelectorAll(".notice")].some((n) => /Threshold/.test(n.textContent)), null, { timeout: 5_000 }).catch(() => {});
+    const refused = (await page.$$eval(".notice", (els) => els.map((e) => e.textContent).find((t) => /Threshold/.test(t)))) ?? "";
+    check((await keys()) === "source,threshold,levels,pixelate,centerline,order" && /Threshold/.test(refused), `a move that breaks the chain is refused with a reason ("${refused}")`);
+    // The sidebar's Move right (touch): the same move, from the focused card.
+    await page.click('.strip .box[data-key="levels"] .pic');
+    await page.click('aside.side .card.focus .step-actions button:has-text("Move right")');
+    await page.waitForFunction(() => [...document.querySelectorAll(".strip .box")].map((e) => e.dataset.key).join(",") === "source,threshold,pixelate,levels,centerline,order", null, { timeout: 10_000 }).catch(() => {});
+    const saidSide = await page.textContent("aside.side .sr-only[role=status]");
+    check((await keys()) === "source,threshold,pixelate,levels,centerline,order" && saidSide === "Moved Levels to position 3.", `the sidebar's Move right moves the step too ("${saidSide}")`);
+
+    // The "+" menu: the focus goes in; switching "+" moves it into the new menu; Tab and Escape close it.
+    const inMenu = () => page.evaluate(() => ({ menu: !!document.activeElement?.closest(".add-menu [role=menu]"), label: document.querySelector(".add-menu [role=menu]")?.getAttribute("aria-label") }));
+    await page.click('.strip .gap[data-gap="1"] .plus');
+    const m1 = await inMenu();
+    await page.click('.strip .gap[data-gap="2"] .plus');
+    await page.waitForFunction((l) => document.querySelector(".add-menu [role=menu]")?.getAttribute("aria-label") !== l, m1.label, { timeout: 5_000 }).catch(() => {});
+    const m2 = await inMenu();
+    check(m1.menu && m2.menu && m1.label !== m2.label, `switching "+" moves the focus into the new menu ("${m1.label}" → "${m2.label}")`);
+    const structure = await page.evaluate(() => ({ head: !!document.querySelector(".add-menu [role=menu] .add-head"), only: [...document.querySelectorAll(".add-menu [role=menu] > *")].every((e) => e.getAttribute("role") === "menuitem") }));
+    check(!structure.head && structure.only, "the menu's heading is outside role=menu, which holds only the steps");
+    await page.keyboard.press("Tab");
+    await page.waitForSelector(".add-menu", { state: "detached", timeout: 5_000 }).catch(() => {});
+    const afterTab = await page.evaluate(() => ({ open: !!document.querySelector(".add-menu"), at: document.activeElement?.closest(".box")?.dataset.key ?? document.activeElement?.className }));
+    check(!afterTab.open, `Tab closes the "+" menu and the focus goes on (${afterTab.at})`);
+    await page.click('.strip .gap[data-gap="2"] .plus');
+    await page.keyboard.press("Escape");
+    await page.waitForSelector(".add-menu", { state: "detached", timeout: 5_000 }).catch(() => {});
+    const backOn = await page.evaluate(() => document.activeElement?.closest(".gap")?.dataset.gap);
+    check(!(await page.$(".add-menu")) && backOn === "2", `Escape closes the "+" menu, back on its "+" (gap ${backOn})`);
+    // Undo while the menu is open (its gap may be gone, or point past the end): the menu closes.
+    const beforeUndo = await keys();
+    const last = beforeUndo.split(",").length - 1;
+    await page.click(`.strip .gap[data-gap="${last}"] .plus`);
+    await page.waitForSelector(".add-menu", { timeout: 5_000 });
+    await page.keyboard.press("ControlOrMeta+z");
+    await page.waitForFunction((b) => [...document.querySelectorAll(".strip .box")].map((e) => e.dataset.key).join(",") !== b, beforeUndo, { timeout: 10_000 }).catch(() => {});
+    check((await keys()) !== beforeUndo && !(await page.$(".add-menu")), `Undo while the "+" menu is open closes it (${beforeUndo} → ${await keys()})`);
+    // Redo brings back the very same recipe: the closed menu stays closed.
+    await page.keyboard.press("ControlOrMeta+Shift+z");
+    await page.waitForFunction((b) => [...document.querySelectorAll(".strip .box")].map((e) => e.dataset.key).join(",") === b, beforeUndo, { timeout: 10_000 }).catch(() => {});
+    await page.waitForTimeout(300);
+    check((await keys()) === beforeUndo && !(await page.$(".add-menu")), `Redo after that doesn't bring the "+" menu back (${await keys()})`);
+    // Alt+arrow on a "+" (not a box): nothing moves, and the browser's Back doesn't happen.
+    await page.evaluate(() => {
+      window.__alt = null;
+      window.addEventListener("keydown", (e) => e.altKey && e.key.startsWith("Arrow") && (window.__alt = e.defaultPrevented));
+    });
+    await page.focus('.strip .gap[data-gap="1"] .plus');
+    await page.keyboard.press("Alt+ArrowLeft");
+    check((await page.evaluate(() => window.__alt)) === true && (await keys()) === beforeUndo, "Alt+← on a \"+\" is swallowed (no browser Back) and moves nothing");
+    // Nothing fits: the reason and Close aren't inside a role=menu.
+    const n2 = (await keys()).split(",").length - 1;
+    await page.click(`.strip .gap[data-gap="${n2}"] .plus`);
+    await page.waitForSelector(".add-menu .add-close", { timeout: 5_000 }).catch(() => {});
+    check(!!(await page.$(".add-menu .add-close")) && !(await page.$(".add-menu [role=menu] .add-close")), "Close is not inside role=menu");
+    await page.keyboard.press("Escape");
+    await page.close();
+  }
+
+  // The preset gallery is a modal: Tab stays inside, Escape (one handler) closes it, and the
+  // focus goes back to Presets.
+  {
+    const page = await open(1280);
+    await page.click("header.top .presets-btn");
+    await page.waitForSelector("[role=dialog][aria-modal=true] .gallery .look");
+    const looks = await page.$$eval(".gallery .look", (els) => els.length);
+    for (let i = 0; i < looks + 3; i++) await page.keyboard.press("Tab");
+    const inside1 = await page.evaluate(() => !!document.activeElement?.closest("[role=dialog]"));
+    for (let i = 0; i < 3; i++) await page.keyboard.press("Shift+Tab");
+    const inside2 = await page.evaluate(() => !!document.activeElement?.closest("[role=dialog]"));
+    check(inside1 && inside2, "Tab and Shift+Tab stay inside the preset gallery");
+    await page.keyboard.press("Escape");
+    await page.waitForSelector("[role=dialog]", { state: "detached", timeout: 5_000 }).catch(() => {});
+    const back = await page.evaluate(() => document.activeElement?.className);
+    check(!(await page.$("[role=dialog]")) && /presets-btn/.test(back ?? ""), `Escape closes the gallery and the focus goes back to Presets (${back})`);
     await page.close();
   }
 
@@ -810,6 +904,18 @@ try {
     check(offered.includes("pixelate") && !offered.includes("order"), `a lane's "+" offers steps for that ink only (${offered.join(",")})`);
     await page.click('.add-menu [role=menuitem][data-step="pixelate"]');
     await page.waitForSelector('.lane-row[data-lane="M"] .box[data-key="pixelate@M"]', { timeout: 10_000 });
+    // Alt+→ in a lane goes through the lane guard: Pixelate can't follow Centerline (it would get lines).
+    // Alt+→ on the split's box in the main row: the lane steps aren't in that row, so it can't cross them.
+    await page.focus('.strip .box[data-key="cmyk"] button.pick');
+    await page.keyboard.press("Alt+ArrowRight");
+    await page.waitForFunction(() => [...document.querySelectorAll(".notice")].some((n) => /across the ink lanes/.test(n.textContent)), null, { timeout: 5_000 }).catch(() => {});
+    const crossSaid = (await page.$$eval(".notice", (els) => els.map((e) => e.textContent).find((t) => /across the ink lanes/.test(t)))) ?? "";
+    check(/M:pixelate\+centerline/.test(await rows()) && /^Separate CMYK can't move across the ink lanes/.test(crossSaid), `Alt+→ on the split box won't cross the hidden lane steps ("${crossSaid}")`);
+    await page.focus('.box[data-key="pixelate@M"] button.pick');
+    await page.keyboard.press("Alt+ArrowRight");
+    await page.waitForFunction(() => [...document.querySelectorAll(".notice")].some((n) => /in the Magenta lane/.test(n.textContent)), null, { timeout: 5_000 }).catch(() => {});
+    const laneSaid = (await page.$$eval(".notice", (els) => els.map((e) => e.textContent).find((t) => /in the Magenta lane/.test(t)))) ?? "";
+    check(/M:pixelate\+centerline/.test(await rows()) && /Pixelate can.t go there in the Magenta lane/.test(laneSaid), `Alt+→ in a lane is refused by the lane guard, with its reason ("${laneSaid}")`);
     await page.click('.box[data-key="centerline@Y"] .pick');
     await page.click("aside.side button:has-text('Take out of Yellow')");
     await page.waitForFunction(() => !document.querySelector('.box[data-key="centerline@Y"]'), null, { timeout: 10_000 });
@@ -1031,7 +1137,7 @@ try {
     await cyan.uncheck({ force: true }).catch(() => {});
     await page.waitForTimeout(300);
     const notices = await page.$$eval(".notice", (els) => els.map((e) => e.textContent).join(" "));
-    check((await cyan.isChecked()) && /Fill works on C's lines/.test(notices) && /Linked/.test(await page.textContent(".lanes-bar .seg button[aria-pressed=true]")), `unticking Cyan in Applies to on a linked split is refused with the reason (${notices.slice(0, 90)}…)`);
+    check((await cyan.isChecked()) && /Fill works on Cyan's lines/.test(notices) && /Linked/.test(await page.textContent(".lanes-bar .seg button[aria-pressed=true]")), `unticking Cyan in Applies to on a linked split is refused with the reason (${notices.slice(0, 90)}…)`);
     await page.click('.strip .box[data-key="levels"] .pick');
     await page.click('aside.side .card.step.focus .scope-row:has(.scope-label:has-text("Settings for")) button:has-text("Magenta")');
     const count = page.locator('aside.side .card.step.focus .param:has(label:has-text("Bands")) input[type=range]').first();

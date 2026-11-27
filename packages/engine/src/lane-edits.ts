@@ -1,5 +1,5 @@
 import { checkChain, removeStep, withStepInks, type ChainResult } from "./chain.ts";
-import { isSplitStep, lanesOf, laneIssues, type Lane, type LaneView } from "./lanes.ts";
+import { inkName, isSplitStep, lanesOf, laneIssues, type Lane, type LaneView } from "./lanes.ts";
 import { actsPerLayer } from "./layers.ts";
 import { defaultParams, type ParamDecl } from "./params.ts";
 import { newStepId, type Recipe, type RecipeStep } from "./recipe.ts";
@@ -25,7 +25,7 @@ function laneNamed(recipe: Recipe, registry: StepRegistry, layer: string): { vie
   const view = lanesOf(recipe, registry);
   if (view.split === null) return { reason: "The picture isn't split into inks, so there are no lanes." };
   const lane = view.lanes.find((l) => l.layer === layer);
-  if (!lane) return { reason: `There is no ${layer} lane: the picture isn't split into that ink.` };
+  if (!lane) return { reason: `There is no ${inkName(recipe, registry, layer)} lane: the picture isn't split into that ink.` };
   return { view, lane };
 }
 
@@ -50,7 +50,7 @@ export function addInLane(recipe: Recipe, registry: StepRegistry, layer: string,
   const def = registry.get(stepId);
   if (!def) return { reason: `Unknown step "${stepId}".` };
   if (!actsPerLayer(def)) return { reason: `${def.title} works on every ink at once, so it can't go in one lane.` };
-  if (at < 0 || at > lane.steps.length) return { reason: `There is no place ${at + 1} in the ${layer} lane.` };
+  if (at < 0 || at > lane.steps.length) return { reason: `There is no place ${at + 1} in the ${inkName(recipe, registry, layer)} lane.` };
   const lo = at === 0 ? view.split! + 1 : lane.steps[at - 1]!.index + 1;
   const hi = at === lane.steps.length ? mergeOf(view, recipe) : lane.steps[at]!.index;
   const fresh: RecipeStep = { id: newStepId(recipe.steps.map((s) => s.id), def.id), step: def.id, version: def.version, params: defaultParams(def.params), enabled: true, layers: [layer] };
@@ -61,7 +61,7 @@ export function addInLane(recipe: Recipe, registry: StepRegistry, layer: string,
     if ("recipe" in res) return { recipe: withStepInks(res.recipe, def), index: p };
     reason ||= res.reason;
   }
-  return { reason: `${def.title} doesn't fit there in the ${layer} lane: ${reason}` };
+  return { reason: `${def.title} doesn't fit there in the ${inkName(recipe, registry, layer)} lane: ${reason}` };
 }
 
 /** The lane step `stepId` in lane `layer`, or why it isn't there. */
@@ -70,7 +70,7 @@ function inLane(recipe: Recipe, registry: StepRegistry, stepId: string, layer: s
   if ("reason" in found) return found;
   const pos = found.lane.steps.findIndex((s) => s.id === stepId);
   const rs = recipe.steps.find((s) => s.id === stepId);
-  if (pos < 0 || !rs) return { reason: `${title(registry, rs)} isn't in the ${layer} lane.` };
+  if (pos < 0 || !rs) return { reason: `${title(registry, rs)} isn't in the ${inkName(recipe, registry, layer)} lane.` };
   return { ...found, pos, rs, index: found.lane.steps[pos]!.index };
 }
 
@@ -85,7 +85,7 @@ export function removeFromLane(recipe: Recipe, registry: StepRegistry, stepId: s
   const name = title(registry, rs);
   if (!actsPerLayer(registry.get(rs.step))) return { reason: `${name} works on every ink at once: remove it from the recipe to take it out of every lane.` };
   const left = (Array.isArray(rs.layers) ? rs.layers : view.layers).filter((x) => x !== layer);
-  const broke = (reason: string) => ({ reason: `Taking ${name} out of the ${layer} lane would break it: ${reason}` });
+  const broke = (reason: string) => ({ reason: `Taking ${name} out of the ${inkName(recipe, registry, layer)} lane would break it: ${reason}` });
   if (left.length === 0) {
     const res = removeStep(recipe, index, registry);
     if ("reason" in res) return res;
@@ -107,7 +107,7 @@ export function moveInLane(recipe: Recipe, registry: StepRegistry, stepId: strin
   const { view, lane, pos, index: from } = found;
   if (to === pos) return { recipe };
   const others = lane.steps.filter((s) => s.id !== stepId);
-  if (to < 0 || to > others.length) return { reason: `There is no place ${to + 1} in the ${layer} lane.` };
+  if (to < 0 || to > others.length) return { reason: `There is no place ${to + 1} in the ${inkName(recipe, registry, layer)} lane.` };
   const lo = to === 0 ? view.split! + 1 : others[to - 1]!.index + 1;
   const hi = to === others.length ? mergeOf(view, recipe) : others[to]!.index;
   let reason = "";
@@ -120,7 +120,7 @@ export function moveInLane(recipe: Recipe, registry: StepRegistry, stepId: strin
     if ("recipe" in res) return res;
     reason ||= res.reason;
   }
-  return { reason: `${title(registry, found.rs)} can't go there in the ${layer} lane: ${reason || "nothing else would change."}` };
+  return { reason: `${title(registry, found.rs)} can't go there in the ${inkName(recipe, registry, layer)} lane: ${reason || "nothing else would change."}` };
 }
 
 /**
@@ -219,7 +219,7 @@ export function linkLanes(recipe: Recipe, registry: StepRegistry, layer: string)
     return [{ ...plain, params: s.params }];
   });
   const res = fits(recipe, steps, registry);
-  return "reason" in res ? { reason: `Linking onto the ${layer} lane would break the chain: ${res.reason}` } : res;
+  return "reason" in res ? { reason: `Linking onto the ${inkName(recipe, registry, layer)} lane would break the chain: ${res.reason}` } : res;
 }
 
 /** A step after the split acts on every layer with one set of settings: a single old layer's overrides become the shared ones. */

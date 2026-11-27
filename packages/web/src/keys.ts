@@ -40,3 +40,17 @@ export function focusOf(t: EventTarget | null): { typing: boolean; menu: boolean
   const typing = t.isContentEditable || t instanceof HTMLTextAreaElement || (t instanceof HTMLInputElement && !["range", "checkbox", "radio", "button", "color", "file"].includes(t.type));
   return { typing, menu: t instanceof HTMLSelectElement };
 }
+
+/**
+ * A modal dialog's focus trap: where Tab (Shift+Tab: `back`) should go from `active` among the
+ * dialog's focusable `items`, or null to let the browser's own Tab do it. Past either end it goes
+ * round; from the dialog itself or outside it (`active` not in `items`), it comes back in.
+ */
+export function trapTab<T>(items: readonly T[], active: T | null, back: boolean): T | null {
+  if (items.length === 0) return null;
+  const i = active === null ? -1 : items.indexOf(active);
+  if (i < 0) return back ? items[items.length - 1]! : items[0]!;
+  if (back && i === 0) return items[items.length - 1]!;
+  if (!back && i === items.length - 1) return items[0]!;
+  return null;
+}

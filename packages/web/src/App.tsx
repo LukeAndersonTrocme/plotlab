@@ -639,7 +639,7 @@ function Editor(props: { hidden: boolean }) {
   const stepTitle = (i: number) => registry.get(recipe.steps[i]?.step ?? "")?.title ?? "step";
   // A switched-off step shows what passes through it; an on-demand step that hasn't run, traced order.
   const viewNote = (i: number) =>
-    recipe.steps[i]?.enabled === false ? " (switched off: what passes through)" : run.steps.some((x) => x.index === i) ? "" : run.stale.length ? " (not run yet: traced order)" : "";
+    recipe.steps[i]?.enabled === false ? " (switched off: what passes through)" : run.steps.some((x) => x.id === recipe.steps[i]?.id) ? "" : run.staleIds.length ? " (not run yet: traced order)" : "";
   const viewTitle = inspect === "source" ? "the source, as placed on the paper" : typeof inspect === "number" ? `${stepTitle(inspect)} output${viewNote(inspect)}` : null;
   const finalLayers = run.steps.at(-1)?.layers ?? [];
   const strokes = plot?.layers.reduce((n, l) => n + l.paths.length, 0) ?? 0;
@@ -947,7 +947,7 @@ function Editor(props: { hidden: boolean }) {
                 onBranch={project ? branch : null}
                 registry={registry}
                 steps={run.steps}
-                stale={run.stale}
+                staleIds={run.staleIds}
                 error={run.error}
                 inspect={inspect}
                 onInspect={inspectStage}
@@ -1030,6 +1030,8 @@ function Editor(props: { hidden: boolean }) {
           onResize={(px) => changeView(resizeThumbs(viewRef.current, px))}
           onNotice={setNotice}
           onAdd={(gap, stepId) => {
+            // On purpose: the new step ends up selected (canvas and settings), since you add a
+            // step to set it up next. A split goes through `split` (checkpoint first) instead.
             const res = addAt(recipe, registry, gap, stepId);
             if ("reason" in res) setNotice(res.reason);
             else if (res.split) void split(gap);
