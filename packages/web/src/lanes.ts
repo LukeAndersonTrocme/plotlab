@@ -1,4 +1,4 @@
-import { addInLane, lanesOf, laneIssues, type PassOrder, type Plot, type Recipe, type StageKind, type StepRegistry } from "@plotlab/engine";
+import { addInLane, lanesOf, laneIssues, moveInLane, type PassOrder, type Plot, type Recipe, type StageKind, type StepRegistry } from "@plotlab/engine";
 import type { PlotEstimate } from "@plotlab/machines";
 import type { AddMenu, AddOption } from "./gaps.ts";
 import { movePass, orderedPasses, passBoxes } from "./plotmode.ts";
@@ -97,6 +97,26 @@ export function laneRows(recipe: Recipe, registry: StepRegistry, run: Run, plot:
   const order = laneOrder(v.layers, plot, recipe.passOrder).filter((l) => show === "all" || l === show);
   const boxes = stripBoxes(recipe, registry, run);
   return order.map((layer) => ({ layer, name: inks[layer]?.name ?? layer, boxes: laneBoxes(recipe, registry, run, layer, boxes) }));
+}
+
+/**
+ * A keyboard move inside an Independent lane: step `stepId` one place along lane `layer`,
+ * through the lane guard the drag uses (`moveInLane`), so a refusal has the drag's reason.
+ * `to` is its new place in the lane.
+ */
+export function laneNudge(recipe: Recipe, registry: StepRegistry, stepId: string, layer: string, dir: -1 | 1): { recipe: Recipe; to: number } | { reason: string } {
+  const v = lanesOf(recipe, registry);
+  const lane = v.lanes.find((l) => l.layer === layer);
+  const pos = lane?.steps.findIndex((s) => s.id === stepId) ?? -1;
+  if (!lane || pos < 0) return { reason: `That step isn't in the ${layer} lane.` };
+  const to = pos + dir;
+  if (to < 0 || to >= lane.steps.length) {
+    const s = lane.steps[pos]!;
+    const name = (v.split !== null ? registry.get(recipe.steps[v.split]!.step)?.layerInks?.[layer]?.name : undefined) ?? layer;
+    return { reason: `${registry.get(s.step)?.title ?? s.step} is already ${dir < 0 ? "first" : "last"} in the ${name} lane.` };
+  }
+  const res = moveInLane(recipe, registry, stepId, layer, to);
+  return "reason" in res ? res : { recipe: res.recipe, to };
 }
 
 /** What lane `layer` has at its gap `at`: layers until a line step there has made its lines. */

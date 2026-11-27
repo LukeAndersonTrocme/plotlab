@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { checkChain, lanesOf, loadRecipe, type Recipe } from "@plotlab/engine";
 import { createRegistry } from "@plotlab/steps";
-import { addAt, addMenu, dragHint, dropGaps, moveToGap, stageAt } from "../src/gaps.ts";
+import { addAt, addMenu, dragHint, dropGaps, liveMenu, movedText, moveToGap, nudge, stageAt } from "../src/gaps.ts";
 
 const reg = createRegistry();
 const recipe = (steps: Array<string | { step: string; enabled?: boolean }>, input?: "image" | "layers" | "geometry"): Recipe =>
@@ -211,5 +211,50 @@ describe("Separate CMYK in the \"+\" right after the source: a split", () => {
     const res = addAt(r, reg, 0, "cmyk");
     if ("reason" in res) throw new Error(res.reason);
     expect(addMenu(res.recipe, reg, 0).options.find((x) => x.id === "cmyk")).toBeUndefined();
+  });
+});
+
+describe("nudge: a keyboard move one place left or right, by the drag's rule", () => {
+  const r = recipe(["tone", "levels", "pixelate", "bands", "order"]);
+
+  it("moves right into the gap past its neighbour, and says where it went", () => {
+    const res = nudge(r, reg, 1, 1);
+    if ("reason" in res) throw new Error(res.reason);
+    expect([res.gap, res.to]).toEqual([3, 2]);
+    expect(ids(res.recipe)).toEqual(["tone", "pixelate", "levels", "bands", "order"]);
+  });
+
+  it("moves left", () => {
+    const res = nudge(r, reg, 2, -1);
+    if ("reason" in res) throw new Error(res.reason);
+    expect([res.gap, res.to]).toEqual([1, 1]);
+    expect(ids(res.recipe)).toEqual(["tone", "pixelate", "levels", "bands", "order"]);
+  });
+
+  it("refuses with the reason the drag shows on that gap", () => {
+    const why = dropGaps(r, reg, 0).find((g) => g.gap === 2)!.reason!;
+    expect(why).toBeTruthy();
+    expect(nudge(r, reg, 0, 1)).toEqual({ reason: why });
+  });
+
+  it("says so at either end", () => {
+    expect(nudge(r, reg, 0, -1)).toEqual({ reason: "Ink density is already the first step." });
+    expect(nudge(r, reg, 4, 1)).toEqual({ reason: "Stroke order is already the last step." });
+  });
+
+  it("the announcement names the step and its new place", () => {
+    expect(movedText("Hatch", 2)).toBe("Moved Hatch to position 3.");
+    expect(movedText("Pixelate", 0, "Magenta")).toBe("Moved Pixelate to position 1 in the Magenta lane.");
+  });
+});
+
+describe("an open + menu and Undo", () => {
+  it("stays open while the recipe it was opened on is shown, and closes once it isn't (Undo, Redo or any edit)", () => {
+    const menu = { gap: 3, recipe: base };
+    expect(liveMenu(menu, base)).toBe(menu);
+    // Undo took Stroke order away: gap 3 would point past the end of the steps.
+    const undone = recipe(["threshold", "centerline"]);
+    expect(liveMenu(menu, undone)).toBeNull();
+    expect(liveMenu(null, base)).toBeNull();
   });
 });

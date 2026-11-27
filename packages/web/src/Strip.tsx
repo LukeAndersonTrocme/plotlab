@@ -1,7 +1,7 @@
 import { Fragment, useEffect, useRef, useState, type CSSProperties, type KeyboardEvent, type PointerEvent } from "react";
 import { STAGE_WORDS, type Recipe, type StageKind, type StepRegistry } from "@plotlab/engine";
-import { addMenu, dragHint, dropGaps, type AddMenu, type DropGap } from "./gaps.ts";
-import { laneAddMenu, type LaneRow } from "./lanes.ts";
+import { addMenu, dragHint, dropGaps, liveMenu, movedText, nudge, type AddMenu, type DropGap } from "./gaps.ts";
+import { laneAddMenu, laneNudge, parseLaneKey, type LaneRow } from "./lanes.ts";
 import { LaneRows } from "./LaneRows.tsx";
 import { useBlobUrl } from "./StageView.tsx";
 import { STACK_KEY, STAGE_NAMES, STAGES, STEP_DRAG, type StripBox, type StripLanes } from "./strip.ts";
@@ -19,7 +19,9 @@ export function Thumb(props: { png: Blob | undefined }) {
  * thumbnail of its output, its stage colours and a bypass toggle. Click (or Enter) shows
  * that step on the canvas and its settings in the sidebar. The grip and − / + resize it.
  * A "+" between boxes adds a step that fits there; dragging a box shows where it can go,
- * and dropping it on the sidebar pins it. Pinned boxes carry a mark.
+ * and dropping it on the sidebar pins it. Pinned boxes carry a mark. Alt+← / Alt+→ on a box
+ * moves its step one place, by the drag's rule (in an Independent lane, along the lane), and
+ * says where it went.
  */
 export function Strip(props: {
   recipe: Recipe;
@@ -71,15 +73,30 @@ export function Strip(props: {
 }) {
   const row = useRef<HTMLDivElement>(null);
   const steps = props.boxes.length - 1;
-  /** The open "+" menu: a gap in the chain, or (`lane`) a gap in one ink's lane. */
-  const [menu, setMenu] = useState<{ gap: number; left: number; bottom: number; lane?: { layer: string; at: number } } | null>(null);
+  /**
+   * The open "+" menu: a gap in the chain, or (`lane`) a gap in one ink's lane, on the recipe it
+   * was opened on. After Undo (or any edit) its gap may be gone, so it closes (`liveMenu`).
+   */
+  const [menuState, setMenu] = useState<{ gap: number; left: number; bottom: number; lane?: { layer: string; at: number }; recipe: Recipe } | null>(null);
+  const menu = liveMenu(menuState, props.recipe);
   const [drag, setDrag] = useState<{ from: number; gaps: Map<number, DropGap>; hint: string } | null>(null);
   const [over, setOver] = useState<number | null>(null);
+  /** While dragging over a dimmed gap: why the step can't go there (shown as text, not only a tooltip). */
+  const [no, setNo] = useState<{ gap: number; reason: string } | null>(null);
+  /** What the last keyboard move did, for screen readers. */
+  const [said, setSaid] = useState("");
+  /** The box to give the focus back to once a keyboard move has re-rendered the strip. */
+  const refocus = useRef<string | null>(null);
+  useEffect(() => {
+    const key = refocus.current;
+    refocus.current = null;
+    if (key) row.current?.querySelector<HTMLButtonElement>(`[data-key="${CSS.escape(key)}"] button.pick`)?.focus();
+  }, [props.recipe]);
 
   const openMenu = (gap: number, anchor: HTMLElement, lane?: { layer: string; at: number }) => {
     if (menu && menu.gap === gap && menu.lane?.layer === lane?.layer && menu.lane?.at === lane?.at) return setMenu(null);
     const r = anchor.getBoundingClientRect();
-    setMenu({ gap, left: Math.max(8, Math.min(window.innerWidth - 300, r.left - 130)), bottom: window.innerHeight - r.top + 8, ...(lane ? { lane } : {}) });
+    setMenu({ gap, left: Math.max(8, Math.min(window.innerWidth - 300, r.left - 130)), bottom: window.innerHeight - r.top + 8, ...(lane ? { lane } : {}), recipe: props.recipe });
   };
   const own = props.laneRows !== null;
   const startDrag = (from: number) => {
@@ -90,11 +107,40 @@ export function Strip(props: {
   const endDrag = () => {
     setDrag(null);
     setOver(null);
+    setNo(null);
   };
 
-  // Left/right arrows move between boxes; Enter or Space (the button's own) selects.
+  /** Alt+← / Alt+→ on box `key`: move its step one place, through the drag's own rule. */
+  const keyMove = (key: string, dir: -1 | 1) => {
+    const inLane = parseLaneKey(key);
+    if (inLane) {
+      // Independent inks: along its lane, through the lane guard (as dragging it along the row).
+      const res = laneNudge(props.recipe, props.registry, inLane.id, inLane.layer, dir);
+      if ("reason" in res) return props.onNotice(res.reason);
+      const row_ = props.laneRows?.find((r) => r.layer === inLane.layer);
+      const title = row_?.boxes.find((b) => b.key === key)?.title ?? inLane.id;
+      refocus.current = key;
+      props.onLaneMove(inLane.id, inLane.layer, res.to);
+      return setSaid(movedText(title, res.to, row_?.name ?? inLane.layer));
+    }
+    const box = props.boxes.find((b) => b.key === key);
+    if (!box || box.index < 0) return;
+    const res = nudge(props.recipe, props.registry, box.index, dir);
+    if ("reason" in res) return props.onNotice(res.reason);
+    refocus.current = key;
+    props.onMove(box.index, res.gap);
+    setSaid(movedText(box.title, res.to));
+  };
+
+  // Left/right arrows move between boxes; Enter or Space (the button's own) selects; Alt+arrows move the step.
   const onKey = (e: KeyboardEvent) => {
     if (e.key !== "ArrowLeft" && e.key !== "ArrowRight") return;
+    if (e.altKey) {
+      const key = (document.activeElement as HTMLElement | null)?.closest<HTMLElement>(".box[data-key]")?.dataset.key;
+      if (!key || !(document.activeElement as HTMLElement).matches("button.pick")) return;
+      e.preventDefault();
+      return keyMove(key, e.key === "ArrowRight" ? 1 : -1);
+    }
     const picks = [...(row.current?.querySelectorAll<HTMLButtonElement>("button.pick") ?? [])];
     const i = picks.indexOf(document.activeElement as HTMLButtonElement);
     if (i < 0) return;
@@ -139,7 +185,10 @@ export function Strip(props: {
       <div className="strip-head">
         <strong>Recipe</strong>
         <span className={`strip-hint${drag ? " drag-hint" : ""}`} aria-live="polite">
-          {drag ? `${drag.hint} Or drop it on the sidebar to pin it.` : `${steps} ${steps === 1 ? "step" : "steps"} · click a box to see that step and its settings, drag it to move it, + to add a step`}
+          {drag ? (no ? no.reason : `${drag.hint} Or drop it on the sidebar to pin it.`) : `${steps} ${steps === 1 ? "step" : "steps"} · click a box to see that step and its settings, drag it (or Alt+←/→) to move it, + to add a step`}
+        </span>
+        <span className="sr-only" role="status">
+          {said}
         </span>
         {props.lanes && (
           <LanesBar
@@ -199,7 +248,7 @@ export function Strip(props: {
                 }}
                 onDragEnd={endDrag}
               >
-                <button className="pick" aria-pressed={selected} aria-label={`Show ${name}${pinned ? " (pinned)" : ""}`} title={props.comparing ? `Show ${name}'s settings (shift-click: add it as a strip)` : `Show ${name} on the canvas, with its settings`}>
+                <button className="pick" aria-pressed={selected} aria-label={`Show ${name}${pinned ? " (pinned)" : ""}`} aria-keyshortcuts={b.index >= 0 ? "Alt+ArrowLeft Alt+ArrowRight" : undefined} title={props.comparing ? `Show ${name}'s settings (shift-click: add it as a strip)` : `Show ${name} on the canvas, with its settings`}>
                   <span className={`band${changes ? "" : " same"}`} title={changes ? `${STAGE_NAMES[b.input]} in, ${STAGE_NAMES[b.output]} out` : STAGE_NAMES[b.output]}>
                     {changes ? `→ ${STAGE_NAMES[b.output]}` : STAGE_NAMES[b.output]}
                   </span>
@@ -254,12 +303,20 @@ export function Strip(props: {
                 data-gap={gap}
                 title={drop && !drop.ok ? drop.reason : undefined}
                 onDragOver={(e) => {
+                  // A dimmed gap: say why in the hint (visible text), and take no drop.
+                  if (drop && !drop.ok) {
+                    if (no?.gap !== gap) setNo({ gap, reason: drop.reason ?? "" });
+                    return;
+                  }
                   if (!drop?.ok) return;
                   e.preventDefault();
                   e.dataTransfer.dropEffect = "move";
                   setOver(gap);
                 }}
-                onDragLeave={() => setOver((o) => (o === gap ? null : o))}
+                onDragLeave={() => {
+                  setOver((o) => (o === gap ? null : o));
+                  setNo((n) => (n?.gap === gap ? null : n));
+                }}
                 onDrop={(e) => {
                   e.preventDefault();
                   const from = drag?.from;
@@ -272,7 +329,7 @@ export function Strip(props: {
                   className="plus"
                   aria-label={`Add a step after ${name}`}
                   aria-haspopup="menu"
-                  aria-expanded={menu?.gap === gap}
+                  aria-expanded={!!menu && !menu.lane && menu.gap === gap}
                   title={`Add a step after ${name}`}
                   onClick={(e) => openMenu(gap, e.currentTarget)}
                 >
@@ -289,6 +346,7 @@ export function Strip(props: {
       </div>
       {menu?.lane && (
         <AddMenuPop
+          key={`lane:${menu.lane.layer}:${menu.lane.at}`}
           menu={laneAddMenu(props.recipe, props.registry, menu.lane.layer, menu.lane.at)}
           after={`${menu.lane.at === 0 ? "the split" : (props.laneRows?.find((r) => r.layer === menu.lane!.layer)?.boxes[menu.lane.at - 1]?.title ?? "")}, for ${props.laneRows?.find((r) => r.layer === menu.lane!.layer)?.name ?? menu.lane.layer} only`}
           from={`.lane-gap[data-lane-gap="${menu.lane.layer}:${menu.lane.at}"] .plus`}
@@ -304,6 +362,7 @@ export function Strip(props: {
       )}
       {menu && !menu.lane && (
         <AddMenuPop
+          key={`gap:${menu.gap}`}
           menu={addMenu(props.recipe, props.registry, menu.gap)}
           after={menu.gap === 0 ? "the source" : (props.boxes[menu.gap]?.title ?? "")}
           from={`.strip > .gap[data-gap="${menu.gap}"] .plus`}
@@ -450,12 +509,17 @@ function StackBox(props: { png: Blob | undefined; names: string[]; selected: boo
   );
 }
 
-/** The menu a "+" opens: only the steps that fit at that gap (`addMenu`, or a lane's `laneAddMenu`), or why nothing does. */
+/**
+ * The menu a "+" opens: only the steps that fit at that gap (`addMenu`, or a lane's `laneAddMenu`),
+ * or why nothing does. The heading, the reason and Close sit outside the `role=menu` list, which
+ * holds only the steps. ↑ / ↓ move through them; Escape closes it and Tab leaves it (both close
+ * it, back on its "+", Tab then going on from there).
+ */
 export function AddMenuPop(props: {
   menu: AddMenu;
   /** Name of the box before the gap. */
   after: string;
-  /** Where the "+" it came from is, to go back to it on Escape (a CSS selector). */
+  /** Where the "+" it came from is, to go back to it on Escape or Tab (a CSS selector). */
   from: string;
   left: number;
   bottom: number;
@@ -466,6 +530,7 @@ export function AddMenuPop(props: {
   const m = props.menu;
   const close = useRef(props.onClose);
   close.current = props.onClose;
+  // On open (and on switching to another "+", which mounts a new one: `key`), the focus comes in.
   useEffect(() => {
     ref.current?.querySelector<HTMLButtonElement>("button")?.focus();
     const away = (e: globalThis.PointerEvent) => {
@@ -492,42 +557,42 @@ export function AddMenuPop(props: {
       close_();
       return;
     }
+    // Tab leaves the menu: back on its "+", and the browser's own Tab goes on from there.
+    if (e.key === "Tab") return close_();
     if (e.key !== "ArrowDown" && e.key !== "ArrowUp") return;
     e.preventDefault();
     const items = [...(ref.current?.querySelectorAll<HTMLButtonElement>("button[role=menuitem]") ?? [])];
     const i = items.indexOf(document.activeElement as HTMLButtonElement);
     items[(i + (e.key === "ArrowDown" ? 1 : items.length - 1)) % items.length]?.focus();
   };
+  const label = `Steps that fit after ${props.after}`;
   return (
-    <div
-      ref={ref}
-      className="add-menu"
-      role="menu"
-      aria-label={`Steps that fit after ${props.after}`}
-      style={{ left: props.left, bottom: props.bottom }}
-      onKeyDown={onKey}
-    >
+    <div ref={ref} className="add-menu" role="group" aria-label={label} style={{ left: props.left, bottom: props.bottom }} onKeyDown={onKey}>
       <div className="add-head">
         <strong>Add after {props.after}</strong>
         <span>The chain has {STAGE_WORDS[m.stage]} here.</span>
       </div>
-      {m.options.map((o) => (
-        <button key={o.id} role="menuitem" data-step={o.id} onClick={() => props.onPick(o.id)}>
-          <span className="ic" aria-hidden="true">
-            {o.icon}
-          </span>
-          <span className="add-text">
-            <span className="add-title">
-              <strong>{o.title}</strong>
-              <span className="pill" style={{ "--st": stageVar(o.output) } as CSSProperties} title={`Gives ${STAGE_NAMES[o.output].toLowerCase()}`}>
-                {STAGE_NAMES[o.output]}
+      {m.options.length > 0 && (
+        <div role="menu" aria-label={label}>
+          {m.options.map((o) => (
+            <button key={o.id} role="menuitem" data-step={o.id} onClick={() => props.onPick(o.id)}>
+              <span className="ic" aria-hidden="true">
+                {o.icon}
               </span>
-              {o.experimental && <span className="badge experimental">experimental</span>}
-            </span>
-            <small>{o.split ? `Splits the picture into inks: the steps after it apply to every ink. ${o.summary}` : o.summary}</small>
-          </span>
-        </button>
-      ))}
+              <span className="add-text">
+                <span className="add-title">
+                  <strong>{o.title}</strong>
+                  <span className="pill" style={{ "--st": stageVar(o.output) } as CSSProperties} title={`Gives ${STAGE_NAMES[o.output].toLowerCase()}`}>
+                    {STAGE_NAMES[o.output]}
+                  </span>
+                  {o.experimental && <span className="badge experimental">experimental</span>}
+                </span>
+                <small>{o.split ? `Splits the picture into inks: the steps after it apply to every ink. ${o.summary}` : o.summary}</small>
+              </span>
+            </button>
+          ))}
+        </div>
+      )}
       {m.reason && <p className="add-none">{m.reason}</p>}
       {m.options.length === 0 && (
         <button className="add-close" onClick={close_}>

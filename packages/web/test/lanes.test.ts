@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
-import { addInLane, lanesOf, loadRecipe, unlinkLanes, type Ink, type Plot, type Recipe } from "@plotlab/engine";
+import { addInLane, lanesOf, loadRecipe, moveInLane, unlinkLanes, type Ink, type Plot, type Recipe } from "@plotlab/engine";
 import { createRegistry } from "@plotlab/steps";
-import { allInks, unlinkedNotice, laneAddMenu, laneBoxes, laneKey, laneOrder, laneRows, moveLane, parseLaneKey, stackRows } from "../src/lanes.ts";
+import { allInks, unlinkedNotice, laneAddMenu, laneBoxes, laneKey, laneNudge, laneOrder, laneRows, moveLane, parseLaneKey, stackRows } from "../src/lanes.ts";
 
 const reg = createRegistry();
 const recipe = (steps: string[]): Recipe =>
@@ -72,6 +72,21 @@ describe("independent lanes in the strip", () => {
     r = ok(addInLane(r, reg, "M", "pixelate", 0)).recipe;
     return r;
   };
+  it("a keyboard move in a lane goes one place along it, through the lane guard", () => {
+    const r = ok(addInLane(mixed(), reg, "M", "levels", 0)).recipe;
+    const lane = (x: Recipe) => lanesOf(x, reg).lanes.find((l) => l.layer === "M")!.steps.map((s) => s.step);
+    expect(lane(r)).toEqual(["levels", "pixelate", "centerline"]);
+    const res = laneNudge(r, reg, "pixelate", "M", -1);
+    if ("reason" in res) throw new Error(res.reason);
+    expect(res.to).toBe(0);
+    expect(lane(res.recipe)).toEqual(["pixelate", "levels", "centerline"]);
+    // Past Centerline it would get lines: refused with the drag's reason (moveInLane).
+    const no = moveInLane(r, reg, "pixelate", "M", 2);
+    expect("reason" in no).toBe(true);
+    expect(laneNudge(r, reg, "pixelate", "M", 1)).toEqual(no);
+    expect(laneNudge(r, reg, "levels", "M", -1)).toEqual({ reason: "Levels is already first in the Magenta lane." });
+    expect(laneNudge(r, reg, "centerline", "M", 1)).toEqual({ reason: "Centerline is already last in the Magenta lane." });
+  });
   it("each lane's boxes are keyed by step and ink, with their chain position", () => {
     const r = mixed();
     const boxes = laneBoxes(r, reg, { steps: [], staleIds: [] }, "M");

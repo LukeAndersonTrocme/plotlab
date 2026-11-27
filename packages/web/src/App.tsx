@@ -1030,6 +1030,8 @@ function Editor(props: { hidden: boolean }) {
           onResize={(px) => changeView(resizeThumbs(viewRef.current, px))}
           onNotice={setNotice}
           onAdd={(gap, stepId) => {
+            // On purpose: the new step ends up selected (canvas and settings), since you add a
+            // step to set it up next. A split goes through `split` (checkpoint first) instead.
             const res = addAt(recipe, registry, gap, stepId);
             if ("reason" in res) setNotice(res.reason);
             else if (res.split) void split(gap);

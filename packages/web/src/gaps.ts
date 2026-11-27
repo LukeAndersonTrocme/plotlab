@@ -125,3 +125,30 @@ export function dragHint(recipe: Recipe, registry: StepRegistry, from: number): 
   const does = input === output ? `it works on ${STAGE_WORDS[input]}` : `it turns ${STAGE_WORDS[input]} into ${STAGE_WORDS[output]}`;
   return `${title} has nowhere else to go: ${does}, and only fits where the chain has ${STAGE_WORDS[input]}.`;
 }
+
+/**
+ * A keyboard move (Alt+← / Alt+→ on a box, or the sidebar's Move left / Move right): the step at
+ * `from` one place over, as a drop into the gap past its neighbour. The same rule as dragging it
+ * there (`moveToGap`), so a refusal carries the reason the drag shows on that gap. `to` is the
+ * step's new chain position.
+ */
+export function nudge(recipe: Recipe, registry: StepRegistry, from: number, dir: -1 | 1): { recipe: Recipe; gap: number; to: number } | { reason: string } {
+  const rs = recipe.steps[from];
+  if (!rs) return { reason: `There is no step ${from + 1}.` };
+  const to = from + dir;
+  if (to < 0 || to >= recipe.steps.length) return { reason: `${registry.get(rs.step)?.title ?? rs.step} is already the ${dir < 0 ? "first" : "last"} step.` };
+  const gap = dir < 0 ? from - 1 : from + 2;
+  const res = moveToGap(recipe, registry, from, gap);
+  return "reason" in res ? res : { recipe: res.recipe, gap, to };
+}
+
+/** What a screen reader hears after a keyboard move: the step and its new place (in a lane, its place in that lane). */
+export const movedText = (title: string, to: number, laneName?: string) => `Moved ${title} to position ${to + 1}${laneName ? ` in the ${laneName} lane` : ""}.`;
+
+/**
+ * The "+" menu stays open only on the recipe it was opened on: after Undo, Redo or any other
+ * edit its gap may point somewhere else, or past the end of the steps, so it closes.
+ */
+export function liveMenu<M extends { recipe: Recipe }>(menu: M | null, recipe: Recipe): M | null {
+  return menu && menu.recipe === recipe ? menu : null;
+}

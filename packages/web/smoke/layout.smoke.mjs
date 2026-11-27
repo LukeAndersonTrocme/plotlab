@@ -147,7 +147,7 @@ try {
     await page.click(".view-bar button:has-text('Show final')").catch(() => {});
     // "+" after Threshold offers only steps that work on layers; picking one adds a box and selects it.
     await page.click('.strip .gap[data-gap="1"] .plus');
-    await page.waitForSelector(".add-menu[role=menu]");
+    await page.waitForSelector(".add-menu [role=menu]");
     const offered = await page.$$eval(".add-menu [role=menuitem]", (els) => els.map((e) => e.dataset.step).sort());
     check(offered.join(",") === "levels,pixelate", `"+" after Threshold offers only the steps that fit there (${offered.join(", ")})`);
     check(!(await page.$("aside.side select.add-step")), "the sidebar has no separate add-step list");
