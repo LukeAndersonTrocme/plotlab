@@ -172,3 +172,32 @@ export const PRINT_SCREEN_ANGLES: Record<string, number> = { C: 15, M: 75, Y: 0,
 export function printScreenAngle(layerId: string, index: number): number {
   return screenAngle({ lpi: 0, angles: PRINT_SCREEN_ANGLES }, layerId, index);
 }
+
+export interface LaneIssue {
+  layer: string;
+  /** Chain position of the step that doesn't fit in that lane. */
+  index: number;
+  reason: string;
+}
+
+/**
+ * Each lane on its own (Independent inks): a layer step needs its ink still to be layers. One
+ * that comes after a line step has already turned that ink into lines would do nothing for it,
+ * so the lane wouldn't show what the ink gets. `checkChain` checks the chain as a whole.
+ */
+export function laneIssues(recipe: Recipe, registry: StepRegistry): LaneIssue[] {
+  const issues: LaneIssue[] = [];
+  for (const lane of lanesOf(recipe, registry).lanes) {
+    let lines: string | null = null;
+    for (const s of lane.steps) {
+      const def = registry.get(s.step);
+      if (!s.enabled || !def) continue;
+      if (def.runLayer && lines !== null) {
+        issues.push({ layer: lane.layer, index: s.index, reason: `${def.title} needs ${lane.layer} as layers, but in the ${lane.layer} lane it's already lines (after ${lines}). Take ${lines} out of the ${lane.layer} lane first, or put ${def.title} before it.` });
+        break;
+      }
+      if (def.runLayer && def.output === "geometry") lines = def.title;
+    }
+  }
+  return issues;
+}
