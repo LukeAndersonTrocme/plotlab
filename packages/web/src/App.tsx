@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { addInLane, budgetOnlyChange, describeEntry, enterAt, lanesOf, loadRecipe, moveInLane, removeFromLane, unlinkLanes, sourceLabel, sourceStage, type AnyStep, type ExportFormat, type Recipe, type Source, type StageKind } from "@plotlab/engine";
+import { budgetOnlyChange, describeEntry, enterAt, loadRecipe, sourceLabel, sourceStage, type AnyStep, type ExportFormat, type Recipe, type Source, type StageKind } from "@plotlab/engine";
 import { budgetCheck } from "@plotlab/machines";
 import { createRegistry } from "@plotlab/steps";
 import { defaultRecipe } from "./defaults.ts";
@@ -9,12 +9,12 @@ import { PassStrip, PlotPanel, usePlayback } from "./PlotPanel.tsx";
 import { fitSolo, framePlot, passBoxes, soloPlot } from "./plotmode.ts";
 import { fmtTime, setupSummary } from "./setup.ts";
 import { ModeSwitch, SetupChip } from "./Shell.tsx";
-import { clickLaneBox, showLanes, canvasTarget, clickBox, lookingBand, compareTargetsOf, fitView, fromViewBlock, initialView, isPinned, openSetup, pin, readThumbSize, resizeThumbs, RESULT, select, selectedIndex, setCompare, setMode, sidebarSteps, SOURCE, stepSelection, toggleCompare, toggleSelect, togglePin, toggleSolo, toViewBlock, writeThumbSize, type ViewState } from "./view.ts";
+import { canvasTarget, clickBox, lookingBand, compareTargetsOf, fitView, fromViewBlock, initialView, isPinned, openSetup, pin, readThumbSize, resizeThumbs, RESULT, select, selectedIndex, setCompare, setMode, sidebarSteps, SOURCE, stepSelection, toggleCompare, toggleSelect, togglePin, toggleSolo, toViewBlock, writeThumbSize, type ViewState } from "./view.ts";
 import { Strip } from "./Strip.tsx";
 import { addAt, moveToGap } from "./gaps.ts";
-import { STACK_KEY, STEP_DRAG, stripBoxes, stripLanes, thumbRenderSide, toggleBypass, type StripBox } from "./strip.ts";
-import { isSplit, linkInks, linkWarning, markSplit, splitIntoCmyk, undoSplit, type SplitMark } from "./split.ts";
-import { laneKey, laneOrder, laneRows, moveLane } from "./lanes.ts";
+import { STACK_KEY, STEP_DRAG, stripBoxes, thumbRenderSide, toggleBypass, type StripBox } from "./strip.ts";
+import { isSplit, linkInks, markSplit, splitIntoCmyk, undoSplit, type SplitMark } from "./split.ts";
+import { laneProps } from "./laneProps.ts";
 import { StackPanel } from "./StackPanel.tsx";
 import { bandView, shiftRefusal, shownBands } from "./compare.ts";
 import { EMPTY_RUN, Runner, type RunState } from "./runner.ts";
@@ -625,19 +625,8 @@ function Editor(props: { hidden: boolean }) {
 
   const boxes = stripBoxes(recipe, registry, run);
   // CMYK lanes: lane order is the pass order; Independent inks get one row per lane.
-  const lanes = stripLanes(recipe, registry);
-  const lanesInOrder = lanes ? laneOrder(lanes.layers, plot, recipe.passOrder) : [];
-  const rows = lanes && !lanes.linked ? laneRows(recipe, registry, run, plot, view.laneView) : null;
-  /** The ink whose settings the sidebar edits: the lane the selected step was picked in, while that lane is independent. */
-  const laneEdit = (() => {
-    const l = view.lane && selected >= 0 && rows ? lanesOf(recipe, registry).lanes.find((x) => x.layer === view.lane) : undefined;
-    return l && !l.linked && l.steps.some((x) => x.index === selected) ? { layer: l.layer, name: lanes!.names[lanes!.layers.indexOf(l.layer)] ?? l.layer } : null;
-  })();
-  const chainEdit = (res: { recipe: Recipe } | { reason: string }, then?: (r: Recipe) => void) => {
-    if ("reason" in res) setNotice(res.reason);
-    else if (then) then(res.recipe);
-    else apply(res.recipe, false);
-  };
+  const lp = laneProps({ recipe, registry, run, plot, view, currentView: () => viewRef.current, changeView, apply, applySelecting, setNotice, link: (l) => void link(l) });
+  const lanes = lp.lanes;
   const summary = setupSummary(recipe, run.estimate);
   const projectName = sourceName === "sample" ? "Sample image" : sourceName;
 
@@ -911,13 +900,7 @@ function Editor(props: { hidden: boolean }) {
                 }}
                 onHelp={setHelp}
                 onNotice={setNotice}
-                lane={laneEdit}
-                onRemoveFromLane={(i, layer) =>
-                  chainEdit(removeFromLane(recipe, registry, recipe.steps[i]!.id, layer), (r) => {
-                    changeView(select(viewRef.current, RESULT));
-                    apply(r, false);
-                  })
-                }
+                {...lp.sidebar}
               />
             </>
           )}
@@ -1001,32 +984,8 @@ function Editor(props: { hidden: boolean }) {
           lanes={lanes}
           onUnsplit={() => void unsplit()}
           onScreenAngles={(on) => apply({ ...recipe, screenAngles: on }, false)}
-          laneRows={rows}
-          laneView={view.laneView}
-          onShowLanes={(w) => changeView(showLanes(viewRef.current, w))}
-          selectedLane={view.selection.kind === "step" && view.lane ? laneKey(view.selection.id, view.lane) : null}
+          {...lp.strip}
           hidden={hidden}
-          onLaneSelect={(id, layer) => changeView(clickLaneBox(viewRef.current, id, layer))}
-          onLaneAdd={(layer, at, stepId) => {
-            const res = addInLane(recipe, registry, layer, stepId, at);
-            if ("reason" in res) setNotice(res.reason);
-            else applySelecting(res.recipe, res.recipe.steps[res.index]!.id, layer);
-          }}
-          onLaneMove={(id, layer, to) => chainEdit(moveInLane(recipe, registry, id, layer, to), (r) => applySelecting(r, id, layer))}
-          onMoveLane={(from, to) => {
-            const res = moveLane(lanes?.layers ?? [], plot, recipe.passOrder, from, to);
-            if ("reason" in res) setNotice(res.reason);
-            else apply({ ...recipe, passOrder: res }, false);
-          }}
-          onUnlink={() =>
-            chainEdit(unlinkLanes(recipe, registry), (r) => {
-              apply(r, false);
-              setNotice("Independent: each ink has its own copy of the steps and settings now. A + in a lane adds a step for that ink only; Linked puts them back together.");
-            })
-          }
-          onLink={(layer) => void link(layer)}
-          linkWarning={(layer) => linkWarning(recipe, registry, layer)}
-          linkLane={view.lane ?? lanesInOrder[0] ?? "C"}
         />
       )}
       {view.mode === "plot" && plot && plot.layers.length > 0 && (
