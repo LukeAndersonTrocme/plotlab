@@ -4,7 +4,8 @@
  * it's tested without a browser; `PhoneViewer.tsx` renders it.
  *
  * On a phone plotlab is a viewer only: it reads the same project storage as the editor
- * (ADR 0014) and never writes to it — no recipe edits, no checkpoints, no Back steps.
+ * (ADR 0014) and never writes to it — no recipe edits, no checkpoints, no Back steps. The
+ * one exception is opening a bundle (`BundleControls.tsx`), which merges a project in.
  */
 import { listForProject } from "./checkpoints.ts";
 import { memoryLibrary, type Checkpoint, type Library, type NewSource, type ProjectId, type ProjectInfo, type ProjectStore, type Source } from "./storage/index.ts";

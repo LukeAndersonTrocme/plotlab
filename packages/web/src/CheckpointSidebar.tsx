@@ -1,5 +1,7 @@
 import { useEffect, useState } from "react";
 import { checkpointLabel, checkpointTime as when, deleteCheckpoint, listAllGrouped, listForProject, updateCheckpoint, type CheckpointGroup } from "./checkpoints.ts";
+import { ExportBundle, OpenBundle } from "./BundleControls.tsx";
+import type { ImportResult } from "./bundle.ts";
 import { estimateStorage, storageWarning, type Checkpoint, type Library, type ProjectStore } from "./storage/index.ts";
 
 /** `version` changes when a picture may have arrived (it's drawn after the checkpoint is saved). */
@@ -90,7 +92,8 @@ function Item(props: { project: ProjectStore; cp: Checkpoint; version: number; o
 /**
  * The checkpoints sidebar (right edge; a bottom drawer on phones). `S` toggles it (the app's
  * shortcuts, keys.ts). Shows
- * the open project's checkpoints, or checkpoints across projects, grouped by image.
+ * the open project's checkpoints, or checkpoints across projects, grouped by image; at the
+ * bottom, the project as a bundle (ADR 0014): Export project and Open a bundle.
  * Swipe-to-delete on phones is left for the mobile pass (#46).
  */
 export function CheckpointSidebar(props: {
@@ -103,6 +106,9 @@ export function CheckpointSidebar(props: {
   version: number;
   onSave: () => void;
   onRestore: (cp: Checkpoint) => void;
+  onNotice: (message: string) => void;
+  /** A bundle was opened into the library (its project may be another one). */
+  onBundleOpened: (result: ImportResult, message: string) => void;
 }) {
   const { library, project } = props;
   const [showAll, setShowAll] = useState(false);
@@ -183,6 +189,11 @@ export function CheckpointSidebar(props: {
             </section>
           ))}
       </div>
+      <section className="bundle" aria-label="Bundle">
+        <h3>Move or share this project</h3>
+        <ExportBundle project={project} onNotice={props.onNotice} />
+        <OpenBundle library={library} onOpened={props.onBundleOpened} onError={props.onNotice} />
+      </section>
     </aside>
   );
 }
