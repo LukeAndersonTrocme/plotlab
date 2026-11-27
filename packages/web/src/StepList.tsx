@@ -74,8 +74,9 @@ export function StepList(props: {
   /** Apply an edit; when it turns linked inks independent, say so (as Independent does). */
   const change = (next: Recipe, proxy: boolean, step?: AnyStep) => {
     props.onChange(next, proxy, step);
+    // Said at the first change that unlinks them (a drag's preview already does).
     const note = unlinkedNotice(recipe, next, registry);
-    if (note && !proxy) props.onNotice(note);
+    if (note) props.onNotice(note);
   };
   const commit = (res: { recipe: Recipe } | { reason: string }) => {
     if ("reason" in res) props.onNotice(res.reason);

@@ -988,6 +988,61 @@ try {
     await page.close();
   }
 
+  // Final review (#77–#79): after Independent, the selected step's slider still changes the
+  // plot (the selection moves into a lane); Applies to can't break a lane; Settings for one ink
+  // in a linked split says the inks are now independent.
+  {
+    const page = await open(1400);
+    const strokes = () => page.textContent(".stats").then((t) => /([\d,]+) strokes/.exec(t)?.[1]);
+    await page.click('.strip .box[data-key="source"] .pic');
+    await page.click("aside.side .split-card button:has-text('Split into CMYK')");
+    await page.waitForSelector(".strip .box.lane.split", { timeout: 30_000 });
+    await page.click('.strip .box[data-key="centerline"] .pick');
+    await page.click(".lanes-bar button:has-text('Independent')");
+    await page.waitForSelector(".lane-rows", { timeout: 10_000 });
+    await page.waitForSelector(".stats .big", { timeout: 60_000 });
+    // Settled: the run after Independent is done (same lines: unlinking changes nothing).
+    await page.waitForFunction(() => !document.querySelector(".stats .refining"), null, { timeout: 60_000 });
+    await page.waitForTimeout(500);
+    const picked = await page.$$eval(".lane-rows .box.sel", (els) => els.map((e) => e.dataset.key));
+    const before = await strokes();
+    const slider = page.locator('aside.side .card.step.focus .param:has(label:has-text("Minimum length")) input[type=range]');
+    await slider.focus();
+    await page.keyboard.press("End");
+    await page.waitForFunction((b) => /([\d,]+) strokes/.exec(document.querySelector(".stats")?.textContent ?? "")?.[1] !== b, before, { timeout: 30_000 }).catch(() => {});
+    const after = await strokes();
+    check(picked.length === 1 && /^centerline@/.test(picked[0]) && after !== before, `after Independent the selected step is picked in a lane (${picked}) and its slider changes the plot (${before} → ${after} strokes)`);
+    await page.close();
+  }
+  {
+    const page = await open(1400);
+    const recipe = {
+      schemaVersion: 4,
+      input: "image",
+      paper: { widthMm: 297, heightMm: 210 },
+      inks: [{ id: "k", color: "#000" }],
+      steps: [{ step: "cmyk" }, { step: "levels", params: { count: 3 } }, { step: "bands" }, { step: "fill" }, { step: "order" }],
+    };
+    await page.setInputFiles("aside.side input[type=file]", { name: "linked-cmyk.json", mimeType: "application/json", buffer: Buffer.from(JSON.stringify(recipe)) });
+    await page.waitForSelector('.strip .box[data-key="bands"]', { timeout: 30_000 });
+    await page.click('.strip .box[data-key="bands"] .pick');
+    const cyan = page.locator('aside.side .card.step.focus .scope-row:has(.scope-label:has-text("Applies to")) label.chip:has-text("Cyan") input');
+    await cyan.waitFor({ timeout: 60_000 });
+    await cyan.uncheck({ force: true }).catch(() => {});
+    await page.waitForTimeout(300);
+    const notices = await page.$$eval(".notice", (els) => els.map((e) => e.textContent).join(" "));
+    check((await cyan.isChecked()) && /Fill works on C's lines/.test(notices) && /Linked/.test(await page.textContent(".lanes-bar .seg button[aria-pressed=true]")), `unticking Cyan in Applies to on a linked split is refused with the reason (${notices.slice(0, 90)}…)`);
+    await page.click('.strip .box[data-key="levels"] .pick');
+    await page.click('aside.side .card.step.focus .scope-row:has(.scope-label:has-text("Settings for")) button:has-text("Magenta")');
+    const count = page.locator('aside.side .card.step.focus .param:has(label:has-text("Bands")) input[type=range]').first();
+    await count.focus();
+    await page.keyboard.press("ArrowRight");
+    await page.waitForFunction(() => /Magenta now has its own/.test([...document.querySelectorAll(".notice")].map((e) => e.textContent).join(" ")), null, { timeout: 10_000 }).catch(() => {});
+    const said = await page.$$eval(".notice", (els) => els.map((e) => e.textContent).join(" "));
+    check(/Independent: Magenta now has its own steps or settings/.test(said), `Settings for one ink in a linked split says the inks are now independent`);
+    await page.close();
+  }
+
   // Dark mode: the chrome goes dark, the paper stays paper-coloured.
   {
     const page = await open(1280, "dark");
