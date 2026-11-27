@@ -1,4 +1,4 @@
-import { checkChain, lanesOf, removeStep, STAGE_WORDS, type ChainResult, type Recipe, type StageKind, type StepRegistry } from "@plotlab/engine";
+import { lanesOf, removeStep, validated, STAGE_WORDS, type ChainResult, type Recipe, type StageKind, type StepRegistry } from "@plotlab/engine";
 
 /**
  * The step strip (#66): one box per step plus the source, each showing a thumbnail of that
@@ -133,9 +133,8 @@ export function toggleBypass(recipe: Recipe, index: number, registry: StepRegist
   if (box.bypass && !box.bypass.ok) return { reason: box.bypass.reason };
   const on = rs.enabled === false;
   const steps = recipe.steps.map((s, i) => (i === index ? { ...s, enabled: on, offForEntry: undefined } : s));
-  const issue = checkChain(recipe.input, steps, registry)[0];
-  if (issue) return { reason: `${on ? "Turning on" : "Switching off"} ${def.title} would break the chain: ${issue.reason}` };
-  return { recipe: { ...recipe, steps } };
+  // The same rule as moving or removing: the chain, and every ink's lane, still fit.
+  return validated(recipe, steps, registry, `${on ? "Turning on" : "Switching off"} ${def.title} would break the chain: `);
 }
 
 /** Whether Remove works on the step at `index`, and why not (it would break the chain). */

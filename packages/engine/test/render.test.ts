@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { imageToRGBA, layerToRGBA, renderLaneThumbnail, renderThumbnail, type Position } from "../src/index.ts";
+import { imageToRGBA, layerToRGBA, renderInkThumbnail, renderLaneThumbnail, renderThumbnail, type Position } from "../src/index.ts";
 
 describe("imageToRGBA", () => {
   it("expands gray to opaque RGBA", () => {
@@ -84,5 +84,19 @@ describe("renderLaneThumbnail: one picture per ink, as a 2×2", () => {
     const t = renderLaneThumbnail(layers, s, 40, ["C", "M", "Y", "K"]);
     expect(at(t, 10, 10)).toEqual([0, 255, 255]);
     expect(at(t, 30, 30)).toEqual([255, 255, 255]);
+  });
+});
+
+describe("renderInkThumbnail: one ink alone (a box in an independent lane)", () => {
+  const paper = { widthMm: 100, heightMm: 100 };
+  const ink = (id: string, color: string) => ({ id, name: id, color, mix: "multiply" as const, widthMm: 0.5 });
+  const inks = { C: ink("c", "#00ffff"), M: ink("m", "#ff00ff") };
+  const s = { paper, inks: Object.values(inks), inkFor: (id: string) => inks[id as keyof typeof inks], passOrder: "light-to-dark" as const };
+  const full = (id: string) => ({ id, name: id, values: { kind: "tone" as const, data: new Float32Array([1]) } });
+  it("draws only that ink, on the whole paper", () => {
+    const layers = { kind: "layers" as const, width: 1, height: 1, frame: { xMm: 0, yMm: 0, widthMm: 100, heightMm: 100 }, layers: ["C", "M"].map(full) };
+    const t = renderInkThumbnail(layers, s, 40, "M");
+    expect([t.width, t.height]).toEqual([40, 40]);
+    expect([...t.rgba.slice((20 * 40 + 20) * 4, (20 * 40 + 20) * 4 + 3)]).toEqual([255, 0, 255]);
   });
 });

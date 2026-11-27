@@ -1,11 +1,11 @@
 import { describe, expect, it } from "vitest";
-import { lanesOf, loadRecipe, type Recipe } from "@plotlab/engine";
+import { addInLane, lanesOf, loadRecipe, unlinkLanes, type Recipe } from "@plotlab/engine";
 import { applyPreset, createRegistry } from "@plotlab/steps";
 import { createHistory, commit, type History } from "../src/history.ts";
 import { addAt } from "../src/gaps.ts";
 import { pickPreset } from "../src/gallery.ts";
 import { listForProject, createCheckpoint } from "../src/checkpoints.ts";
-import { canSplit, markSplit, PRE_SPLIT, splitIntoCmyk, undoSplit } from "../src/split.ts";
+import { BEFORE_LINK, canSplit, linkInks, linkWarning, markSplit, PRE_SPLIT, splitIntoCmyk, undoSplit } from "../src/split.ts";
 import { memoryLibrary, type Library, type ProjectStore } from "../src/storage/index.ts";
 
 const reg = createRegistry();
@@ -186,5 +186,37 @@ describe("undo the split", () => {
     // A loaded split recipe, no storage: Back's previous recipe isn't what the split replaced.
     expect(await undoSplit(null, null, commit(createHistory(other), split.recipe), parse, reg, null)).toEqual({ reason: expect.stringMatching(/Couldn't find the recipe from before the split/) });
     expect(await undoSplit(null, null, createHistory(before), parse, reg, null)).toEqual({ reason: expect.stringMatching(/isn't split/) });
+  });
+});
+
+describe("linking independent inks (lossy)", () => {
+  const independent = () => {
+    const u = unlinkLanes(recipe(["cmyk", "centerline", "order"]), reg);
+    if ("reason" in u) throw new Error(u.reason);
+    const a = addInLane(u.recipe, reg, "M", "pixelate", 0);
+    if ("reason" in a) throw new Error(a.reason);
+    return a.recipe;
+  };
+  it("saves a checkpoint first, then collapses every lane onto the chosen one", async () => {
+    const { project } = await open();
+    const before = independent();
+    const res = await linkInks(project, before, reg, "M");
+    if ("reason" in res) throw new Error(res.reason);
+    expect(lanesOf(res.recipe, reg).linked).toBe(true);
+    expect(res.recipe.steps.map((s) => s.step)).toEqual(["cmyk", "pixelate", "centerline", "order"]);
+    const cps = await listForProject(project);
+    expect(cps.map((c) => c.name)).toEqual([BEFORE_LINK]);
+    expect(cps[0]!.recipe).toEqual(before);
+    expect(res.message).toMatch(/every ink now uses the Magenta lane.*saved as a checkpoint/);
+  });
+  it("the warning says which lanes change", () => {
+    expect(linkWarning(independent(), reg, "C")).toMatch(/Linking makes every ink use the Cyan lane.*Magenta: Pixelate → Centerline.*saved as a checkpoint first/);
+  });
+  it("without storage, Back is the way back; a refusal changes nothing", async () => {
+    const res = await linkInks(null, independent(), reg, "C");
+    if ("reason" in res) throw new Error(res.reason);
+    expect(res.saved).toBeNull();
+    expect(res.message).toMatch(/Back/);
+    expect(await linkInks(null, recipe(["cmyk", "centerline", "order"]), reg, "C")).toEqual({ reason: expect.stringMatching(/already linked/) });
   });
 });

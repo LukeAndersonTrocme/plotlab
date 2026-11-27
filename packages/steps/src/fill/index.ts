@@ -51,6 +51,7 @@ export const fill = defineStep({
   output: "geometry",
   cost: "live",
   usesScreenAngles: true,
+  linesPerLayer: true,
   params: {
     kind: {
       type: "enum",

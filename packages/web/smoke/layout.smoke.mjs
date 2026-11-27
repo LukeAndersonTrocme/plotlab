@@ -791,6 +791,119 @@ try {
     await page.close();
   }
 
+  // Independent inks (#78): split, unlink, then build "pixelated magenta, stippled yellow" from
+  // the lanes: Pixelate in M's lane, Centerline out of Y's lane, Stipple in Y's lane. Then the
+  // lane tabs, dragging a lane (pass order), the Stack panel, hiding an ink and linking again.
+  {
+    const page = await open(1400);
+    const rows = () => page.$$eval(".lane-row", (els) => els.map((e) => `${e.dataset.lane}:${[...e.querySelectorAll(".box")].map((b) => b.dataset.key.split("@")[0]).join("+")}`).join(" "));
+    await page.click('.strip .box[data-key="source"] .pic');
+    await page.click("aside.side .split-card button:has-text('Split into CMYK')");
+    await page.waitForSelector(".strip .box.lane.split", { timeout: 30_000 });
+    await page.click(".lanes-bar button:has-text('Independent')");
+    await page.waitForSelector(".lane-rows", { timeout: 10_000 });
+    const unlinked = await rows();
+    check((await page.$$(".lane-row")).length === 4 && unlinked.split(" ").every((r) => /^\w:centerline$/.test(r)), `Independent: four lanes, each still showing what it showed (${unlinked})`);
+
+    await page.click('.lane-gap[data-lane-gap="M:0"] .plus');
+    const offered = await page.$$eval(".add-menu [role=menuitem]", (els) => els.map((e) => e.dataset.step));
+    check(offered.includes("pixelate") && !offered.includes("order"), `a lane's "+" offers steps for that ink only (${offered.join(",")})`);
+    await page.click('.add-menu [role=menuitem][data-step="pixelate"]');
+    await page.waitForSelector('.lane-row[data-lane="M"] .box[data-key="pixelate@M"]', { timeout: 10_000 });
+    await page.click('.box[data-key="centerline@Y"] .pick');
+    await page.click("aside.side button:has-text('Take out of Yellow')");
+    await page.waitForFunction(() => !document.querySelector('.box[data-key="centerline@Y"]'), null, { timeout: 10_000 });
+    await page.click('.lane-gap[data-lane-gap="Y:0"] .plus');
+    await page.click('.add-menu [role=menuitem][data-step="stipple"]');
+    await page.waitForSelector('.box[data-key="stipple@Y"]', { timeout: 10_000 });
+    await page.click("aside.side button:has-text('Run stipple')");
+    const built = await rows();
+    check(/M:pixelate\+centerline/.test(built) && /Y:stipple(\s|$)/.test(built) && /C:centerline/.test(built) && /K:centerline/.test(built), `pixelated magenta, stippled yellow, built from the lanes (${built})`);
+    // Each lane box shows its ink alone: Stipple's thumbnail is yellow, Pixelate's magenta.
+    const tint = (key) =>
+      page
+        .waitForFunction(
+          (k) => {
+            const img = document.querySelector(`.box[data-key="${k}"] .pic img`);
+            if (!img || !img.complete || !img.naturalWidth) return null;
+            const c = document.createElement("canvas");
+            c.width = img.naturalWidth;
+            c.height = img.naturalHeight;
+            const g = c.getContext("2d");
+            g.drawImage(img, 0, 0);
+            const d = g.getImageData(0, 0, c.width, c.height).data;
+            let r = 0, gg = 0, b = 0, n = 0;
+            for (let i = 0; i < d.length; i += 4) {
+              if (d[i] > 235 && d[i + 1] > 235 && d[i + 2] > 235) continue; // bare paper
+              r += d[i]; gg += d[i + 1]; b += d[i + 2]; n++;
+            }
+            return n ? [r / n, gg / n, b / n].map(Math.round) : null;
+          },
+          key,
+          { timeout: 60_000 },
+        )
+        .then((h) => h.jsonValue());
+    const y = await tint("stipple@Y");
+    const m = await tint("pixelate@M");
+    check(y[0] > y[2] + 40 && y[1] > y[2] + 40 && m[0] > m[1] + 40, `lane boxes show their own ink: Stipple yellow ${JSON.stringify(y)}, Pixelate magenta ${JSON.stringify(m)}`);
+
+    // The Stack panel (the Stack box): per-ink lines and time, in pass order.
+    await page.click('.strip .box[data-key="@stack"] .pic');
+    await page.waitForFunction(() => [...document.querySelectorAll(".stack-row")].filter((r) => /lines? · ~/.test(r.textContent)).length >= 3, null, { timeout: 60_000 });
+    const stack = await page.$$eval(".stack-row", (els) => els.map((e) => `${e.dataset.ink}:${e.querySelector(".stack-stat").textContent}`));
+    check(stack.length === 4 && /Y:[\d,]+ lines · ~/.test(stack.join("|")) && /M:[\d,]+ lines? · ~/.test(stack.join("|")), `the Stack panel lists each ink's lines and time (${stack.join(" | ")})`);
+    const passOrder = () => page.$$eval(".stack-row", (els) => els.map((e) => e.dataset.ink).join(""));
+    const laneOrder = () => page.$$eval(".lane-row", (els) => els.map((e) => e.dataset.lane).join(""));
+    check((await passOrder()) === (await laneOrder()), `lane order is the pass order (${await laneOrder()})`);
+
+    // Dragging a lane's handle changes the pass order, and the Stack panel follows.
+    const before = await laneOrder();
+    await page.dragAndDrop(`.lane-head[data-lane-handle="${before[1]}"]`, `.lane-row[data-lane="${before[0]}"]`);
+    await page.waitForFunction((b) => [...document.querySelectorAll(".lane-row")].map((e) => e.dataset.lane).join("") !== b, before, { timeout: 30_000 }).catch(() => {});
+    const dragged = await laneOrder();
+    await page.waitForFunction((o) => [...document.querySelectorAll(".stack-row")].map((e) => e.dataset.ink).join("") === o, dragged, { timeout: 30_000 }).catch(() => {});
+    check(dragged === before[1] + before[0] + before.slice(2) && (await passOrder()) === dragged, `dragging a lane updates the pass order and the stack (${before} → ${dragged}, stack ${await passOrder()})`);
+    // The Stack panel's arrows do the same.
+    const first = dragged[0];
+    await page.click(`.stack-row[data-ink="${first}"] button[aria-label="Plot ${await page.textContent(`.stack-row[data-ink="${first}"] .layer-name`)} later"]`);
+    await page.waitForFunction((f) => document.querySelector(".lane-row")?.dataset.lane !== f, first, { timeout: 30_000 }).catch(() => {});
+    check((await laneOrder())[1] === first, `the Stack panel's ↓ moves an ink later, and its lane follows (${dragged} → ${await laneOrder()})`);
+
+    // Hiding an ink is only the view: the canvas loses it, the plot (strokes) doesn't.
+    const stats = await page.textContent(".stats .big");
+    await page.uncheck('.stack-row[data-ink="Y"] input[type=checkbox]');
+    const chipOn = await page.isChecked('.view-bar label.chip:has-text("Yellow") input');
+    check(!chipOn && (await page.textContent(".stats .big")) === stats && (await page.$('.lane-row[data-lane="Y"].hidden-lane')) !== null, "hiding Yellow in the Stack panel hides it on the canvas only (time estimate unchanged)");
+    await page.check('.stack-row[data-ink="Y"] input[type=checkbox]');
+
+    // One lane at a time, then all four again.
+    await page.click('.lanes-bar [data-lane-tab="M"]');
+    const one = await rows();
+    await page.click('.lanes-bar [data-lane-tab="all"]');
+    check(one === "M:pixelate+centerline" && (await page.$$(".lane-row")).length === 4, `the C/M/Y/K tabs show one lane, All lanes all four (${one})`);
+
+    // The warning takes the focus; Escape closes it and gives the focus back to Linked.
+    await page.click(".lanes-bar button:has-text('Linked')");
+    const focusIn = await page.evaluate(() => document.activeElement?.closest(".link-warn") !== null && document.activeElement?.textContent);
+    await page.keyboard.press("Escape");
+    const back = await page.evaluate(() => ({ gone: !document.querySelector(".link-warn"), on: document.activeElement?.textContent }));
+    check(/Link every ink/.test(focusIn || "") && back.gone && back.on === "Linked", `the link warning takes the focus, and Escape gives it back (${focusIn} → ${back.on})`);
+    // Linked again: a warning first, then a checkpoint, then every ink copies the chosen lane.
+    await page.click(".lanes-bar button:has-text('Linked')");
+    const warn = await page.textContent(".link-warn");
+    check(/will change/.test(warn) && /checkpoint first/.test(warn), `Linked warns what changes and that a checkpoint is saved first (${warn.slice(0, 80)}…)`);
+    await page.click('.link-warn .link-warn-pick button:has-text("Magenta")');
+    await page.click(".link-warn button:has-text('Link every ink to Magenta')");
+    await page.waitForSelector(".lane-rows", { state: "detached", timeout: 30_000 });
+    const keys = await page.$$eval(".strip .box", (els) => els.map((e) => e.dataset.key).join(","));
+    const notices = await page.$$eval(".notice", (els) => els.map((e) => e.textContent).join(" "));
+    check(keys === "source,cmyk,pixelate,centerline,@stack,order" && /every ink now uses the Magenta lane/.test(notices), `linking collapses every ink onto Magenta's lane (${keys})`);
+    await page.click("header.top .cp-group button:has-text('Checkpoints')");
+    const saved = await page.waitForSelector("text=Before linking the inks", { timeout: 10_000 }).catch(() => null);
+    check(!!saved, "the independent inks were saved as a checkpoint before linking");
+    await page.close();
+  }
+
   // Dark mode: the chrome goes dark, the paper stays paper-coloured.
   {
     const page = await open(1280, "dark");

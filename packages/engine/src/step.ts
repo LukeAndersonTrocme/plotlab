@@ -76,6 +76,12 @@ export interface StepDefinition<
    * recipe lacks (matched by ink id) and points layers that have no ink yet at them.
    */
   layerInks?: Record<string, Ink>;
+  /**
+   * A lines → lines step that treats each layer on its own (Fill). Like a layer step it takes
+   * a layer selector and per-layer settings (ADR 0009, Independent inks): the engine runs it
+   * on each selected layer with that layer's settings and passes the others through.
+   */
+  linesPerLayer?: boolean;
   /** Lattice steps (Fill): their output follows the recipe's print screen angles (`StepContext.screenAngle`). */
   usesScreenAngles?: boolean;
   /** Layer value kinds `runLayer` can handle (default: both). */

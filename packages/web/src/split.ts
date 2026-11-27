@@ -1,4 +1,4 @@
-import { lanesOf, splitWith, type Recipe, type StepRegistry } from "@plotlab/engine";
+import { lanesOf, linkLanes, linkLoss, splitWith, type Recipe, type StepRegistry } from "@plotlab/engine";
 import { presets } from "@plotlab/steps";
 import { autoCheckpoint, listForProject, restoreSafely } from "./checkpoints.ts";
 import { commit, type History } from "./history.ts";
@@ -16,6 +16,8 @@ export const SPLIT_STEP = "cmyk";
 export const PRE_SPLIT = "Before splitting into CMYK";
 /** The checkpoint saved before undoing a split, so linked edits made since aren't lost. */
 export const BEFORE_UNDO = "Before undoing the split";
+/** The checkpoint saved before linking independent inks (linking loses each ink's own steps and settings). */
+export const BEFORE_LINK = "Before linking the inks";
 
 export const isSplit = (r: Recipe, registry: StepRegistry) => lanesOf(r, registry).split !== null;
 
@@ -129,4 +131,36 @@ export async function undoSplit(
     return { recipe: r.recipe, history: r.history, saved: r.saved, message: [`Undid the split: back to the settings from before it. ${where}`, ...r.warnings].join("\n") };
   }
   return { reason: "Couldn't find the recipe from before the split. Pick a checkpoint from before it in Checkpoints, or remove Separate CMYK." };
+}
+
+/** An ink's name (Cyan…) from the split step's inks. */
+function inkName(r: Recipe, registry: StepRegistry, layer: string): string {
+  const v = lanesOf(r, registry);
+  return (v.split !== null && registry.get(r.steps[v.split]!.step)?.layerInks?.[layer]?.name) || layer;
+}
+
+/** What the Linked button warns before linking onto lane `layer` (`linkLoss`: the lanes that change). */
+export function linkWarning(r: Recipe, registry: StepRegistry, layer: string): string {
+  const loss = linkLoss(r, registry, layer);
+  const what = loss.length ? ` These lanes are different and will change: ${loss.join("; ")}.` : " The lanes are the same now, so nothing changes in what they show.";
+  return `Linking makes every ink use the ${inkName(r, registry, layer)} lane's steps and settings.${what} Your current settings are saved as a checkpoint first.`;
+}
+
+/**
+ * Linked again: every lane becomes lane `layer` (`linkLanes`). It's lossy, so the current recipe
+ * is saved as a checkpoint first, the way a split saves one (no storage: Back undoes it). If
+ * saving fails, the error is thrown and nothing changes.
+ */
+export async function linkInks(
+  project: ProjectStore | null,
+  current: Recipe,
+  registry: StepRegistry,
+  layer: string,
+  now?: number,
+): Promise<{ recipe: Recipe; saved: Saved | null; message: string } | { reason: string }> {
+  const res = linkLanes(current, registry, layer);
+  if ("reason" in res) return res;
+  const saved = project ? await autoCheckpoint(project, { recipe: current, name: BEFORE_LINK, now }) : null;
+  const back = saved ? "Your independent inks are saved as a checkpoint." : "Checkpoints are off, so they weren't saved first: Back brings them back.";
+  return { recipe: res.recipe, saved, message: `Linked: every ink now uses the ${inkName(current, registry, layer)} lane's steps and settings. ${back}` };
 }

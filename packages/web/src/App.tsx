@@ -12,8 +12,10 @@ import { ModeSwitch, SetupChip } from "./Shell.tsx";
 import { canvasTarget, clickBox, lookingBand, compareTargetsOf, fitView, fromViewBlock, initialView, isPinned, openSetup, pin, readThumbSize, resizeThumbs, RESULT, select, selectedIndex, setCompare, setMode, sidebarSteps, SOURCE, stepSelection, toggleCompare, toggleSelect, togglePin, toggleSolo, toViewBlock, writeThumbSize, type ViewState } from "./view.ts";
 import { Strip } from "./Strip.tsx";
 import { addAt, moveToGap } from "./gaps.ts";
-import { STACK_KEY, STEP_DRAG, stripBoxes, stripLanes, thumbRenderSide, toggleBypass, type StripBox } from "./strip.ts";
-import { isSplit, markSplit, splitIntoCmyk, undoSplit, type SplitMark } from "./split.ts";
+import { STACK_KEY, STEP_DRAG, stripBoxes, thumbRenderSide, toggleBypass, type StripBox } from "./strip.ts";
+import { isSplit, linkInks, markSplit, splitIntoCmyk, undoSplit, type SplitMark } from "./split.ts";
+import { laneProps } from "./laneProps.ts";
+import { StackPanel } from "./StackPanel.tsx";
 import { bandView, shiftRefusal, shownBands } from "./compare.ts";
 import { EMPTY_RUN, Runner, type RunState } from "./runner.ts";
 import { decodeFile, loadSample, sampleSource } from "./sample.ts";
@@ -355,6 +357,23 @@ function Editor(props: { hidden: boolean }) {
     }
   };
 
+  /** Linked again (lossy): every ink copies lane `layer`; the independent inks are saved as a checkpoint first. */
+  const link = async (layer: string) => {
+    const before = recipeRef.current;
+    try {
+      const r = await linkInks(project, before, registry, layer);
+      if ("reason" in r) return setNotice(r.reason);
+      if (r.saved) {
+        if (r.saved.created && project) addPicture(project, r.saved.checkpoint, before);
+        setSaved((n) => n + 1);
+      }
+      apply(r.recipe, false);
+      setNotice(r.message);
+    } catch (e) {
+      setNotice(`Couldn't save your settings as a checkpoint first, so the inks weren't linked: ${errText(e)}`);
+    }
+  };
+
   const apply = (next: Recipe, proxy: boolean, _step?: AnyStep) => {
     if (!ready) return;
     // A drag previews; releasing commits, so one drag is one Back step.
@@ -415,10 +434,11 @@ function Editor(props: { hidden: boolean }) {
     const strips = JSON.stringify(compareTargetsOf(next, r)) !== JSON.stringify(runner.compare);
     if (canvasTarget(next, r) !== runner.inspect || strips || thumbSide(next) !== runner.thumbs || passSide(next) !== runner.passes) send(r, false);
   };
-  /** A chain edit from the strip that ends with a step selected: the canvas shows that step. */
-  const applySelecting = (next: Recipe, id: string) => {
+  /** A chain edit from the strip that ends with a step selected (in lane `lane`, if given): the canvas shows that step. */
+  const applySelecting = (next: Recipe, id: string, lane?: string) => {
     if (!ready) return;
-    const v = select(viewRef.current, stepSelection(id));
+    const picked = select(viewRef.current, stepSelection(id));
+    const v = lane ? { ...picked, lane } : picked;
     // Set the view first, so the run this edit sends already draws the selected step.
     viewRef.current = v;
     setView(v);
@@ -604,6 +624,9 @@ function Editor(props: { hidden: boolean }) {
   };
 
   const boxes = stripBoxes(recipe, registry, run);
+  // CMYK lanes: lane order is the pass order; Independent inks get one row per lane.
+  const lp = laneProps({ recipe, registry, run, plot, view, currentView: () => viewRef.current, changeView, apply, applySelecting, setNotice, link: (l) => void link(l) });
+  const lanes = lp.lanes;
   const summary = setupSummary(recipe, run.estimate);
   const projectName = sourceName === "sample" ? "Sample image" : sourceName;
 
@@ -841,6 +864,23 @@ function Editor(props: { hidden: boolean }) {
                   <p className="hint">Four inks, one set of settings for all. Your current settings are saved as a checkpoint first.</p>
                 </div>
               )}
+              {lanes && view.selection.kind === "result" && (
+                <StackPanel
+                  layers={lanes.layers}
+                  names={lanes.names}
+                  plot={plot}
+                  estimate={run.estimate}
+                  passOrder={recipe.passOrder}
+                  hidden={hidden}
+                  onHide={(id, hide) => {
+                    const h = new Set(hidden);
+                    if (hide) h.add(id);
+                    else h.delete(id);
+                    setHidden(h);
+                  }}
+                  onPassOrder={(order) => apply({ ...recipe, passOrder: order }, false)}
+                />
+              )}
               <StepList
                 recipe={recipe}
                 {...(cards && { cards })}
@@ -860,6 +900,7 @@ function Editor(props: { hidden: boolean }) {
                 }}
                 onHelp={setHelp}
                 onNotice={setNotice}
+                {...lp.sidebar}
               />
             </>
           )}
@@ -940,9 +981,11 @@ function Editor(props: { hidden: boolean }) {
             if ("reason" in res) setNotice(res.reason);
             else if (id) applySelecting(res.recipe, id);
           }}
-          lanes={stripLanes(recipe, registry)}
+          lanes={lanes}
           onUnsplit={() => void unsplit()}
           onScreenAngles={(on) => apply({ ...recipe, screenAngles: on }, false)}
+          {...lp.strip}
+          hidden={hidden}
         />
       )}
       {view.mode === "plot" && plot && plot.layers.length > 0 && (

@@ -47,9 +47,13 @@ export interface ViewState {
   solo: string | null;
   /** Compare stages (Design): the canvas split into strips (`compare.ts`); null = off. */
   compare: Compare | null;
+  /** CMYK lanes (Independent inks): every lane in the strip ("all"), or one ink's lane (its tab). Not saved. */
+  laneView: "all" | string;
+  /** The lane the selected step was picked in: the sidebar edits that ink's settings. Null outside the lanes. Not saved. */
+  lane: string | null;
 }
 
-export const initialView: ViewState = { mode: "design", selection: RESULT, thumb: THUMB.default, pins: [], solo: null, compare: null };
+export const initialView: ViewState = { mode: "design", selection: RESULT, thumb: THUMB.default, pins: [], solo: null, compare: null, laneView: "all", lane: null };
 
 const clampThumb = (px: number) => Math.round(Math.min(THUMB.max, Math.max(THUMB.min, px)));
 
@@ -99,10 +103,23 @@ export function toggleSolo(v: ViewState, id: string | null): ViewState {
 /** The setup chip in the top bar opens Page mode. */
 export const openSetup = (v: ViewState) => setMode(v, "page");
 
-/** Look at a step (or the source, or the result). Step settings live in Design, so go there. */
+/** Look at a step (or the source, or the result). Step settings live in Design, so go there. A new selection is outside the lanes. */
 export function select(v: ViewState, selection: Selection): ViewState {
   if (v.mode === "design" && sameSelection(v.selection, selection)) return v;
-  return { ...v, mode: "design", selection };
+  return { ...v, mode: "design", selection, lane: null };
+}
+
+/** The lane tabs: every lane, or one ink's lane (whose settings the sidebar then edits). */
+export function showLanes(v: ViewState, which: "all" | string): ViewState {
+  const lane = which === "all" ? v.lane : which;
+  return v.laneView === which && v.lane === lane ? v : { ...v, laneView: which, lane };
+}
+
+/** A box in lane `layer`: look at that step for that ink; the same box again goes back to the result. */
+export function clickLaneBox(v: ViewState, id: string, layer: string): ViewState {
+  const sel = stepSelection(id);
+  if (v.mode === "design" && sameSelection(v.selection, sel) && v.lane === layer) return select(v, RESULT);
+  return { ...select(v, sel), lane: layer };
 }
 
 /** Clicking what's already selected (in Design) goes back to the result. */

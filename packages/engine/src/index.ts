@@ -15,6 +15,7 @@ export * from "./project.ts";
 export * from "./layers.ts";
 export * from "./chain.ts";
 export * from "./lanes.ts";
+export * from "./lane-edits.ts";
 export * from "./render.ts";
 export * from "./features.ts";
 export * from "./defaults.ts";

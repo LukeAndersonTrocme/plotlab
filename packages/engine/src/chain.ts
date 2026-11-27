@@ -1,5 +1,7 @@
 import { defaultParams } from "./params.ts";
 import { newStepId, type Recipe, type RecipeStep } from "./recipe.ts";
+import { newLaneIssue } from "./lanes.ts";
+import { stageAfter, stageMismatch, stageOf } from "./stages.ts";
 import type { AnyStep, StepRegistry } from "./step.ts";
 import type { Ink, StageKind } from "./types.ts";
 
@@ -25,7 +27,7 @@ function advice(needs: StageKind, input: StageKind, registry: StepRegistry): str
 /** Every place an enabled step receives the wrong kind of data. */
 export function checkChain(input: StageKind, steps: RecipeStep[], registry: StepRegistry): ChainIssue[] {
   const issues: ChainIssue[] = [];
-  let current = input;
+  let at = stageOf(input);
   steps.forEach((rs, index) => {
     if (rs.enabled === false) return;
     const def = registry.get(rs.step);
@@ -34,21 +36,28 @@ export function checkChain(input: StageKind, steps: RecipeStep[], registry: Step
       return;
     }
     const needs = def.input as StageKind;
-    if (needs !== current) {
+    const miss = stageMismatch(at, def, rs);
+    if (miss === "kind") {
       issues.push({
         index,
-        reason: `${def.title} needs ${STAGE_WORDS[needs]}, but at that point the chain has ${STAGE_WORDS[current]}. ${advice(needs, input, registry)}`,
+        reason: `${def.title} needs ${STAGE_WORDS[needs]}, but at that point the chain has ${STAGE_WORDS[at.kind]}. ${advice(needs, input, registry)}`,
       });
-    }
-    current = def.output as StageKind;
+    } else if (miss) issues.push({ index, reason: miss.reason });
+    at = stageAfter(at, def, rs);
   });
   return issues;
 }
 
-function validated(recipe: Recipe, steps: RecipeStep[], registry: StepRegistry, prefix = ""): ChainResult {
+/**
+ * The edited chain, if it fits: as a whole (`checkChain`) and, in a split recipe, in every
+ * ink's lane (`newLaneIssue`: the edit mustn't break a lane that worked).
+ */
+export function validated(recipe: Recipe, steps: RecipeStep[], registry: StepRegistry, prefix = ""): ChainResult {
   const issues = checkChain(recipe.input, steps, registry);
   if (issues.length) return { reason: prefix + issues[0]!.reason };
-  return { recipe: { ...recipe, steps } };
+  const next = { ...recipe, steps };
+  const lane = newLaneIssue(recipe, next, registry);
+  return lane ? { reason: prefix + lane.reason } : { recipe: next };
 }
 
 /** Move the step at `from` so it ends up at index `to`. */
@@ -80,6 +89,8 @@ export function insertStep(
     if ("recipe" in res) return { recipe: withStepInks(res.recipe, def), index: i };
     reason ||= res.reason;
   }
+  // A lane the step would break at the place asked for: that's the reason.
+  if (at !== undefined && !checkChain(recipe.input, [...recipe.steps.slice(0, at), fresh, ...recipe.steps.slice(at)], registry).length) return { reason };
   // Prefer the reason about the new step itself (it's the one the person is placing).
   const end = [...recipe.steps, fresh];
   const own = checkChain(recipe.input, end, registry).find((x) => x.index === end.length - 1);

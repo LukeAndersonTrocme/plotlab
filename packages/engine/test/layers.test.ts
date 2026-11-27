@@ -5,6 +5,8 @@ import { centerline, threshold } from "../../steps/src/index.ts";
 /** Test-only: splits the image into two identical tone layers "a" and "b". */
 const split = defineStep({
   id: "split", version: 1, title: "Split", summary: "", input: "image", output: "layers", cost: "live", help: "", params: {},
+  // Declares its layers, so a chain knows which are left once some are lines.
+  layerInks: { a: { id: "ka", color: "#000" }, b: { id: "kb", color: "#000" } } as never,
   run: (img): Layers => {
     const data = new Float32Array(img.width * img.height).map((_, i) => (img.data[i * img.channels]! < 0.5 ? 1 : 0));
     const layer = (id: string): Layer => ({ id, name: id.toUpperCase(), values: { kind: "tone", data: data.slice() } });
@@ -101,6 +103,49 @@ describe("layers that stop early", () => {
     const { plot } = await run([{ step: "split" }, { step: "centerline", layers: [] }]);
     expect(plot?.layers).toEqual([]);
     expect(plot?.rasterLayers?.layers).toHaveLength(2);
+  });
+});
+
+describe("a second line step for the layers the first one left (one ink each)", () => {
+  it("transforms and traces the layers that are still layers, and keeps the lines already made", async () => {
+    const { output, plot } = await run([
+      { step: "split" },
+      { step: "centerline", layers: ["a"], params: { minLength: 0 } },
+      { step: "invert", layers: ["b"], params: { amount: 0 } },
+      { step: "centerline", layers: ["b"], params: { minLength: 0 } },
+    ]);
+    expect(output.kind).toBe("geometry");
+    if (output.kind !== "geometry") return;
+    expect(output.layers.map((l) => l.id)).toEqual(["a", "b"]);
+    expect(output.rasterLayers).toBeUndefined();
+    expect(output.layers.every((l) => l.features.features.length > 0)).toBe(true);
+    expect(plot?.layers.map((l) => l.id).sort()).toEqual(["a", "b"]);
+  });
+  it("a later line step's lines come after the lines already made (the plot orders passes by passOrder)", async () => {
+    const { output, plot } = await run([
+      { step: "split" },
+      { step: "centerline", layers: ["b"], params: { minLength: 0 } },
+      { step: "centerline", layers: ["a"], params: { minLength: 0 } },
+    ]);
+    if (output.kind !== "geometry") throw new Error("expected lines");
+    expect(output.layers.map((l) => l.id)).toEqual(["b", "a"]);
+    // Both inks are black here, so light-to-dark keeps the lines' order; a named order wins.
+    expect(plot?.layers.map((l) => l.id)).toEqual(["b", "a"]);
+    const named = await new Pipeline(reg).run(
+      src,
+      loadRecipe({ schemaVersion: 2, paper: { widthMm: 8, heightMm: 8 }, layout: { marginMm: 0 }, workingMmPerPx: 1, inks: [{ id: "k", color: "#000" }], passOrder: ["a", "b"], steps: [{ step: "split" }, { step: "centerline", layers: ["b"] }, { step: "centerline", layers: ["a"] }] }, reg).recipe,
+    );
+    expect(named.plot?.layers.map((l) => l.id)).toEqual(["a", "b"]);
+  });
+  it("a layer step after the lines changes only the layers still riding along", async () => {
+    const { output, results } = await run([{ step: "split" }, { step: "centerline", layers: ["a"] }, { step: "invert", layers: ["b"] }]);
+    if (output.kind !== "geometry") throw new Error("expected lines");
+    expect(output.layers.map((l) => l.id)).toEqual(["a"]);
+    expect(tone(output.rasterLayers?.layers[0])?.slice(0, 8)).toEqual([0, 0, 0, 0, 1, 1, 1, 1]);
+    expect(results[2]!.layers).toEqual([
+      { id: "a", name: "A", kind: "lines" },
+      { id: "b", name: "B", kind: "tone" },
+    ]);
   });
 });
 
