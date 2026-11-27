@@ -107,6 +107,11 @@ describe("drawOrder: what the canvas draws, bottom to top", () => {
   it("by default, as before: images, the layers, then the lines, each with its own mix", () => {
     expect(shape(drawOrder([R("image", null), ...rasters], lines, { hidden: none }))).toEqual(["r:image:n", "r:C:x", "r:M:x", "l:Y:x", "l:K:x", "l:C:x"]);
   });
+  it("by default, an image keeps its place among the layers (arrival order), as before", () => {
+    expect(shape(drawOrder([R("C"), R("image", null), R("M")], [L("K")], { hidden: none }))).toEqual(["r:C:x", "r:image:n", "r:M:x", "l:K:x"]);
+    // Opaque or a focus: images go underneath every ink.
+    expect(shape(drawOrder([R("C"), R("image", null)], [], { hidden: none, opaque: true, order: ["C"] }))).toEqual(["r:image:n", "r:C:n"]);
+  });
   it("hidden inks are left out, everywhere", () => {
     expect(shape(drawOrder(rasters, lines, { hidden: new Set(["C"]) }))).toEqual(["r:M:x", "l:Y:x", "l:K:x"]);
     expect(shape(drawOrder(rasters, lines, { hidden: new Set(["C"]), focus: "M", otherInks: true }))).toEqual(["l:Y~:x", "l:K~:x", "r:M:x"]);

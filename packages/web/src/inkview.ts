@@ -85,17 +85,19 @@ export interface DrawOptions {
 }
 
 /**
- * What the canvas draws, bottom to top. Images (`color` null) first; hidden inks never. By
- * default the layers then the lines, as they come, each with its own mix (see-through inks
- * multiply, so their order doesn't change the picture). Opaque: each ink's layer then its
- * lines, in pass order, blended normally. With a focus, the other inks go underneath, faint.
+ * What the canvas draws, bottom to top; hidden inks never. By default exactly as before: the
+ * rasters as they come (images among them), then the lines, each with its own mix (see-through
+ * inks multiply, so their order doesn't change the picture). Opaque or with a focus, images
+ * (`color` null) go first, then the inks: opaque, each ink's layer then its lines in pass
+ * order, blended normally; with a focus, the other inks underneath, faint, then that ink.
  */
 export function drawOrder(rasters: ReadonlyArray<{ id: string; color: string | null; mix: "multiply" | "normal" }>, lines: ReadonlyArray<{ id: string; mix: "multiply" | "normal" }>, o: DrawOptions): DrawItem[] {
-  const images: DrawItem[] = rasters.filter((r) => r.color === null && !o.hidden.has(r.id)).map((r) => ({ kind: "raster", id: r.id, faint: false, mix: r.mix }));
-  let inks: DrawItem[] = [
-    ...rasters.filter((r) => r.color !== null).map((r): DrawItem => ({ kind: "raster", id: r.id, faint: false, mix: r.mix })),
-    ...lines.map((l): DrawItem => ({ kind: "lines", id: l.id, faint: false, mix: l.mix })),
-  ].filter((d) => !o.hidden.has(d.id));
+  const item = (kind: DrawItem["kind"]) => (d: { id: string; mix: DrawItem["mix"] }): DrawItem => ({ kind, id: d.id, faint: false, mix: d.mix });
+  const shown = <T extends { id: string }>(xs: ReadonlyArray<T>) => xs.filter((x) => !o.hidden.has(x.id));
+  // As before: the rasters as they come (images among them), then the lines.
+  if (!o.opaque && !o.focus) return [...shown(rasters).map(item("raster")), ...shown(lines).map(item("lines"))];
+  const images = shown(rasters.filter((r) => r.color === null)).map(item("raster"));
+  let inks = [...shown(rasters.filter((r) => r.color !== null)).map(item("raster")), ...shown(lines).map(item("lines"))];
   if (o.opaque) {
     const order = o.order ?? [];
     const rank = (id: string) => (order.includes(id) ? order.indexOf(id) : order.length);
@@ -106,5 +108,6 @@ export function drawOrder(rasters: ReadonlyArray<{ id: string; color: string | n
     const others = o.otherInks ? inks.filter((d) => d.id !== o.focus).map((d) => ({ ...d, faint: true })) : [];
     inks = [...others, ...inks.filter((d) => d.id === o.focus)];
   }
+  // Images aren't inks: under all of them.
   return [...images, ...inks];
 }
