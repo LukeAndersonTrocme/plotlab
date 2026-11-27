@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { addInLane, checkChain, insertStep, moveStep, removeStep, Pipeline, type RawImage, laneIssues, lanesOf, linkLanes, linkLoss, loadRecipe, moveInLane, removeFromLane, setLaneParam, unlinkLanes, type Recipe } from "../src/index.ts";
+import { addInLane, checkChain, insertStep, moveStep, removeStep, resetLaneStep, Pipeline, type RawImage, laneIssues, lanesOf, linkLanes, linkLoss, loadRecipe, moveInLane, removeFromLane, setLaneParam, unlinkLanes, type Recipe } from "../src/index.ts";
 import { createRegistry } from "../../steps/src/index.ts";
 
 const reg = createRegistry();
@@ -224,5 +224,22 @@ describe("whole-chain edits keep every lane working (review r1)", () => {
     expect(laneIssues(r, reg)).toHaveLength(1);
     expect("recipe" in moveStep(r, 1, 1, reg)).toBe(true);
     expect("recipe" in insertStep(r, "pixelate", reg, 1)).toBe(true);
+  });
+});
+
+describe("resetLaneStep: Defaults for this step, from a lane (review r1)", () => {
+  it("puts only that ink's settings back to the defaults; the other inks keep theirs", () => {
+    let r = recipe(["cmyk", { step: "centerline", params: { minLength: 2 } }, "order"]);
+    r = ok(unlinkLanes(r, reg)).recipe;
+    r = ok(setLaneParam(r, reg, "centerline", "minLength", 3, "M")).recipe;
+    const d = ok(resetLaneStep(r, reg, "centerline", "M")).recipe;
+    const defaults = recipe(["cmyk", "centerline"]).steps[1]!.params;
+    expect(lane(d, "M").steps[0]!.params).toEqual(defaults);
+    for (const x of ["C", "Y", "K"]) expect(lane(d, x).steps[0]!.params.minLength).toBe(2);
+    expect(lanesOf(d, reg).linked).toBe(false);
+  });
+  it("refuses a step that isn't in that lane", () => {
+    const r = ok(unlinkLanes(linked(), reg)).recipe;
+    expect(resetLaneStep(r, reg, "order", "M")).toEqual({ reason: expect.stringMatching(/isn't in the M lane/) });
   });
 });

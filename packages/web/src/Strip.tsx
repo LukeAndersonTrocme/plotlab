@@ -340,6 +340,17 @@ function LanesBar(props: {
   /** Linked was pressed while independent: the lane to link onto, waiting for a yes. */
   const [linking, setLinking] = useState<string | null>(null);
   useEffect(() => setLinking(null), [lanes.linked]);
+  const linkedBtn = useRef<HTMLButtonElement>(null);
+  const dialog = useRef<HTMLSpanElement>(null);
+  const opened = linking !== null;
+  // The warning takes the focus when it opens (its Link button), and gives it back to Linked.
+  useEffect(() => {
+    if (opened) dialog.current?.querySelector<HTMLButtonElement>(".link-warn-do .primary")?.focus();
+  }, [opened]);
+  const closeWarning = () => {
+    setLinking(null);
+    linkedBtn.current?.focus();
+  };
   return (
     <span className="lanes-bar" aria-label="Inks">
       <span className="lanes-inks" title={`Split into ${lanes.names.join(", ")}.${lanes.linked ? " Each box in the row shows all four inks, one in each corner." : ""}`}>
@@ -350,7 +361,9 @@ function LanesBar(props: {
       </span>
       <span className="seg" role="group" aria-label="Linked or independent inks">
         <button
+          ref={linkedBtn}
           aria-pressed={lanes.linked}
+          aria-expanded={lanes.linked ? undefined : opened}
           title="Linked: one set of steps and settings drives every ink."
           onClick={() => !lanes.linked && setLinking(linking ? null : props.linkLane)}
         >
@@ -376,8 +389,20 @@ function LanesBar(props: {
         Undo the split
       </button>
       {linking && (
-        <span className="link-warn" role="alertdialog" aria-label="Link the inks?">
-          <span>{props.linkWarning(linking)}</span>
+        <span
+          ref={dialog}
+          className="link-warn"
+          role="alertdialog"
+          aria-label="Link the inks?"
+          aria-describedby="link-warn-text"
+          onKeyDown={(e) => {
+            if (e.key !== "Escape") return;
+            e.preventDefault();
+            e.stopPropagation();
+            closeWarning();
+          }}
+        >
+          <span id="link-warn-text">{props.linkWarning(linking)}</span>
           <span className="link-warn-pick">
             Copy the lane of
             {lanes.layers.map((l, i) => (
@@ -397,7 +422,7 @@ function LanesBar(props: {
             >
               Link every ink to {lanes.names[lanes.layers.indexOf(linking)]}
             </button>
-            <button onClick={() => setLinking(null)}>Cancel</button>
+            <button onClick={closeWarning}>Cancel</button>
           </span>
         </span>
       )}

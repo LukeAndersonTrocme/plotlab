@@ -1,7 +1,7 @@
 import { checkChain, removeStep, withStepInks, type ChainResult } from "./chain.ts";
 import { isSplitStep, lanesOf, laneIssues, type Lane, type LaneView } from "./lanes.ts";
 import { actsPerLayer } from "./layers.ts";
-import { defaultParams } from "./params.ts";
+import { defaultParams, type ParamDecl } from "./params.ts";
 import { newStepId, type Recipe, type RecipeStep } from "./recipe.ts";
 import type { AnyStep, StepRegistry } from "./step.ts";
 
@@ -121,6 +121,22 @@ export function moveInLane(recipe: Recipe, registry: StepRegistry, stepId: strin
     reason ||= res.reason;
   }
   return { reason: `${title(registry, found.rs)} can't go there in the ${layer} lane: ${reason || "nothing else would change."}` };
+}
+
+/**
+ * "Defaults for this step" from lane `layer`: that ink's settings go back to the defaults
+ * (written as its own settings, keeping its seed), so the other inks keep theirs.
+ */
+export function resetLaneStep(recipe: Recipe, registry: StepRegistry, stepId: string, layer: string): ChainResult {
+  const found = inLane(recipe, registry, stepId, layer);
+  if ("reason" in found) return found;
+  const { rs, index } = found;
+  const def = registry.get(rs.step)!;
+  const mine = found.lane.steps[found.pos]!.params;
+  const own: Record<string, unknown> = {};
+  for (const [k, d] of Object.entries(def.params as Record<string, ParamDecl>)) own[k] = d.type === "number" && d.seed && mine[k] !== undefined ? mine[k] : d.default;
+  const next: RecipeStep = { ...rs, layerParams: { ...rs.layerParams, [layer]: own } };
+  return { recipe: { ...recipe, steps: recipe.steps.map((s, i) => (i === index ? next : s)) } };
 }
 
 /** Chain positions of the steps in the lanes (after the split, before the stack). */

@@ -73,7 +73,9 @@ export async function applyLayerStep(
 /**
  * A layer step on lines that still carry layers (a line step before it took only some):
  * it works on those layers, and the lines already made stay. A line step adds its lines
- * after them, so each ink can have its own line step (ADR 0009).
+ * after them, so each ink can have its own line step (ADR 0009). That order (lines in the
+ * order they were made) is deliberate and harmless: the plot orders its passes by the
+ * recipe's `passOrder` (`toPlot`), and print screen angles go by layer id.
  */
 async function applyToLeftLayers(def: AnyStep, input: Geometry, rs: Pick<RecipeStep, "params" | "layers" | "layerParams">, ctx: StepContext): Promise<Geometry> {
   const left = input.rasterLayers;

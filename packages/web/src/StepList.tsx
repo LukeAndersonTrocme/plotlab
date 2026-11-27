@@ -5,6 +5,7 @@ import {
   moveStep,
   removeStep,
   resetParam,
+  resetLaneStep,
   resetStep,
   setLaneParam,
   type AnyStep,
@@ -198,9 +199,9 @@ export function StepList(props: {
             {stepChanged && (
               <button
                 className="icon"
-                title="Defaults for this step: put every setting back (keeps the seed)"
+                title={lane ? `Defaults for this step, for ${lane.name} only: put its settings back (keeps the seed); the other inks keep theirs` : "Defaults for this step: put every setting back (keeps the seed)"}
                 aria-label={`Defaults for ${def.title}`}
-                onClick={() => props.onChange(resetStep(recipe, index, registry), false)}
+                onClick={() => (lane ? commit(resetLaneStep(recipe, registry, rs.id, lane.layer)) : props.onChange(resetStep(recipe, index, registry), false))}
               >
                 ↺
               </button>

@@ -882,6 +882,12 @@ try {
     await page.click('.lanes-bar [data-lane-tab="all"]');
     check(one === "M:pixelate+centerline" && (await page.$$(".lane-row")).length === 4, `the C/M/Y/K tabs show one lane, All lanes all four (${one})`);
 
+    // The warning takes the focus; Escape closes it and gives the focus back to Linked.
+    await page.click(".lanes-bar button:has-text('Linked')");
+    const focusIn = await page.evaluate(() => document.activeElement?.closest(".link-warn") !== null && document.activeElement?.textContent);
+    await page.keyboard.press("Escape");
+    const back = await page.evaluate(() => ({ gone: !document.querySelector(".link-warn"), on: document.activeElement?.textContent }));
+    check(/Link every ink/.test(focusIn || "") && back.gone && back.on === "Linked", `the link warning takes the focus, and Escape gives it back (${focusIn} → ${back.on})`);
     // Linked again: a warning first, then a checkpoint, then every ink copies the chosen lane.
     await page.click(".lanes-bar button:has-text('Linked')");
     const warn = await page.textContent(".link-warn");

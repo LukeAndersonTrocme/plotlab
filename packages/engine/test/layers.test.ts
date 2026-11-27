@@ -121,6 +121,22 @@ describe("a second line step for the layers the first one left (one ink each)", 
     expect(output.layers.every((l) => l.features.features.length > 0)).toBe(true);
     expect(plot?.layers.map((l) => l.id).sort()).toEqual(["a", "b"]);
   });
+  it("a later line step's lines come after the lines already made (the plot orders passes by passOrder)", async () => {
+    const { output, plot } = await run([
+      { step: "split" },
+      { step: "centerline", layers: ["b"], params: { minLength: 0 } },
+      { step: "centerline", layers: ["a"], params: { minLength: 0 } },
+    ]);
+    if (output.kind !== "geometry") throw new Error("expected lines");
+    expect(output.layers.map((l) => l.id)).toEqual(["b", "a"]);
+    // Both inks are black here, so light-to-dark keeps the lines' order; a named order wins.
+    expect(plot?.layers.map((l) => l.id)).toEqual(["b", "a"]);
+    const named = await new Pipeline(reg).run(
+      src,
+      loadRecipe({ schemaVersion: 2, paper: { widthMm: 8, heightMm: 8 }, layout: { marginMm: 0 }, workingMmPerPx: 1, inks: [{ id: "k", color: "#000" }], passOrder: ["a", "b"], steps: [{ step: "split" }, { step: "centerline", layers: ["b"] }, { step: "centerline", layers: ["a"] }] }, reg).recipe,
+    );
+    expect(named.plot?.layers.map((l) => l.id)).toEqual(["a", "b"]);
+  });
   it("a layer step after the lines changes only the layers still riding along", async () => {
     const { output, results } = await run([{ step: "split" }, { step: "centerline", layers: ["a"] }, { step: "invert", layers: ["b"] }]);
     if (output.kind !== "geometry") throw new Error("expected lines");
