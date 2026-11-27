@@ -1,6 +1,8 @@
 import { Fragment, useEffect, useRef, useState, type CSSProperties, type KeyboardEvent, type PointerEvent } from "react";
 import { STAGE_WORDS, type Recipe, type StageKind, type StepRegistry } from "@plotlab/engine";
-import { addMenu, dragHint, dropGaps, type DropGap } from "./gaps.ts";
+import { addMenu, dragHint, dropGaps, type AddMenu, type DropGap } from "./gaps.ts";
+import { laneAddMenu, type LaneRow } from "./lanes.ts";
+import { LaneRows } from "./LaneRows.tsx";
 import { useBlobUrl } from "./StageView.tsx";
 import { STACK_KEY, STAGE_NAMES, STAGES, STEP_DRAG, type StripBox, type StripLanes } from "./strip.ts";
 import { THUMB } from "./view.ts";
@@ -45,18 +47,41 @@ export function Strip(props: {
   lanes: StripLanes | null;
   onUnsplit: () => void;
   onScreenAngles: (on: boolean) => void;
+  /** Independent inks: the lane rows to show (`laneRows`); null when linked or not split. */
+  laneRows: LaneRow[] | null;
+  /** Every lane, or one ink's tab. */
+  laneView: "all" | string;
+  onShowLanes: (which: "all" | string) => void;
+  /** Key of the selected lane box (`laneKey`), or null. */
+  selectedLane: string | null;
+  /** Inks hidden from the stack (only the view). */
+  hidden: ReadonlySet<string>;
+  onLaneSelect: (id: string, layer: string) => void;
+  onLaneAdd: (layer: string, at: number, stepId: string) => void;
+  onLaneMove: (id: string, layer: string, to: number) => void;
+  /** Drag lane `from` to place `to` (lane order is the pass order). */
+  onMoveLane: (from: number, to: number) => void;
+  onUnlink: () => void;
+  /** Link onto lane `layer` (lossy: the app saves a checkpoint first). */
+  onLink: (layer: string) => void;
+  /** What linking onto lane `layer` would lose (`linkWarning`). */
+  linkWarning: (layer: string) => string;
+  /** The lane to link onto unless another is picked: the lane being looked at, else the first. */
+  linkLane: string;
 }) {
   const row = useRef<HTMLDivElement>(null);
   const steps = props.boxes.length - 1;
-  const [menu, setMenu] = useState<{ gap: number; left: number; bottom: number } | null>(null);
+  /** The open "+" menu: a gap in the chain, or (`lane`) a gap in one ink's lane. */
+  const [menu, setMenu] = useState<{ gap: number; left: number; bottom: number; lane?: { layer: string; at: number } } | null>(null);
   const [drag, setDrag] = useState<{ from: number; gaps: Map<number, DropGap>; hint: string } | null>(null);
   const [over, setOver] = useState<number | null>(null);
 
-  const openMenu = (gap: number, anchor: HTMLElement) => {
-    if (menu?.gap === gap) return setMenu(null);
+  const openMenu = (gap: number, anchor: HTMLElement, lane?: { layer: string; at: number }) => {
+    if (menu && menu.gap === gap && menu.lane?.layer === lane?.layer && menu.lane?.at === lane?.at) return setMenu(null);
     const r = anchor.getBoundingClientRect();
-    setMenu({ gap, left: Math.max(8, Math.min(window.innerWidth - 300, r.left - 130)), bottom: window.innerHeight - r.top + 8 });
+    setMenu({ gap, left: Math.max(8, Math.min(window.innerWidth - 300, r.left - 130)), bottom: window.innerHeight - r.top + 8, ...(lane ? { lane } : {}) });
   };
+  const own = props.laneRows !== null;
   const startDrag = (from: number) => {
     setMenu(null);
     const gaps = new Map(dropGaps(props.recipe, props.registry, from).map((g) => [g.gap, g]));
@@ -93,7 +118,7 @@ export function Strip(props: {
   };
 
   return (
-    <section className={`strip-wrap${drag ? " dragging" : ""}`} aria-label="Recipe steps" style={{ "--thumb": `${props.size}px` } as CSSProperties}>
+    <section className={`strip-wrap${drag ? " dragging" : ""}`} aria-label="Recipe steps" style={{ "--thumb": `${props.size}px`, "--thumb-base": `${props.size}px` } as CSSProperties}>
       <div
         className="strip-grip"
         role="separator"
@@ -116,7 +141,19 @@ export function Strip(props: {
         <span className={`strip-hint${drag ? " drag-hint" : ""}`} aria-live="polite">
           {drag ? `${drag.hint} Or drop it on the sidebar to pin it.` : `${steps} ${steps === 1 ? "step" : "steps"} · click a box to see that step and its settings, drag it to move it, + to add a step`}
         </span>
-        {props.lanes && <LanesBar lanes={props.lanes} onUnsplit={props.onUnsplit} onScreenAngles={props.onScreenAngles} />}
+        {props.lanes && (
+          <LanesBar
+            lanes={props.lanes}
+            onUnsplit={props.onUnsplit}
+            onScreenAngles={props.onScreenAngles}
+            laneView={props.laneView}
+            onShowLanes={props.onShowLanes}
+            onUnlink={props.onUnlink}
+            onLink={props.onLink}
+            linkWarning={props.linkWarning}
+            linkLane={props.linkLane}
+          />
+        )}
         <span className="legend" aria-label="Stage colours">
           {STAGES.map((k) => (
             <span key={k} style={{ "--st": stageVar(k) } as CSSProperties}>
@@ -137,6 +174,8 @@ export function Strip(props: {
       </div>
       <div className="strip" ref={row} onKeyDown={onKey} onScroll={() => setMenu(null)}>
         {props.boxes.map((b) => {
+          // Independent inks: the lane steps are in the lane rows, after the split.
+          if (own && b.lane === "lane") return null;
           const changes = b.input !== b.output;
           const selected = props.selected === b.key;
           const pinned = b.index >= 0 && props.pins.includes(b.key);
@@ -194,6 +233,22 @@ export function Strip(props: {
                   </button>
                 )}
               </div>
+              {own && b.lane === "split" ? (
+                <LaneRows
+                  rows={props.laneRows!}
+                  all={props.laneView === "all"}
+                  thumbs={props.thumbs}
+                  selected={props.selectedLane}
+                  hidden={props.hidden}
+                  onSelect={props.onLaneSelect}
+                  onBypass={props.onBypass}
+                  onNotice={props.onNotice}
+                  onPlus={(layer, at, anchor) => openMenu(gap, anchor, { layer, at })}
+                  onMove={props.onLaneMove}
+                  onMoveLane={props.onMoveLane}
+                  open={menu?.lane ?? null}
+                />
+              ) : (
               <div
                 className={["gap", drop ? (drop.ok ? "drop-ok" : "drop-no") : "", drop?.ok && over === gap ? "over" : ""].join(" ")}
                 data-gap={gap}
@@ -224,56 +279,128 @@ export function Strip(props: {
                   +
                 </button>
               </div>
-              {props.lanes?.stackAfter === b.index && (
+              )}
+              {props.lanes && (own ? b.lane === "split" : props.lanes.stackAfter === b.index) && (
                 <StackBox png={props.thumbs[STACK_KEY]} names={props.lanes.names} selected={props.selected === null} onSelect={() => props.onSelect(STACK_KEY, false)} />
               )}
             </Fragment>
           );
         })}
       </div>
-      {menu && (
+      {menu?.lane && (
         <AddMenuPop
-          recipe={props.recipe}
-          registry={props.registry}
-          gap={menu.gap}
+          menu={laneAddMenu(props.recipe, props.registry, menu.lane.layer, menu.lane.at)}
+          after={`${menu.lane.at === 0 ? "the split" : (props.laneRows?.find((r) => r.layer === menu.lane!.layer)?.boxes[menu.lane.at - 1]?.title ?? "")}, for ${props.laneRows?.find((r) => r.layer === menu.lane!.layer)?.name ?? menu.lane.layer} only`}
+          from={`.lane-gap[data-lane-gap="${menu.lane.layer}:${menu.lane.at}"] .plus`}
+          left={menu.left}
+          bottom={menu.bottom}
+          onPick={(id) => {
+            const l = menu.lane!;
+            setMenu(null);
+            props.onLaneAdd(l.layer, l.at, id);
+          }}
+          onClose={() => setMenu(null)}
+        />
+      )}
+      {menu && !menu.lane && (
+        <AddMenuPop
+          menu={addMenu(props.recipe, props.registry, menu.gap)}
           after={menu.gap === 0 ? "the source" : (props.boxes[menu.gap]?.title ?? "")}
+          from={`.strip > .gap[data-gap="${menu.gap}"] .plus`}
           left={menu.left}
           bottom={menu.bottom}
           onPick={(id) => {
             setMenu(null);
             props.onAdd(menu.gap, id);
           }}
-          onClose={() => {
-            // Back to the "+" it came from, for keyboard use.
-            row.current?.querySelector<HTMLButtonElement>(`.gap[data-gap="${menu.gap}"] .plus`)?.focus();
-            setMenu(null);
-          }}
+          onClose={() => setMenu(null)}
         />
       )}
     </section>
   );
 }
 
-/** The lane row's controls: the inks, Linked, the print screen angles switch and Undo the split. */
-function LanesBar(props: { lanes: StripLanes; onUnsplit: () => void; onScreenAngles: (on: boolean) => void }) {
+/**
+ * The lane row's controls: the inks, Linked / Independent, the lane tabs (Independent: all
+ * lanes or one ink), the print screen angles switch and Undo the split. Linking independent
+ * inks is lossy, so Linked first says what changes and which lane every ink will copy.
+ */
+function LanesBar(props: {
+  lanes: StripLanes;
+  onUnsplit: () => void;
+  onScreenAngles: (on: boolean) => void;
+  laneView: "all" | string;
+  onShowLanes: (which: "all" | string) => void;
+  onUnlink: () => void;
+  onLink: (layer: string) => void;
+  linkWarning: (layer: string) => string;
+  linkLane: string;
+}) {
   const { lanes } = props;
+  /** Linked was pressed while independent: the lane to link onto, waiting for a yes. */
+  const [linking, setLinking] = useState<string | null>(null);
+  useEffect(() => setLinking(null), [lanes.linked]);
   return (
     <span className="lanes-bar" aria-label="Inks">
-      <span className="lanes-inks" title={`Split into ${lanes.names.join(", ")}. Each box in the row shows all four inks, one in each corner.`}>
+      <span className="lanes-inks" title={`Split into ${lanes.names.join(", ")}.${lanes.linked ? " Each box in the row shows all four inks, one in each corner." : ""}`}>
         {lanes.layers.map((l) => (
           <span key={l} className={`ink-dot ink-${l}`} aria-hidden="true" />
         ))}
         {lanes.layers.join(" ")}
       </span>
-      <span className="pill" style={{ "--st": stageVar("layers") } as CSSProperties} title={lanes.linked ? "Linked: one set of steps and settings drives every ink." : "Independent: some inks have their own steps or settings."}>
-        {lanes.linked ? "Linked" : "Independent"}
+      <span className="seg" role="group" aria-label="Linked or independent inks">
+        <button
+          aria-pressed={lanes.linked}
+          title="Linked: one set of steps and settings drives every ink."
+          onClick={() => !lanes.linked && setLinking(linking ? null : props.linkLane)}
+        >
+          Linked
+        </button>
+        <button aria-pressed={!lanes.linked} title="Independent: each ink gets its own steps and settings, in its own lane." onClick={() => lanes.linked && props.onUnlink()}>
+          Independent
+        </button>
       </span>
+      {!lanes.linked && (
+        <span className="seg lane-tabs" role="group" aria-label="Lanes to show">
+          {["all", ...lanes.layers].map((v) => (
+            <button key={v} aria-pressed={props.laneView === v} data-lane-tab={v} onClick={() => props.onShowLanes(v)} title={v === "all" ? "Show every ink's lane" : `Show only ${lanes.names[lanes.layers.indexOf(v)]}'s lane, with room to work`}>
+              {v === "all" ? "All lanes" : v}
+            </button>
+          ))}
+        </span>
+      )}
       <label className="toggle" title="Turn each ink's Fill lines by its print screen angle (cyan 15°, magenta 75°, yellow 0°, black 45°), so the inks don't all hatch the same way.">
         <input type="checkbox" checked={lanes.screenAngles} onChange={(e) => props.onScreenAngles(e.target.checked)} /> Screen angles
       </label>
       <button className="link" onClick={props.onUnsplit} title="Go back to the single chain you had before splitting (the split version is saved as a checkpoint).">
         Undo the split
       </button>
+      {linking && (
+        <span className="link-warn" role="alertdialog" aria-label="Link the inks?">
+          <span>{props.linkWarning(linking)}</span>
+          <span className="link-warn-pick">
+            Copy the lane of
+            {lanes.layers.map((l, i) => (
+              <button key={l} className={linking === l ? "chip on" : "chip"} aria-pressed={linking === l} onClick={() => setLinking(l)}>
+                {lanes.names[i]}
+              </button>
+            ))}
+          </span>
+          <span className="link-warn-do">
+            <button
+              className="primary"
+              onClick={() => {
+                const l = linking;
+                setLinking(null);
+                props.onLink(l);
+              }}
+            >
+              Link every ink to {lanes.names[lanes.layers.indexOf(linking)]}
+            </button>
+            <button onClick={() => setLinking(null)}>Cancel</button>
+          </span>
+        </span>
+      )}
     </span>
   );
 }
@@ -298,20 +425,20 @@ function StackBox(props: { png: Blob | undefined; names: string[]; selected: boo
   );
 }
 
-/** The menu a "+" opens: only the steps that fit at that gap, or why nothing does. */
-function AddMenuPop(props: {
-  recipe: Recipe;
-  registry: StepRegistry;
-  gap: number;
+/** The menu a "+" opens: only the steps that fit at that gap (`addMenu`, or a lane's `laneAddMenu`), or why nothing does. */
+export function AddMenuPop(props: {
+  menu: AddMenu;
   /** Name of the box before the gap. */
   after: string;
+  /** Where the "+" it came from is, to go back to it on Escape (a CSS selector). */
+  from: string;
   left: number;
   bottom: number;
   onPick: (stepId: string) => void;
   onClose: () => void;
 }) {
   const ref = useRef<HTMLDivElement>(null);
-  const m = addMenu(props.recipe, props.registry, props.gap);
+  const m = props.menu;
   const close = useRef(props.onClose);
   close.current = props.onClose;
   useEffect(() => {
@@ -328,11 +455,16 @@ function AddMenuPop(props: {
       window.removeEventListener("resize", resize);
     };
   }, []);
+  const close_ = () => {
+    // Back to the "+" it came from, for keyboard use.
+    document.querySelector<HTMLButtonElement>(props.from)?.focus();
+    props.onClose();
+  };
   const onKey = (e: KeyboardEvent) => {
     if (e.key === "Escape") {
       e.preventDefault();
       e.stopPropagation();
-      props.onClose();
+      close_();
       return;
     }
     if (e.key !== "ArrowDown" && e.key !== "ArrowUp") return;
@@ -373,7 +505,7 @@ function AddMenuPop(props: {
       ))}
       {m.reason && <p className="add-none">{m.reason}</p>}
       {m.options.length === 0 && (
-        <button className="add-close" onClick={props.onClose}>
+        <button className="add-close" onClick={close_}>
           Close
         </button>
       )}

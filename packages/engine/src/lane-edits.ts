@@ -40,7 +40,7 @@ function dropOwn(rs: RecipeStep, layer: string): RecipeStep {
 
 /**
  * "+" in lane `layer` at lane gap `at` (0 = right after the split, `lane.steps.length` = at
- * the end of the lane): add `stepId` for that ink only (`layers: [layer]`), at the first chain
+ * the end of the lane): add `stepId` for that ink only (`layers: [layer]`), at the last chain
  * position between the lane's neighbours where the chain and every lane still fit.
  */
 export function addInLane(recipe: Recipe, registry: StepRegistry, layer: string, stepId: string, at: number): { recipe: Recipe; index: number } | { reason: string } {
@@ -55,7 +55,8 @@ export function addInLane(recipe: Recipe, registry: StepRegistry, layer: string,
   const hi = at === lane.steps.length ? mergeOf(view, recipe) : lane.steps[at]!.index;
   const fresh: RecipeStep = { id: newStepId(recipe.steps.map((s) => s.id), def.id), step: def.id, version: def.version, params: defaultParams(def.params), enabled: true, layers: [layer] };
   let reason = "";
-  for (let p = lo; p <= hi; p++) {
+  // As late as it fits: a slow line step there doesn't hold up the other inks' steps.
+  for (let p = hi; p >= lo; p--) {
     const res = fits(recipe, [...recipe.steps.slice(0, p), fresh, ...recipe.steps.slice(p)], registry);
     if ("recipe" in res) return { recipe: withStepInks(res.recipe, def), index: p };
     reason ||= res.reason;

@@ -56,6 +56,12 @@ export function StepList(props: {
   onRun: () => void;
   onHelp: (def: AnyStep) => void;
   onNotice: (msg: string) => void;
+  /**
+   * Independent inks: the step being looked at was picked in this ink's lane, so its card
+   * shows and edits that ink's settings (`setLaneParam`) and can take the step out of the lane.
+   */
+  lane?: { layer: string; name: string } | null;
+  onRemoveFromLane?: (index: number, layer: string) => void;
 }) {
   const { recipe, registry } = props;
   const [dragFrom, setDragFrom] = useState<number | null>(null);
@@ -69,12 +75,15 @@ export function StepList(props: {
     const steps = recipe.steps.map((s, i) => (i === index ? { ...s, ...patch } : s));
     props.onChange({ ...recipe, steps }, proxy, registry.get(recipe.steps[index]!.step));
   };
+  /** The lane the card at `index` edits: only the card being looked at, picked in a lane. */
+  const laneAt = (index: number) => (props.lane && props.cards?.looking === index ? props.lane : null);
   const setParam = (index: number, name: string, value: unknown, proxy: boolean) => {
     const rs = recipe.steps[index]!;
     const layer = editing[index] ?? null;
     if (layer === null) {
-      // A linked edit: the shared settings, written once for every ink (lanes, #66).
-      const res = setLaneParam(recipe, registry, rs.id, name, value, null);
+      // From a lane: that ink's settings when it's independent. Else a linked edit: the shared
+      // settings, written once for every ink (lanes, #66).
+      const res = setLaneParam(recipe, registry, rs.id, name, value, laneAt(index)?.layer ?? null);
       if ("reason" in res) props.onNotice(res.reason);
       else props.onChange(res.recipe, proxy, registry.get(rs.step));
     } else patchStep(index, { layerParams: { ...rs.layerParams, [layer]: { ...rs.layerParams?.[layer], [name]: value } } }, proxy);
@@ -106,10 +115,16 @@ export function StepList(props: {
       );
     }
     const layerStep = Boolean(def.runLayer);
-    const layer = editing[index] ?? null;
+    const lane = editing[index] == null ? laneAt(index) : null;
+    const layer = editing[index] ?? lane?.layer ?? null;
     const values = layer === null ? rs.params : { ...rs.params, ...rs.layerParams?.[layer] };
+    // In a lane every setting is the ink's own: changed means not the default.
     const changedHere = (name: string, decl: ParamDecl) =>
-      layer === null ? isChanged(decl, rs.params[name]) : rs.layerParams?.[layer]?.[name] !== undefined;
+      lane ? isChanged(decl, values[name]) : layer === null ? isChanged(decl, rs.params[name]) : rs.layerParams?.[layer]?.[name] !== undefined;
+    const resetHere = (name: string) =>
+      lane
+        ? setParam(index, name, (def.params[name] as ParamDecl).default, false)
+        : props.onChange(resetParam(recipe, index, name, registry, layer ?? undefined), false);
     const stepChanged =
       Object.keys(rs.layerParams ?? {}).length > 0 || Object.entries(def.params).some(([n, d]) => isChanged(d as ParamDecl, rs.params[n]));
     const stale = props.stale.includes(index);
@@ -233,10 +248,16 @@ export function StepList(props: {
               >
                 Branch from here
               </button>
-              <button disabled={!remove.ok} title={remove.ok ? `Take ${def.title} out of the recipe (Back undoes it)` : remove.reason} onClick={() => commit(removeStep(recipe, index, registry))}>
+              <button disabled={!remove.ok} title={remove.ok ? `Take ${def.title} out of the recipe${lane ? ", for every ink" : ""} (Back undoes it)` : remove.reason} onClick={() => commit(removeStep(recipe, index, registry))}>
                 Remove
               </button>
+              {lane && props.onRemoveFromLane && (
+                <button title={`Take ${def.title} out of the ${lane.name} lane only: the other inks keep it`} onClick={() => props.onRemoveFromLane!(index, lane.layer)}>
+                  Take out of {lane.name}
+                </button>
+              )}
             </div>
+            {lane && !layerStep && <p className="hint lane-note">Settings for {lane.name} only.</p>}
             {!remove.ok && <p className="reason">{remove.reason}</p>}
           </>
         )}
@@ -260,7 +281,7 @@ export function StepList(props: {
                 onDrag={(v) => setParam(index, name, v, true)}
                 onCommit={(v) => setParam(index, name, v, false)}
                 changed={changedHere(name, def.params[name] as ParamDecl)}
-                onReset={() => props.onChange(resetParam(recipe, index, name, registry, layer ?? undefined), false)}
+                onReset={() => resetHere(name)}
               />
             ) : null;
           const { main, more } = splitSettings(def.params);

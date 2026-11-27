@@ -105,6 +105,8 @@ describe("pixelated magenta, stippled yellow", () => {
     expect(laneSteps(r, "C")).toEqual(["centerline"]);
     expect(laneSteps(r, "K")).toEqual(["centerline"]);
     sound(r);
+    // A new line step goes as late as it fits, so the other inks' lines don't wait for it.
+    expect(r.steps.map((s) => s.step)).toEqual(["cmyk", "pixelate", "centerline", "stipple", "order"]);
   });
   it("and plots: magenta's lines come from the pixelated layer, yellow's are dots", async () => {
     let r = ok(unlinkLanes(linked(), reg)).recipe;
@@ -178,6 +180,16 @@ describe("link: collapses every lane onto one (lossy)", () => {
 });
 
 describe("laneIssues: each lane on its own", () => {
+  it("finds a lines step (Fill) in a lane whose ink isn't lines yet", () => {
+    const r = recipe(["cmyk", "levels", { step: "bands", layers: ["C", "M", "K"] }, "fill", "order"]);
+    expect(laneIssues(r, reg)).toEqual([{ layer: "Y", index: 3, reason: expect.stringMatching(/Fill works on Y's lines, but in the Y lane it isn't lines yet/) }]);
+  });
+  it("so taking the line step out of a lane asks for Fill to go first", () => {
+    const u = ok(unlinkLanes(recipe(["cmyk", "levels", "bands", "fill", "order"]), reg)).recipe;
+    expect(removeFromLane(u, reg, "bands", "Y")).toEqual({ reason: expect.stringMatching(/Taking Bands out of the Y lane would break it: Fill works on Y's lines/) });
+    const r = ok(removeFromLane(ok(removeFromLane(u, reg, "fill", "Y")).recipe, reg, "bands", "Y")).recipe;
+    expect(laneSteps(r, "Y")).toEqual(["levels"]);
+  });
   it("finds a layer step that comes after that ink became lines", () => {
     const r = recipe(["cmyk", { step: "stipple", layers: ["Y"] }, "centerline", "order"]);
     expect(laneIssues(r, reg)).toEqual([{ layer: "Y", index: 2, reason: expect.stringMatching(/Centerline needs Y as layers.*already lines.*Stipple/) }]);
