@@ -1,5 +1,6 @@
 import { defaultParams } from "./params.ts";
 import { newStepId, type Recipe, type RecipeStep } from "./recipe.ts";
+import { fitsStage, stageAfter, stageOf } from "./stages.ts";
 import type { AnyStep, StepRegistry } from "./step.ts";
 import type { Ink, StageKind } from "./types.ts";
 
@@ -25,7 +26,7 @@ function advice(needs: StageKind, input: StageKind, registry: StepRegistry): str
 /** Every place an enabled step receives the wrong kind of data. */
 export function checkChain(input: StageKind, steps: RecipeStep[], registry: StepRegistry): ChainIssue[] {
   const issues: ChainIssue[] = [];
-  let current = input;
+  let at = stageOf(input);
   steps.forEach((rs, index) => {
     if (rs.enabled === false) return;
     const def = registry.get(rs.step);
@@ -34,13 +35,13 @@ export function checkChain(input: StageKind, steps: RecipeStep[], registry: Step
       return;
     }
     const needs = def.input as StageKind;
-    if (needs !== current) {
+    if (!fitsStage(at, def)) {
       issues.push({
         index,
-        reason: `${def.title} needs ${STAGE_WORDS[needs]}, but at that point the chain has ${STAGE_WORDS[current]}. ${advice(needs, input, registry)}`,
+        reason: `${def.title} needs ${STAGE_WORDS[needs]}, but at that point the chain has ${STAGE_WORDS[at.kind]}. ${advice(needs, input, registry)}`,
       });
     }
-    current = def.output as StageKind;
+    at = stageAfter(at, def, rs);
   });
   return issues;
 }

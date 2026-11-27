@@ -1,5 +1,6 @@
 import { DEFAULT_LAYOUT, type Layout } from "./layout.ts";
 import { resolveParams } from "./params.ts";
+import { fitsStage, stageAfter, stageOf } from "./stages.ts";
 import { TARGET_KINDS, type PassOrder, type Target } from "./project.ts";
 import type { StepRegistry } from "./step.ts";
 import type { Ink, Paper, StageKind } from "./types.ts";
@@ -267,7 +268,7 @@ export function loadRecipe(raw: unknown, registry: StepRegistry): { recipe: Reci
   const ids = withStepIds(rawSteps.map((rs) => ({ step: String(obj(rs).step), id: obj(rs).id }))).map((s) => s.id);
 
   const steps: RecipeStep[] = [];
-  let current: StageKind = input;
+  let at = stageOf(input);
   rawSteps.forEach((rs, index) => {
     const s = rs as Partial<RecipeStep>;
     const def = s.step ? registry.get(s.step) : undefined;
@@ -304,10 +305,10 @@ export function loadRecipe(raw: unknown, registry: StepRegistry): { recipe: Reci
     for (const i of issues) warnings.push({ index, message: `${def.id}.${i.param}: ${i.message}` });
     const enabled = s.enabled !== false;
     if (enabled) {
-      if (def.input !== current) {
-        errors.push({ index, message: `${def.id} expects ${def.input} but receives ${current}` });
+      if (!fitsStage(at, def)) {
+        errors.push({ index, message: `${def.id} expects ${def.input} but receives ${at.kind}` });
       }
-      current = def.output;
+      at = stageAfter(at, def, { layers: Array.isArray(s.layers) ? s.layers : undefined });
     }
     const out: RecipeStep = { id: ids[index]!, step: def.id, version, params: values, enabled };
     if (!enabled && s.offForEntry === true) out.offForEntry = true;

@@ -1,6 +1,6 @@
 import type { RecipeStep } from "./recipe.ts";
 import type { AnyStep, StepContext } from "./step.ts";
-import type { GeometryLayer, Image, Layer, Layers, LayerValueKind, StageData } from "./types.ts";
+import type { Geometry, GeometryLayer, Image, Layer, Layers, LayerValueKind, StageData } from "./types.ts";
 
 /** A layer as the UI sees it in a step's output. */
 export interface LayerInfo {
@@ -70,6 +70,44 @@ export async function applyLayerStep(
   };
 }
 
+/**
+ * A layer step on lines that still carry layers (a line step before it took only some):
+ * it works on those layers, and the lines already made stay. A line step adds its lines
+ * after them, so each ink can have its own line step (ADR 0009).
+ */
+async function applyToLeftLayers(def: AnyStep, input: Geometry, rs: Pick<RecipeStep, "params" | "layers" | "layerParams">, ctx: StepContext): Promise<Geometry> {
+  const left = input.rasterLayers;
+  if (!left) return input;
+  const out = await applyLayerStep(def, left, rs, ctx);
+  if (out.kind === "layers") return { ...input, rasterLayers: out };
+  const geo = out as Geometry;
+  const { rasterLayers: _, ...lines } = input;
+  return { ...lines, layers: [...input.layers, ...geo.layers], ...(geo.rasterLayers ? { rasterLayers: geo.rasterLayers } : {}) };
+}
+
+/** Whether a step takes a layer selector and per-layer settings: layer steps, and lines steps that treat each layer on its own (Fill). */
+export const actsPerLayer = (def: AnyStep | undefined): boolean => !!def && (!!def.runLayer || (!!def.linesPerLayer && def.input === "geometry" && def.output === "geometry"));
+
+/**
+ * A lines-per-layer step (Fill) with a selector or per-layer settings: run on each selected
+ * layer alone with its own settings (keeping its place among the layers, which its print
+ * screen angle may depend on); the other layers' lines pass through.
+ */
+async function applyLinesPerLayer(def: AnyStep, input: Geometry, rs: Pick<RecipeStep, "params" | "layers" | "layerParams">, ctx: StepContext): Promise<Geometry> {
+  const sel = rs.layers ?? "all";
+  const layers: GeometryLayer[] = [];
+  for (const [i, l] of input.layers.entries()) {
+    if (sel !== "all" && !sel.includes(l.id)) {
+      layers.push(l);
+      continue;
+    }
+    const screenAngle = ctx.screenAngle && ((id: string) => ctx.screenAngle!(id, i));
+    const out = (await def.run!({ ...input, layers: [l] }, { ...rs.params, ...rs.layerParams?.[l.id] } as never, { ...ctx, screenAngle })) as Geometry;
+    layers.push(...out.layers);
+  }
+  return { ...input, layers };
+}
+
 /** Run any step on its input, whole-stage or per layer. */
 export async function applyStep(
   def: AnyStep,
@@ -77,7 +115,10 @@ export async function applyStep(
   rs: Pick<RecipeStep, "params" | "layers" | "layerParams">,
   ctx: StepContext,
 ): Promise<StageData> {
+  if (def.runLayer && input.kind === "geometry") return applyToLeftLayers(def, input, rs, ctx);
   if (def.runLayer) return applyLayerStep(def, input as Layers, rs, ctx);
+  const own = Array.isArray(rs.layers) || Object.values(rs.layerParams ?? {}).some((o) => Object.keys(o).length > 0);
+  if (actsPerLayer(def) && input.kind === "geometry" && own) return applyLinesPerLayer(def, input, rs, ctx);
   return def.run!(input, rs.params as never, ctx);
 }
 

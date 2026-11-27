@@ -155,7 +155,9 @@ export class Pipeline {
       if (rs.enabled === false) continue;
       const def = this.registry.get(rs.step);
       if (!def) throw new StepError(index, `unknown step "${rs.step}"`);
-      if (def.input !== data.kind) throw new StepError(index, `${def.title} needs ${def.input} but receives ${data.kind}`);
+      // A layer step may work on the layers that lines still carry (`fitsStage`).
+      const onLeftLayers = !!def.runLayer && def.input === "layers" && data.kind === "geometry";
+      if (def.input !== data.kind && !onLeftLayers) throw new StepError(index, `${def.title} needs ${def.input} but receives ${data.kind}`);
       key = `${key}>${def.id}@${def.version}${JSON.stringify([rs.params, rs.layers, rs.layerParams])}`;
       if (def.output === "plot") key += inkKey;
       if (def.usesScreenAngles && angles) key += "|screen-angles";

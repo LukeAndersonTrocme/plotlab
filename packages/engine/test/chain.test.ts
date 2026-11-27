@@ -19,6 +19,19 @@ describe("checkChain", () => {
     steps[1]!.enabled = false;
     expect(checkChain("image", steps, reg)[0]!.reason).toMatch(/Stroke order needs lines/);
   });
+  it("a layer step may follow a line step that left some layers as they were (one ink each, ADR 0009)", () => {
+    const r = loadRecipe(
+      { schemaVersion: 2, paper: { widthMm: 100, heightMm: 100 }, inks: [{ id: "k", color: "#000" }], steps: [{ step: "cmyk" }, { step: "stipple", layers: ["Y"] }, { step: "pixelate", layers: ["M"] }, { step: "centerline" }, { step: "order" }] },
+      reg,
+    ).recipe;
+    expect(checkChain("image", r.steps, reg)).toEqual([]);
+  });
+  it("but not once a line step has turned every layer into lines", () => {
+    const steps = ["cmyk", "stipple", "pixelate"].map((step, i) => ({ id: `s${i}`, step, version: 1, params: {}, enabled: true }));
+    const issues = checkChain("image", steps, reg);
+    expect(issues[0]).toMatchObject({ index: 2 });
+    expect(issues[0]!.reason).toMatch(/Pixelate needs layers, but at that point the chain has lines/);
+  });
 });
 
 describe("moveStep", () => {

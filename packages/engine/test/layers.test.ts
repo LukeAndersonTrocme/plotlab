@@ -104,6 +104,33 @@ describe("layers that stop early", () => {
   });
 });
 
+describe("a second line step for the layers the first one left (one ink each)", () => {
+  it("transforms and traces the layers that are still layers, and keeps the lines already made", async () => {
+    const { output, plot } = await run([
+      { step: "split" },
+      { step: "centerline", layers: ["a"], params: { minLength: 0 } },
+      { step: "invert", layers: ["b"], params: { amount: 0 } },
+      { step: "centerline", layers: ["b"], params: { minLength: 0 } },
+    ]);
+    expect(output.kind).toBe("geometry");
+    if (output.kind !== "geometry") return;
+    expect(output.layers.map((l) => l.id)).toEqual(["a", "b"]);
+    expect(output.rasterLayers).toBeUndefined();
+    expect(output.layers.every((l) => l.features.features.length > 0)).toBe(true);
+    expect(plot?.layers.map((l) => l.id).sort()).toEqual(["a", "b"]);
+  });
+  it("a layer step after the lines changes only the layers still riding along", async () => {
+    const { output, results } = await run([{ step: "split" }, { step: "centerline", layers: ["a"] }, { step: "invert" }]);
+    if (output.kind !== "geometry") throw new Error("expected lines");
+    expect(output.layers.map((l) => l.id)).toEqual(["a"]);
+    expect(tone(output.rasterLayers?.layers[0])?.slice(0, 8)).toEqual([0, 0, 0, 0, 1, 1, 1, 1]);
+    expect(results[2]!.layers).toEqual([
+      { id: "a", name: "A", kind: "lines" },
+      { id: "b", name: "B", kind: "tone" },
+    ]);
+  });
+});
+
 describe("leftoverRasters (what the result view composites besides lines)", () => {
   it("a chain ending at layers shows those layers", async () => {
     const { output } = await run([{ step: "split" }]);

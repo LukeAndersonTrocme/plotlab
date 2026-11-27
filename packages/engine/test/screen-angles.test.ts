@@ -79,3 +79,26 @@ describe("print screen angles in a linked split", () => {
     expect(directions(b, "C")[0]).not.toBeCloseTo(directions(a, "C")[0]!, 3);
   });
 });
+
+describe("Fill with settings for one ink (Independent inks)", () => {
+  const withFill = (screenAngles: boolean, fill: Record<string, unknown>) => {
+    const r = recipe(screenAngles);
+    return loadRecipe({ ...r, steps: r.steps.map((s) => (s.step === "fill" ? { ...s, ...fill } : s)) }, reg).recipe;
+  };
+  it("an ink's own Fill settings change only that ink's lines, and its print angle still applies", async () => {
+    const shared = (await new Pipeline(reg).run(img, withFill(true, {}))).output as Geometry;
+    const own = (await new Pipeline(reg).run(img, withFill(true, { layerParams: { M: { angle: 0 } } }))).output as Geometry;
+    for (const layer of ["C", "Y", "K"]) expect(directions(own, layer)).toEqual(directions(shared, layer));
+    // M hatches at its own 0°, turned by its print angle (75°).
+    expect(directions(own, "M").every((d) => same(d, 75))).toBe(true);
+    expect(directions(shared, "M").every((d) => same(d, 105))).toBe(true);
+  });
+  it("Fill narrowed to some inks leaves the other inks' lines as they were", async () => {
+    const all = (await new Pipeline(reg).run(img, withFill(false, {}))).output as Geometry;
+    const some = (await new Pipeline(reg).run(img, withFill(false, { layers: ["C", "M", "K"] }))).output as Geometry;
+    expect(directions(some, "C")).toEqual(directions(all, "C"));
+    // Y isn't filled: only its band outlines (polygons) are left, no hatch lines.
+    expect(directions(some, "Y")).toEqual([]);
+    expect(some.layers.find((l) => l.id === "Y")!.features.features.every((f) => f.geometry.type === "Polygon")).toBe(true);
+  });
+});

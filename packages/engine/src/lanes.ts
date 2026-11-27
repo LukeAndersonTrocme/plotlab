@@ -1,4 +1,5 @@
 import { checkChain, withStepInks, type ChainResult } from "./chain.ts";
+import { actsPerLayer } from "./layers.ts";
 import { defaultParams } from "./params.ts";
 import { screenAngle } from "./project.ts";
 import { newStepId, type Recipe, type RecipeStep } from "./recipe.ts";
@@ -65,9 +66,9 @@ export function lanesOf(recipe: Recipe, registry: StepRegistry): LaneView {
   let merge = steps.findIndex((rs, i) => i > split && rs.enabled !== false && registry.get(rs.step)?.output === "plot");
   if (merge < 0) merge = steps.length;
   const inLanes = all.slice(split + 1, merge);
-  // Only layer-acting steps take a selector and per-layer settings; whole-stage steps (Fill,
-  // which works on every layer's lines alike) are in every lane with their shared settings.
-  const layerActing = (rs: RecipeStep) => !!registry.get(rs.step)?.runLayer;
+  // Steps that act per layer (layer steps, and Fill) take a selector and per-layer settings;
+  // any other whole-stage step is in every lane with its shared settings.
+  const layerActing = (rs: RecipeStep) => actsPerLayer(registry.get(rs.step));
   const unlinkedAll = inLanes.some((i) => layerActing(steps[i]!) && narrowed(steps[i]!));
   const lanes = layers.map((layer): Lane => {
     const laneSteps: LaneStep[] = [];
@@ -103,7 +104,7 @@ export function setLaneParam(recipe: Recipe, registry: StepRegistry, stepId: str
     if (!l) return { reason: `There is no ${lane} lane: the picture isn't split into that ink.` };
     if (!l.steps.some((x) => x.id === stepId)) return { reason: `${def.title} isn't in the ${lane} lane, so it can't be changed from there.` };
     // The lane's own state: a lane with its own settings keeps them; a linked lane edits the shared ones.
-    own = !!def.runLayer && !l.linked;
+    own = actsPerLayer(def) && !l.linked;
   }
   const next: RecipeStep = own && lane !== null
     ? { ...rs, layerParams: { ...rs.layerParams, [lane]: { ...rs.layerParams?.[lane], [name]: value } } }
@@ -113,7 +114,7 @@ export function setLaneParam(recipe: Recipe, registry: StepRegistry, stepId: str
 
 /** A step after the split acts on every layer with one set of settings: a single old layer's overrides become the shared ones. */
 function onAllLayers(rs: RecipeStep, def: AnyStep | undefined): RecipeStep {
-  if (!def?.runLayer || (rs.layers === undefined && rs.layerParams === undefined)) return rs;
+  if (!actsPerLayer(def) || (rs.layers === undefined && rs.layerParams === undefined)) return rs;
   const { layers: _l, layerParams, ...rest } = rs;
   const folded = Object.values(layerParams ?? {}).reduce<Record<string, unknown>>((p, o) => ({ ...p, ...o }), {});
   return { ...rest, params: { ...rs.params, ...folded } };
