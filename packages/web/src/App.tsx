@@ -276,8 +276,10 @@ function Editor(props: { hidden: boolean }) {
     preSplit.current = null;
     const before = history.present;
     const label = checkpointLabel(cp);
+    let savedFirst = false;
     try {
       const r = await restoreSafely(library, project, cp, history, parseRecipe, { name: `Before restoring “${label}”` });
+      savedFirst = true;
       if (r.saved.created) addPicture(project, r.saved.checkpoint, before);
       setSaved((n) => n + 1);
       if (r.source) takeSource(await decodeStored(r.project, r.source, (m) => r.warnings.push(m)), nameOf(r.project), r.project.id);
@@ -291,7 +293,12 @@ function Editor(props: { hidden: boolean }) {
       if (live) send(fitted, false);
       else setDirty(true);
     } catch (e) {
-      setNotice(`Couldn't restore “${label}”, so nothing was changed and no extra checkpoint was kept. (${errText(e)})`);
+      // Before the save finished nothing was kept; after it, where you were stays saved (it has its picture).
+      setNotice(
+        savedFirst
+          ? `Couldn't finish restoring “${label}”: its image couldn't be opened, so nothing was restored. Where you were is saved as a checkpoint. (${errText(e)})`
+          : `Couldn't restore “${label}”, so nothing was changed and no extra checkpoint was kept. (${errText(e)})`,
+      );
     }
   };
 

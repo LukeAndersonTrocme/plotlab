@@ -1,7 +1,8 @@
 import { describe, expect, it } from "vitest";
 import { IDBFactory } from "fake-indexeddb";
 import { indexedDbLibrary, memoryLibrary, type Library } from "../src/storage/index.ts";
-import { autoCheckpoint, createCheckpoint, listForProject, updateCheckpoint } from "../src/checkpoints.ts";
+import { createHistory } from "../src/history.ts";
+import { attachThumbnail, autoCheckpoint, createCheckpoint, deleteCheckpoint, listForProject, restoreSafely, updateCheckpoint } from "../src/checkpoints.ts";
 import { MAX_AUTO_CHECKPOINTS, registerKeeper } from "../src/prune.ts";
 import { LruMap } from "../src/lru.ts";
 import { once } from "../src/once.ts";
@@ -48,9 +49,38 @@ describe.each(adapters)("pruning automatic checkpoints: %s", (_n, open) => {
     const p = await proj();
     const first = (await autoCheckpoint(p, { recipe: { i: -1 }, name: "Before x", now: 1 })).checkpoint;
     const off = registerKeeper(() => [first.id]);
-    for (let i = 0; i < MAX_AUTO_CHECKPOINTS + 3; i++) await autoCheckpoint(p, { recipe: { i }, name: "Before y", now: 10 + i });
-    expect((await listForProject(p)).some((c) => c.id === first.id)).toBe(true);
-    off();
+    try {
+      for (let i = 0; i < MAX_AUTO_CHECKPOINTS + 3; i++) await autoCheckpoint(p, { recipe: { i }, name: "Before y", now: 10 + i });
+      expect((await listForProject(p)).some((c) => c.id === first.id)).toBe(true);
+    } finally {
+      off();
+    }
+  });
+
+  it("a failed restore at the cap costs no old checkpoint", async () => {
+    const p = await proj();
+    for (let i = 0; i < MAX_AUTO_CHECKPOINTS; i++) await autoCheckpoint(p, { recipe: { i }, name: "Before y", now: 10 + i });
+    const target = await createCheckpoint(p, { recipe: { t: 1 }, now: 1 });
+    const bad = () => {
+      throw new Error("x");
+    };
+    await expect(restoreSafely(await open(), p, target, createHistory({ n: 99 }), bad, { name: "Before restoring", now: 999 })).rejects.toThrow();
+    expect((await listForProject(p)).filter((c) => c.auto)).toHaveLength(MAX_AUTO_CHECKPOINTS);
+  });
+
+  it("attaching a picture leaves a rename alone and doesn't bring back a deleted checkpoint", async () => {
+    const p = await proj();
+    const cp = (await autoCheckpoint(p, { recipe: { a: 1 }, name: "Before x", now: 1 })).checkpoint;
+    await updateCheckpoint(p, cp.id, { name: "mine" });
+    await attachThumbnail(p, cp.id, thumb);
+    const after = (await p.getCheckpoint(cp.id))!;
+    expect(after.name).toBe("mine");
+    expect(after.auto).toBeUndefined();
+    expect(await p.getThumbnail(cp.id)).toBeDefined();
+    await deleteCheckpoint(p, cp.id);
+    await attachThumbnail(p, cp.id, thumb);
+    expect(await p.getCheckpoint(cp.id)).toBeUndefined();
+    expect(await p.getThumbnail(cp.id)).toBeUndefined();
   });
 
   it("an existing checkpoint with the same recipe is reused and nothing is pruned", async () => {

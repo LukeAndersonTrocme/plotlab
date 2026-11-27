@@ -148,6 +148,10 @@ export async function indexedDbLibrary(
           t.objectStore(CHECKPOINTS).put({ ...cp, sourceHash: id });
           if (thumbnail) t.objectStore(THUMBNAILS).put(thumbnail, cp.id);
         }),
+      putThumbnail: (cid, thumbnail) =>
+        tx("readwrite", async (t) => {
+          if (await own(t, cid)) t.objectStore(THUMBNAILS).put(thumbnail, cid);
+        }),
       getCheckpoint: (cid) => tx("readonly", (t) => own(t, cid)),
       listCheckpoints: () => tx("readonly", (t) => req(t.objectStore(CHECKPOINTS).index("byProject").getAll(id) as IDBRequest<Checkpoint[]>)),
       getThumbnail: (cid) => tx("readonly", async (t) => ((await own(t, cid)) ? get<Uint8Array>(t, THUMBNAILS, cid) : undefined)),

@@ -48,6 +48,10 @@ export function memoryLibrary(opts: { onSetRecipe?: (saved: SavedRecipe) => void
         x.checkpoints.set(cp.id, structuredClone({ ...cp, sourceHash: id }));
         if (thumbnail) x.thumbnails.set(cp.id, thumbnail.slice());
       },
+      async putThumbnail(cid, thumbnail) {
+        const x = p();
+        if (x?.checkpoints.has(cid)) x.thumbnails.set(cid, thumbnail.slice());
+      },
       async getCheckpoint(cid) {
         const c = p()?.checkpoints.get(cid);
         return c && structuredClone(c);
