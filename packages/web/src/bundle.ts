@@ -14,8 +14,7 @@ import pkg from "../package.json";
 import { createCheckpoint, listForProject, sameRecipe } from "./checkpoints.ts";
 import { setupSummary } from "./setup.ts";
 import { BundleError, folderName, readBundle, writeBundle } from "./storage/bundle.ts";
-import { sha256Hex, type Checkpoint, type Library, type ProjectInfo } from "./storage/index.ts";
-import type { ProjectStore } from "./storage/index.ts";
+import { sha256Hex, type Checkpoint, type Library, type ProjectInfo, type ProjectStore } from "./storage/index.ts";
 
 export { BundleError, MAX_BUNDLE_BYTES } from "./storage/bundle.ts";
 
