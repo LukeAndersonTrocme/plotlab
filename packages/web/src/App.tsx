@@ -99,6 +99,9 @@ function Editor(props: { hidden: boolean }) {
   const runner = useMemo(() => new Runner(setRun), []);
   const recipeRef = useRef(recipe);
   recipeRef.current = recipe;
+  /** The latest history, for handlers that wait on storage (Undo the split), like `recipeRef`. */
+  const historyRef = useRef(history);
+  historyRef.current = history;
   // What the screen shows (mode, selection): not a recipe edit, so never a Back step.
   // The thumbnail size is remembered by this browser, not the project.
   const [view, setView] = useState<ViewState>(() => resizeThumbs(initialView, readThumbSize(defaultLocalStorage() ?? null)));
@@ -346,9 +349,10 @@ function Editor(props: { hidden: boolean }) {
   };
   /** Undo the split: restores the checkpoint from before it (one Back step), saving the split version first. */
   const unsplit = async () => {
-    const now = history.present;
+    const h = historyRef.current;
+    const now = h.present;
     try {
-      const r = await undoSplit(library, project, history, parseRecipe, registry, preSplit.current);
+      const r = await undoSplit(library, project, h, parseRecipe, registry, preSplit.current);
       if ("reason" in r) return setNotice(r.reason);
       if (r.saved?.created && project) addPicture(project, r.saved.checkpoint, now);
       setSaved((n) => n + 1);

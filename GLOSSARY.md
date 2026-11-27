@@ -18,7 +18,7 @@ still to be argued over with Nick. Change a term here first, then rename it ever
 | **Lattice** | The grid of hatch lines or dots a Fill uses; one lattice per spacing/angle, anchored at the paper corner so bands line up | screen, ruling | regular grid |
 | **Cumulative** (cross-hatch) | Darker bands also get the lighter bands' lines | cross-hatching | nested fills |
 | **Contour line** | The border between two levels, drawn on its own | contour | isoline |
-| **Separation** | Splitting an image into layers (CMYK, palette, split darks) | separating colors | decomposition |
+| **Separation** (UI: **Split**) | Splitting an image into layers (CMYK, palette, split darks). The UI says "Split into CMYK" and "Undo the split"; the step is Separate CMYK | separating colors, splitting | decomposition |
 | **Color mosaic** | Discrete opaque color areas, relying on optical mixing | mosaic, color bitmap | palette reduction, clustering |
 | **Screen angle** | Rotation of a layer's halftone/hatch grid; controls moiré | screen angle | grid rotation |
 | **Dither** | Spreading dots to fake intermediate tones with 1-bit | dither, halftone-ish | error diffusion / ordered threshold |
@@ -58,6 +58,9 @@ still to be argued over with Nick. Change a term here first, then rename it ever
 | **Lane** | One ink's row of steps after a split (CMYK): the steps that act on that ink, with its settings. A view of the one recipe, not a copy | the cyan, a plate's steps | per-layer projection |
 | **Linked / Independent inks** | Linked: one set of steps and settings drives every ink. Independent: each ink has its own steps and settings (pixelated magenta, stippled yellow). Linking again copies one lane to all and saves a checkpoint first | same for all / each its own | shared / per-layer params |
 | **Stack** | Where the lanes merge: all the inks together, in pass order (lane order is the pass order) | the print, all inks | composite |
+| **Four panels** | The canvas showing C, M, Y and K side by side, each ink on its own paper, at the split, a step or the stack (the other choice is Stacked) | the channels, side by side | small multiples |
+| **See-through / Opaque** | How the stack preview mixes the inks: see-through multiplies them (transparent inks); opaque lays each ink over the earlier ones in pass order | transparent / opaque ink | multiply / normal blend |
+| **Show other inks** | While looking at one ink's step, the other inks show faintly underneath, for context | ghosting | context layers |
 
 ## Open terminology questions
 
