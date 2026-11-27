@@ -32,10 +32,10 @@ try {
   const page = await browser.newPage({ viewport: { width: 1280, height: 800 } });
   /** The readout once the run has settled: the estimate (if any) and the step error (if any). */
   const readout = async () => {
-    await page.waitForSelector(".stats .big, .card.step.has-error", { timeout: 60_000 });
+    await page.waitForSelector(".stats .big, .failed-note", { timeout: 60_000 });
     return page.evaluate(() => ({
       estimate: document.querySelector(".stats .big")?.textContent ?? null,
-      error: document.querySelector(".card.step.has-error .error")?.textContent ?? null,
+      error: document.querySelector(".failed-note")?.textContent ?? null,
     }));
   };
 
@@ -46,21 +46,42 @@ try {
   const d1 = await readout();
   check(d1.estimate && !d1.error, `default recipe after a reload: estimate shows (${d1.estimate})`);
 
-  await page.selectOption("aside.side select.add-step >> nth=-1", "levels");
+  // Build the invalid recipe through the strip: "+" after Threshold, then Levels.
+  await page.click('.strip .gap[data-gap="1"] .plus');
+  await page.click('.add-menu [role=menuitem][data-step="levels"]');
   await page.waitForSelector('.strip .box[data-key="levels"]');
   const keys = await page.$$eval(".strip .box", (els) => els.map((e) => e.dataset.key));
   check(keys.join(",") === "source,threshold,levels,centerline,order", `recipe is Threshold → Levels → Centerline → Stroke order (${keys.join(", ")})`);
-  await page.waitForSelector(".card.step.has-error", { timeout: 60_000 });
+  await page.waitForSelector(".failed-note", { timeout: 60_000 });
   const before = await readout();
   check(!!before.error, `with Levels, Centerline reports an error ("${before.error}")`);
   check(before.estimate === null, `no estimate is shown for a recipe that fails (shown: ${before.estimate})`);
+
+  // The canvas keeps the last good plot, dimmed, with the error over it in plain words.
+  const cue = await page.evaluate(() => ({
+    dimmed: !!document.querySelector(".canvas-frame.failed svg.preview"),
+    opacity: Number(getComputedStyle(document.querySelector(".canvas-frame.failed svg.preview") ?? document.body).opacity),
+    note: document.querySelector(".canvas-frame .failed-note")?.textContent ?? null,
+    strokes: /strokes/.test(document.querySelector(".stats")?.textContent ?? ""),
+  }));
+  check(cue.dimmed && cue.opacity < 1, `the last good plot stays on the canvas, dimmed (opacity ${cue.opacity})`);
+  check(/This recipe can't run/.test(cue.note ?? "") && /Centerline traces tone layers/.test(cue.note ?? ""), `the canvas says why, in plain words ("${cue.note}")`);
+  check(!cue.strokes, "the stroke count is not shown as if current");
 
   // Let the autosave land, then reload.
   await page.waitForTimeout(500);
   await page.reload();
   await page.waitForSelector('.strip .box[data-key="levels"]', { timeout: 30_000 });
   const after = await readout();
-  check(after.error === before.error && after.estimate === before.estimate, `the readout is the same after a reload (before ${JSON.stringify(before)}, after ${JSON.stringify(after)})`);
+  // After a reload there is no earlier plot, so only the lead-in of the message differs.
+  const reason = (e) => (e ?? "").replace(/^This recipe can't run[^.]*\.\s*/, "");
+  check(reason(after.error) === reason(before.error) && after.estimate === before.estimate, `the readout is the same after a reload (before ${JSON.stringify(before)}, after ${JSON.stringify(after)})`);
+
+  // A later run that works clears the dim and the message.
+  await page.click('button[aria-label="Remove Levels"]');
+  await page.waitForSelector(".stats .big", { timeout: 60_000 });
+  const ok = await page.evaluate(() => ({ failed: !!document.querySelector(".canvas-frame.failed"), note: !!document.querySelector(".failed-note") }));
+  check(!ok.failed && !ok.note, "a later run that succeeds removes the dim and the message");
 } finally {
   await browser?.close();
   server.kill();

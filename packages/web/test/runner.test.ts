@@ -46,6 +46,7 @@ const result = (id: number): FromWorker => ({
   inspected: null,
   underlay: null,
   proof: null,
+  compared: null,
 });
 
 describe("bug #85: Threshold → Levels → Centerline → Stroke order", () => {

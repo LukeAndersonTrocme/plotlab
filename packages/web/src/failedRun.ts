@@ -4,7 +4,7 @@
  */
 export type FailedRunCue = { dim: boolean; message: string };
 
-export function failedRunCue(run: { error: { message: string } | null; hasPicture: boolean }): FailedRunCue | null {
+export function failedRunCue(run: { error: { message: string; index?: number } | null; hasPicture: boolean }): FailedRunCue | null {
   if (!run.error) return null;
   return run.hasPicture
     ? { dim: true, message: `This recipe can't run, so this is the last plot that did. ${run.error.message}` }

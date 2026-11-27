@@ -23,6 +23,7 @@ import { EMPTY_RUN, Runner, type RunState } from "./runner.ts";
 import { decodeFile, loadSample, sampleSource } from "./sample.ts";
 import { canRedo, canUndo, commit, createHistory, preview, redo, undo, type History } from "./history.ts";
 import type { InspectTarget } from "./protocol.ts";
+import { failedRunCue } from "./failedRun.ts";
 import { StageView } from "./StageView.tsx";
 import { CompareBar, CompareCanvas, shiftHint, type BandOption } from "./Compare.tsx";
 import { StepList, type SidebarCards } from "./StepList.tsx";
@@ -598,6 +599,7 @@ function Editor(props: { hidden: boolean }) {
   const head = frame?.head ? { at: frame.head.at, color: shown!.layers.find((l) => l.id === frame.head!.layerId)!.ink.color } : null;
   // Compare stages (Design): the canvas shows the strips, each from the same run as everything else.
   const compare = view.mode === "design" ? view.compare : null;
+  const failCue = failedRunCue({ error: run.error, hasPicture: !!plot || run.rasterLayers.length > 0 });
   const compareTargets = compareTargetsOf(view, recipe) ?? [];
   const shownViews = compare ? shownBands(compare).flatMap((b) => bandView(run.compared, compare, compareTargets, b) ?? []) : [{ rasters: viewRasters, plot: viewPlot }];
   const viewLayers = [
@@ -711,7 +713,7 @@ function Editor(props: { hidden: boolean }) {
               );
             })()}
             {run.estimate && plot && !plot.ordered && <span className="caveat">traced order: add Stroke order for a better estimate</span>}
-            {plot && <span>{strokes} strokes</span>}
+            {plot && !run.error && <span>{strokes} strokes</span>}
             {run.estimate && run.estimate.penChanges > 0 && <span>{run.estimate.penChanges} pen changes</span>}
             {run.estimate && (
               <>
@@ -730,7 +732,6 @@ function Editor(props: { hidden: boolean }) {
               </label>
             )}
           </div>
-          {run.error && run.error.index === undefined && <div className="error">{run.error.message}</div>}
           {[...run.warnings, ...(recipe.target.kind === "plotter" && notLines.length ? [notLinesNotice(notLines)] : [])].map((w) => (
             <div key={w} className="notice">
               {w}
@@ -794,6 +795,12 @@ function Editor(props: { hidden: boolean }) {
             )}
             {compare && <CompareBar compare={compare} chain={recipe} selected={selected} options={boxes.map(bandOption)} looking={lookingBand(view, recipe)} aspect={recipe.paper.widthMm / recipe.paper.heightMm} onChange={(c) => changeView(setCompare(viewRef.current, c))} />}
           </div>
+          <div className={`canvas-frame${failCue?.dim ? " failed" : ""}`}>
+          {failCue && (
+            <div className="failed-note" role="alert">
+              {failCue.message}
+            </div>
+          )}
           {compare ? (
             <CompareCanvas
               paper={recipe.paper}
@@ -835,6 +842,7 @@ function Editor(props: { hidden: boolean }) {
             head={head}
           />
           )}
+          </div>
         </section>
 
         <aside
