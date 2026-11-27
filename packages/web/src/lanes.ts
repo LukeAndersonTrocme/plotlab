@@ -121,3 +121,22 @@ export function laneAddMenu(recipe: Recipe, registry: StepRegistry, layer: strin
   const issue = laneIssues(recipe, registry)[0];
   return { stage, options, reason: issue ? `Nothing fits here until this lane fits together: ${issue.reason}` : `Nothing fits here in the ${layer} lane: no step that works on one ink keeps the steps after it working.` };
 }
+
+/**
+ * A card that edits step `stepId` without a lane picked edits every ink (`setLaneParam` with no
+ * lane, `resetAllInks`): true when the step is in the lanes and some ink has its own settings.
+ */
+export function allInks(recipe: Recipe, registry: StepRegistry, stepId: string): boolean {
+  const rs = recipe.steps.find((s) => s.id === stepId);
+  if (!rs || !Object.values(rs.layerParams ?? {}).some((o) => Object.keys(o).length)) return false;
+  return lanesOf(recipe, registry).lanes.some((l) => l.steps.some((s) => s.id === stepId));
+}
+
+/** What to say when an edit turns linked inks independent (an ink's own setting or selector), else null. */
+export function unlinkedNotice(before: Recipe, after: Recipe, registry: StepRegistry): string | null {
+  const a = lanesOf(before, registry), b = lanesOf(after, registry);
+  if (a.split === null || b.split === null || !a.linked || b.linked) return null;
+  const inks = registry.get(after.steps[b.split]!.step)?.layerInks ?? {};
+  const names = b.lanes.filter((l) => !l.linked).map((l) => inks[l.layer]?.name ?? l.layer);
+  return `Independent: ${names.join(", ")} now ${names.length === 1 ? "has its" : "have their"} own steps or settings, so the inks aren't linked any more. A + in a lane adds a step for one ink only; Linked puts them back together.`;
+}

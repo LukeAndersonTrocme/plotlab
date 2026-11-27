@@ -139,6 +139,25 @@ export function resetLaneStep(recipe: Recipe, registry: StepRegistry, stepId: st
   return { recipe: { ...recipe, steps: recipe.steps.map((s, i) => (i === index ? next : s)) } };
 }
 
+/**
+ * "Defaults for this step" for every ink, on a step in the lanes: the shared settings and each
+ * ink's own go back to the defaults (keeping the seed), so independent inks stay independent.
+ */
+export function resetAllInks(recipe: Recipe, registry: StepRegistry, stepId: string): ChainResult {
+  const index = recipe.steps.findIndex((s) => s.id === stepId);
+  const rs = recipe.steps[index];
+  const def = rs && registry.get(rs.step);
+  if (!rs || !def) return { reason: `There is no step "${stepId}" in this recipe.` };
+  const defaults = (mine: Record<string, unknown>) => {
+    const out: Record<string, unknown> = {};
+    for (const [k, d] of Object.entries(def.params as Record<string, ParamDecl>)) out[k] = d.type === "number" && d.seed && mine[k] !== undefined ? mine[k] : d.default;
+    return out;
+  };
+  const own = rs.layerParams && Object.fromEntries(Object.entries(rs.layerParams).map(([l, o]) => [l, Object.keys(o).length ? defaults({ ...rs.params, ...o }) : o]));
+  const next: RecipeStep = { ...rs, params: defaults(rs.params), ...(own ? { layerParams: own } : {}) };
+  return { recipe: { ...recipe, steps: recipe.steps.map((s, i) => (i === index ? next : s)) } };
+}
+
 /** Chain positions of the steps in the lanes (after the split, before the stack). */
 const laneRange = (view: LaneView, recipe: Recipe) => ({ from: view.split! + 1, to: mergeOf(view, recipe) });
 

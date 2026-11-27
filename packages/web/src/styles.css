@@ -504,3 +504,14 @@ aside.side.pin-over { outline: 2px dashed var(--accent); outline-offset: -6px; }
 .compare-bar .lens-size input { width: 90px; }
 .compare-bar .box-chip { display: inline-flex; align-items: center; gap: 4px; }
 .compare-bar .hint { font-size: 12px; }
+
+/* CMYK views (#66): Stacked / Four panels, Show other inks; See-through / Opaque in the Stack panel. */
+.ink-view-bar { display: inline-flex; gap: 8px; align-items: center; }
+.ink-view-bar .seg button { padding: 2px 8px; font-size: 12px; }
+.ink-view-bar .seg button:disabled { opacity: 0.5; cursor: not-allowed; }
+.four-panels .panel-current { fill: none; stroke: var(--accent); stroke-width: 1.2; }
+.four-panels .panel-label { font-weight: 600; paint-order: stroke; stroke: var(--paper); stroke-width: 0.8px; }
+.ink-text-C { fill: #00a0d6; } .ink-text-M { fill: #d6127a; } .ink-text-Y { fill: #c49f00; } .ink-text-K { fill: #1d1d1b; }
+.stack-mix { display: flex; flex-direction: column; gap: 4px; margin-top: 8px; }
+.stack-mix .seg { align-self: flex-start; }
+.stack-mix .seg button { padding: 2px 8px; font-size: 12px; }

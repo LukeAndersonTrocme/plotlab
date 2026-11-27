@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { addInLane, checkChain, insertStep, moveStep, removeStep, resetLaneStep, Pipeline, type RawImage, laneIssues, lanesOf, linkLanes, linkLoss, loadRecipe, moveInLane, removeFromLane, setLaneParam, unlinkLanes, type Recipe } from "../src/index.ts";
+import { addInLane, checkChain, validated, insertStep, moveStep, removeStep, resetAllInks, resetLaneStep, Pipeline, type RawImage, laneIssues, lanesOf, linkLanes, linkLoss, loadRecipe, moveInLane, removeFromLane, setLaneParam, unlinkLanes, type Recipe } from "../src/index.ts";
 import { createRegistry } from "../../steps/src/index.ts";
 
 const reg = createRegistry();
@@ -252,5 +252,40 @@ describe("a layer step between line steps runs (review r2)", () => {
     const { plot } = await new Pipeline(reg).run({ width: W, height: W, channels: 3, data } as RawImage, { ...r, workingMmPerPx: 2.5 });
     expect(plot?.layers.find((l) => l.id === "Y")?.paths.length).toBeGreaterThan(0);
     expect(plot?.rasterLayers?.layers ?? []).toEqual([]);
+  });
+});
+
+describe("a card with no lane on an independent step changes every ink (final review I-1)", () => {
+  const unlinkedFill = () => ok(unlinkLanes(recipe(["cmyk", "levels", "bands", { step: "fill", params: { minSpacing: 1 } }, "order"]), reg)).recipe;
+  it("setLaneParam(…, null) writes the shared setting and every ink's own copy: all inks", () => {
+    const r = ok(setLaneParam(unlinkedFill(), reg, "fill", "minSpacing", 2.5, null)).recipe;
+    for (const l of lanesOf(r, reg).lanes) expect(l.steps.find((s) => s.id === "fill")!.params.minSpacing, l.layer).toBe(2.5);
+    expect(lanesOf(r, reg).linked).toBe(false);
+  });
+  it("outside a split, the shared setting stays shared (a layer's own value wins)", () => {
+    const r0 = recipe(["tone", { step: "levels", params: { count: 4 }, layerParams: { tone: { count: 7 } } }, "bands", "order"]);
+    const r = ok(setLaneParam(r0, reg, "levels", "count", 5, null)).recipe;
+    expect(r.steps[1]!.params.count).toBe(5);
+    expect(r.steps[1]!.layerParams!.tone!.count).toBe(7);
+  });
+  it("resetAllInks: Defaults for every ink, which stay independent", () => {
+    const r0 = ok(setLaneParam(unlinkedFill(), reg, "fill", "minSpacing", 2.5, "M")).recipe;
+    const r = ok(resetAllInks(r0, reg, "fill")).recipe;
+    const dflt = recipe(["cmyk", "levels", "bands", "fill"]).steps[3]!.params;
+    for (const l of lanesOf(r, reg).lanes) expect(l.steps.find((s) => s.id === "fill")!.params, l.layer).toEqual(dflt);
+    expect(lanesOf(r, reg).linked).toBe(false);
+  });
+});
+
+describe("Applies to goes through the lane guard (final review I-2)", () => {
+  it("unticking Cyan on Bands in a linked split is refused: Fill would do nothing for cyan", () => {
+    const r = recipe(["cmyk", "levels", "bands", "fill", "order"]);
+    const steps = r.steps.map((s) => (s.step === "bands" ? { ...s, layers: ["M", "Y", "K"] } : s));
+    expect(validated(r, steps, reg, "Bands can't apply to just those: ")).toEqual({ reason: expect.stringMatching(/Bands can't apply to just those: Fill works on C's lines, but in the C lane it isn't lines yet/) });
+  });
+  it("a selector that keeps every lane working goes through", () => {
+    const r = recipe(["cmyk", "levels", "bands", "order"]);
+    const steps = r.steps.map((s) => (s.step === "levels" ? { ...s, layers: ["M"] } : s));
+    expect("recipe" in validated(r, steps, reg)).toBe(true);
   });
 });
