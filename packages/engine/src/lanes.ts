@@ -1,8 +1,7 @@
-import { checkChain, withStepInks, type ChainResult } from "./chain.ts";
+import type { ChainResult } from "./chain.ts";
 import { actsPerLayer } from "./layers.ts";
-import { defaultParams } from "./params.ts";
 import { screenAngle } from "./project.ts";
-import { newStepId, type Recipe, type RecipeStep } from "./recipe.ts";
+import type { Recipe, RecipeStep } from "./recipe.ts";
 import type { AnyStep, StepRegistry } from "./step.ts";
 
 /**
@@ -112,59 +111,6 @@ export function setLaneParam(recipe: Recipe, registry: StepRegistry, stepId: str
   return { recipe: { ...recipe, steps: recipe.steps.map((s, i) => (i === index ? next : s)) } };
 }
 
-/** A step after the split acts on every layer with one set of settings: a single old layer's overrides become the shared ones. */
-function onAllLayers(rs: RecipeStep, def: AnyStep | undefined): RecipeStep {
-  if (!actsPerLayer(def) || (rs.layers === undefined && rs.layerParams === undefined)) return rs;
-  const { layers: _l, layerParams, ...rest } = rs;
-  const folded = Object.values(layerParams ?? {}).reduce<Record<string, unknown>>((p, o) => ({ ...p, ...o }), {});
-  return { ...rest, params: { ...rs.params, ...folded } };
-}
-
-/**
- * Split the picture into layers with the step `stepId` (Separate CMYK) at `gap`, or where
- * the chain makes its layers now. It takes the place of the step that made the layers
- * (Ink density, Threshold…); the layer steps after it act on every new layer with their
- * shared settings (linked), the split's inks are added, and print screen angles go on.
- * Image steps before it stay in the trunk.
- */
-export function splitWith(
-  recipe: Recipe,
-  stepId: string,
-  registry: StepRegistry,
-  gap?: number,
-): { recipe: Recipe; index: number; replaced: string | null } | { reason: string } {
-  const def = registry.get(stepId);
-  if (!def) return { reason: `Unknown step "${stepId}".` };
-  if (!isSplitStep(def)) return { reason: `${def.title} doesn't split the picture into layers.` };
-  if (recipe.input !== "image") return { reason: `${def.title} splits a picture, but this source doesn't enter as a picture.` };
-  const view = lanesOf(recipe, registry);
-  if (view.split !== null) return { reason: `The picture is already split into ${view.layers.join(", ")}. Undo the split first.` };
-  if (recipe.steps.some((rs) => rs.step === def.id && rs.enabled === false)) {
-    return { reason: `${def.title} is already in the recipe, switched off. Switch it back on (its ● in the strip) instead of adding another.` };
-  }
-  const makesLayers = (rs: RecipeStep) => {
-    const d = registry.get(rs.step);
-    return rs.enabled !== false && d?.input === "image" && d.output === "layers";
-  };
-  const firstMaker = recipe.steps.findIndex(makesLayers);
-  const positions = gap !== undefined ? [gap] : firstMaker >= 0 ? [firstMaker] : [...Array(recipe.steps.length + 1).keys()];
-  let reason = "";
-  for (const at of positions) {
-    const old = recipe.steps.findIndex((rs, i) => i >= at && makesLayers(rs));
-    const kept = recipe.steps.filter((_, i) => i !== old);
-    const fresh: RecipeStep = { id: newStepId(kept.map((s) => s.id), def.id), step: def.id, version: def.version, params: defaultParams(def.params), enabled: true };
-    const steps = [...kept.slice(0, at), fresh, ...kept.slice(at).map((rs) => onAllLayers(rs, registry.get(rs.step)))];
-    const issue = checkChain(recipe.input, steps, registry)[0];
-    if (issue) {
-      reason ||= issue.reason;
-      continue;
-    }
-    const replaced = old >= 0 ? (registry.get(recipe.steps[old]!.step)?.title ?? recipe.steps[old]!.step) : null;
-    return { recipe: { ...withStepInks({ ...recipe, steps }, def), screenAngles: true }, index: at, replaced };
-  }
-  return { reason: `${def.title} doesn't fit here: ${reason}` };
-}
-
 /** Print screen angles by layer (glossary: screen angle), so the inks don't all hatch the same way. */
 export const PRINT_SCREEN_ANGLES: Record<string, number> = { C: 15, M: 75, Y: 0, K: 45 };
 
@@ -206,4 +152,16 @@ export function laneIssues(recipe: Recipe, registry: StepRegistry): LaneIssue[] 
     }
   }
   return issues;
+}
+
+/**
+ * A lane issue that `after` has and `before` didn't (matched by ink and step id): what a
+ * whole-chain edit (move, add, remove, switch off) would break in one ink's lane. Issues a
+ * recipe already had (an older recipe) don't block other edits. Null when nothing new breaks.
+ */
+export function newLaneIssue(before: Recipe, after: Recipe, registry: StepRegistry): LaneIssue | null {
+  if (lanesOf(after, registry).split === null) return null;
+  const key = (r: Recipe, i: LaneIssue) => `${i.layer}|${r.steps[i.index]?.id}`;
+  const had = new Set(laneIssues(before, registry).map((i) => key(before, i)));
+  return laneIssues(after, registry).find((i) => !had.has(key(after, i))) ?? null;
 }

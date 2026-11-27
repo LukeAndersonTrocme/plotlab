@@ -1,6 +1,6 @@
 import { DEFAULT_LAYOUT, type Layout } from "./layout.ts";
 import { resolveParams } from "./params.ts";
-import { fitsStage, stageAfter, stageOf } from "./stages.ts";
+import { stageAfter, stageMismatch, stageOf } from "./stages.ts";
 import { TARGET_KINDS, type PassOrder, type Target } from "./project.ts";
 import type { StepRegistry } from "./step.ts";
 import type { Ink, Paper, StageKind } from "./types.ts";
@@ -305,10 +305,11 @@ export function loadRecipe(raw: unknown, registry: StepRegistry): { recipe: Reci
     for (const i of issues) warnings.push({ index, message: `${def.id}.${i.param}: ${i.message}` });
     const enabled = s.enabled !== false;
     if (enabled) {
-      if (!fitsStage(at, def)) {
-        errors.push({ index, message: `${def.id} expects ${def.input} but receives ${at.kind}` });
-      }
-      at = stageAfter(at, def, { layers: Array.isArray(s.layers) ? s.layers : undefined });
+      const sel = { layers: Array.isArray(s.layers) ? (s.layers as string[]) : undefined };
+      const miss = stageMismatch(at, def, sel);
+      if (miss === "kind") errors.push({ index, message: `${def.id} expects ${def.input} but receives ${at.kind}` });
+      else if (miss) errors.push({ index, message: `${def.id}: ${miss.reason}` });
+      at = stageAfter(at, def, sel);
     }
     const out: RecipeStep = { id: ids[index]!, step: def.id, version, params: values, enabled };
     if (!enabled && s.offForEntry === true) out.offForEntry = true;

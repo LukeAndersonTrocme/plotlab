@@ -5,6 +5,8 @@ import { centerline, threshold } from "../../steps/src/index.ts";
 /** Test-only: splits the image into two identical tone layers "a" and "b". */
 const split = defineStep({
   id: "split", version: 1, title: "Split", summary: "", input: "image", output: "layers", cost: "live", help: "", params: {},
+  // Declares its layers, so a chain knows which are left once some are lines.
+  layerInks: { a: { id: "ka", color: "#000" }, b: { id: "kb", color: "#000" } } as never,
   run: (img): Layers => {
     const data = new Float32Array(img.width * img.height).map((_, i) => (img.data[i * img.channels]! < 0.5 ? 1 : 0));
     const layer = (id: string): Layer => ({ id, name: id.toUpperCase(), values: { kind: "tone", data: data.slice() } });
@@ -120,7 +122,7 @@ describe("a second line step for the layers the first one left (one ink each)", 
     expect(plot?.layers.map((l) => l.id).sort()).toEqual(["a", "b"]);
   });
   it("a layer step after the lines changes only the layers still riding along", async () => {
-    const { output, results } = await run([{ step: "split" }, { step: "centerline", layers: ["a"] }, { step: "invert" }]);
+    const { output, results } = await run([{ step: "split" }, { step: "centerline", layers: ["a"] }, { step: "invert", layers: ["b"] }]);
     if (output.kind !== "geometry") throw new Error("expected lines");
     expect(output.layers.map((l) => l.id)).toEqual(["a"]);
     expect(tone(output.rasterLayers?.layers[0])?.slice(0, 8)).toEqual([0, 0, 0, 0, 1, 1, 1, 1]);

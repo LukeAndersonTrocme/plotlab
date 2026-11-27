@@ -139,3 +139,18 @@ describe("strip lanes: CMYK as one row of 2×2 thumbnails, then a Stack box", ()
     expect(stripLanes(recipe(["cmyk"]), reg)?.stackAfter).toBe(0);
   });
 });
+
+describe("toggleBypass keeps every lane working (review r1)", () => {
+  it("turning Fill on where yellow isn't lines yet says why, and changes nothing", () => {
+    const r = loadRecipe(
+      {
+        schemaVersion: 4,
+        paper: { widthMm: 210, heightMm: 297 },
+        inks: [{ id: "k", color: "#000" }],
+        steps: [{ step: "cmyk" }, { step: "centerline", layers: ["C", "M", "K"] }, { step: "fill", enabled: false }, { step: "stipple", layers: ["Y"] }, { step: "order" }],
+      },
+      reg,
+    ).recipe;
+    expect(toggleBypass(r, 2, reg)).toEqual({ reason: expect.stringMatching(/Turning on Fill would break the chain: Fill works on Y's lines, but in the Y lane it isn't lines yet/) });
+  });
+});

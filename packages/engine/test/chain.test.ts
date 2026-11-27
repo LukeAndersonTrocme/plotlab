@@ -26,6 +26,29 @@ describe("checkChain", () => {
     ).recipe;
     expect(checkChain("image", r.steps, reg)).toEqual([]);
   });
+  describe("exactly the layers still left (review r1)", () => {
+    const steps = (list: Array<string | Record<string, unknown>>) =>
+      list.map((s, i) => ({ id: `s${i}`, version: 1, params: {}, enabled: true, ...(typeof s === "string" ? { step: s } : s) }) as never);
+    const raw = (list: Array<string | Record<string, unknown>>) => ({ schemaVersion: 4, paper: { widthMm: 100, heightMm: 100 }, inks: [{ id: "k", color: "#000" }], steps: list.map((s) => (typeof s === "string" ? { step: s } : s)) });
+    const refused = (list: Array<string | Record<string, unknown>>, at: number, why: RegExp) => {
+      const issues = checkChain("image", steps(list), reg);
+      expect(issues[0], JSON.stringify(list)).toMatchObject({ index: at });
+      expect(issues[0]!.reason).toMatch(why);
+      expect(() => loadRecipe(raw(list), reg)).toThrow();
+    };
+    it("single ink: the layer names aren't known, so nothing follows the lines", () => {
+      refused(["threshold", { step: "centerline", layers: ["threshold"] }, "pixelate", "order"], 2, /Pixelate needs layers, but at that point the chain has lines/);
+    });
+    it("every ink already lines: nothing is left for a layer step", () => {
+      refused(["cmyk", { step: "stipple", layers: ["Y"] }, { step: "centerline", layers: ["C", "M", "K"] }, { step: "pixelate", layers: ["M"] }, "order"], 3, /Pixelate needs layers, but at that point the chain has lines/);
+    });
+    it("a layer step after the lines must name inks that are still layers", () => {
+      refused(["cmyk", { step: "centerline", layers: ["C", "M", "K"] }, { step: "pixelate", layers: ["M"] }, { step: "stipple", layers: ["Y"] }, "order"], 2, /Pixelate needs M as layers, but at that point only Y is still layers; the others are lines/);
+    });
+    it("a whole-chain layer step after some lines is refused (it would only reach some inks)", () => {
+      refused(["cmyk", { step: "stipple", layers: ["Y"] }, "centerline", "order"], 2, /Centerline acts on every ink, but some are already lines at that point. Name the inks that are still layers \(C, M and K\)/);
+    });
+  });
   it("but not once a line step has turned every layer into lines", () => {
     const steps = ["cmyk", "stipple", "pixelate"].map((step, i) => ({ id: `s${i}`, step, version: 1, params: {}, enabled: true }));
     const issues = checkChain("image", steps, reg);

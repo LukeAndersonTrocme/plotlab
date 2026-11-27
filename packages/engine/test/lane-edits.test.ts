@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { addInLane, checkChain, Pipeline, type RawImage, laneIssues, lanesOf, linkLanes, linkLoss, loadRecipe, moveInLane, removeFromLane, setLaneParam, unlinkLanes, type Recipe } from "../src/index.ts";
+import { addInLane, checkChain, insertStep, moveStep, removeStep, Pipeline, type RawImage, laneIssues, lanesOf, linkLanes, linkLoss, loadRecipe, moveInLane, removeFromLane, setLaneParam, unlinkLanes, type Recipe } from "../src/index.ts";
 import { createRegistry } from "../../steps/src/index.ts";
 
 const reg = createRegistry();
@@ -191,7 +191,38 @@ describe("laneIssues: each lane on its own", () => {
     expect(laneSteps(r, "Y")).toEqual(["levels"]);
   });
   it("finds a layer step that comes after that ink became lines", () => {
-    const r = recipe(["cmyk", { step: "stipple", layers: ["Y"] }, "centerline", "order"]);
+    // checkChain refuses this chain too (a whole-chain step after some lines); laneIssues names the ink.
+    const base = recipe(["cmyk", { step: "stipple", layers: ["Y"] }, { step: "centerline", layers: ["C", "M", "K"] }, "order"]);
+    const r = { ...base, steps: base.steps.map((s) => (s.step === "centerline" ? { ...s, layers: undefined } : s)) };
     expect(laneIssues(r, reg)).toEqual([{ layer: "Y", index: 2, reason: expect.stringMatching(/Centerline needs Y as layers.*already lines.*Stipple/) }]);
+  });
+});
+
+describe("whole-chain edits keep every lane working (review r1)", () => {
+  // Pixelated magenta, stippled yellow, then a Fill for the lines.
+  const built = () => recipe(["cmyk", { step: "pixelate", layers: ["M"] }, { step: "centerline", layers: ["C", "M", "K"] }, { step: "stipple", layers: ["Y"] }, "fill", "order"]);
+  const at = (r: Recipe, step: string) => r.steps.findIndex((s) => s.step === step);
+  it("the sidebar's ↓ on Pixelate can't take it past magenta's line step", () => {
+    const r = built();
+    expect(moveStep(r, at(r, "pixelate"), at(r, "pixelate") + 1, reg)).toEqual({ reason: expect.stringMatching(/Pixelate needs M as layers, but at that point only Y is still layers/) });
+  });
+  it("moving Fill before yellow's line step would leave Fill doing nothing for yellow", () => {
+    const r = built();
+    expect(moveStep(r, at(r, "fill"), at(r, "stipple"), reg)).toEqual({ reason: expect.stringMatching(/Fill works on Y's lines, but in the Y lane it isn't lines yet/) });
+  });
+  it("removing a line step that a lane's Fill needs says so", () => {
+    const r = built();
+    expect(removeStep(r, at(r, "centerline"), reg)).toEqual({ reason: expect.stringMatching(/Fill works on C's lines/) });
+  });
+  it("adding a whole-chain Fill where some inks aren't lines yet is refused", () => {
+    const r = built();
+    expect(insertStep(r, "fill", reg, at(r, "stipple"))).toEqual({ reason: expect.stringMatching(/Fill works on Y's lines/) });
+  });
+  it("an issue the recipe already had doesn't block other edits", () => {
+    // Fill for every ink, but Y is never lines: loads as before (the old chain rules).
+    const r = recipe(["cmyk", "levels", { step: "bands", layers: ["C", "M", "K"] }, "fill", "order"]);
+    expect(laneIssues(r, reg)).toHaveLength(1);
+    expect("recipe" in moveStep(r, 1, 1, reg)).toBe(true);
+    expect("recipe" in insertStep(r, "pixelate", reg, 1)).toBe(true);
   });
 });
