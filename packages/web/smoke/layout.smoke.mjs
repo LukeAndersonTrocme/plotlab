@@ -932,6 +932,15 @@ try {
     await page.waitForFunction(() => /each ink in the final stack/.test(document.querySelector(".view-bar").textContent), null, { timeout: 30_000 }).catch(() => {});
     const atStack = await panels();
     check(/^C:C M:M? Y:Y? K:K?$/.test(atStack) && /each ink in the final stack/.test(await viewing()), `four panels at the stack: each ink of the final plot (${atStack})`);
+    // Preview as exported draws the page as one proof picture; four panels still show each ink's lines.
+    await page.check(".stats label.toggle:has-text('Preview as exported') input");
+    // The proof comes from a new run: wait for it to finish before looking.
+    await page.waitForSelector(".stats .refining", { timeout: 5_000 }).catch(() => {});
+    await page.waitForSelector(".stats .refining", { state: "detached", timeout: 60_000 }).catch(() => {});
+    await page.waitForTimeout(500);
+    const exported = await panels();
+    check(/^C:C M:M? Y:Y? K:K?$/.test(exported) && (await page.$('svg.four-panels g[data-panel="C"] g[data-ink="C"] path')) !== null, `four panels at the stack keep the lines with Preview as exported on (${exported})`);
+    await page.uncheck(".stats label.toggle:has-text('Preview as exported') input");
     await page.uncheck('.stack-row[data-ink="C"] input[type=checkbox]');
     const hiddenC = await panels();
     check(/^C\(hidden\): /.test(hiddenC), `an ink hidden in the Stack panel stays hidden in four panels (${hiddenC})`);

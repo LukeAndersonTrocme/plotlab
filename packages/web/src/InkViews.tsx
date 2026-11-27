@@ -46,9 +46,10 @@ const GAP = 8;
  * its own paper, from the same stage output as the stacked canvas. A hidden ink keeps its
  * panel, empty; the ink the step was picked in is outlined.
  */
-export function FourPanels(props: { paper: Paper; panels: InkPanel[]; rasters: RasterView[]; plot: Plot | null; hidden: ReadonlySet<string>; showTravel: boolean; underlay: RasterView | null }) {
+export function FourPanels(props: { paper: Paper; panels: InkPanel[]; rasters: RasterView[]; plot: Plot | null; hidden: ReadonlySet<string>; showTravel: boolean; underlay: RasterView | null; empty?: string }) {
   const { widthMm: w, heightMm: h } = props.paper;
   const label = Math.max(4, Math.min(w, h) / 16);
+  const nothing = !props.rasters.length && !props.plot;
   return (
     <svg className="preview four-panels" viewBox={`-5 -5 ${2 * w + GAP + 10} ${2 * h + GAP + 10}`} preserveAspectRatio="xMidYMid meet" aria-label="Four panels: each ink on its own paper">
       {props.panels.map((p, k) => (
@@ -59,6 +60,11 @@ export function FourPanels(props: { paper: Paper; panels: InkPanel[]; rasters: R
           <text x={label * 0.6} y={label * 1.4} className={`panel-label ink-text-${p.id}`} style={{ fontSize: label }}>
             {p.name}
           </text>
+          {!p.hidden && nothing && props.empty && (
+            <text x={w / 2} y={h / 2} textAnchor="middle" className="empty-text" style={{ fontSize: label }}>
+              {props.empty}
+            </text>
+          )}
           {p.hidden && (
             <text x={w / 2} y={h / 2} textAnchor="middle" className="empty-text" style={{ fontSize: label }}>
               Hidden (Stack panel)

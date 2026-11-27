@@ -810,8 +810,10 @@ function Editor(props: { hidden: boolean }) {
             <FourPanels
               paper={recipe.paper}
               panels={inks.panels}
+              // The stage itself, never the export proof (one picture, not inks): the lines too with Preview as exported on.
               rasters={inspected ? inspected.rasters : run.rasterLayers}
-              plot={viewPlot}
+              plot={inspected ? inspected.plot : plot}
+              empty={run.busy ? "Working…" : "Nothing to show at this stage"}
               hidden={hidden}
               showTravel={showTravel && recipe.target.kind === "plotter" && (!inspected || inspected.kind === "plot")}
               underlay={showSource && inspect !== "source" ? run.underlay : null}
