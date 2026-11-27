@@ -25,6 +25,11 @@ jobs:
       - run: pnpm build
         env:
           BASE: /${{ github.event.repository.name }}/
+      - name: Build the user manual (HTML + PDF) into dist/manual
+        run: |
+          sudo apt-get update && sudo apt-get install -y pandoc
+          pnpm --filter @plotlab/web exec playwright install --with-deps chromium
+          pnpm --filter @plotlab/web manual
       - uses: actions/upload-pages-artifact@v3
         with:
           path: packages/web/dist
