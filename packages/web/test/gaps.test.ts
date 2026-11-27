@@ -1,7 +1,8 @@
 import { describe, expect, it } from "vitest";
 import { checkChain, lanesOf, loadRecipe, type Recipe } from "@plotlab/engine";
 import { createRegistry } from "@plotlab/steps";
-import { addAt, addMenu, dragHint, dropGaps, liveMenu, movedText, moveToGap, nudge, stageAt } from "../src/gaps.ts";
+import { addAt, addMenu, dragHint, dropGaps, liveMenu, movedText, moveToGap, nudge, shownPlace, stageAt } from "../src/gaps.ts";
+import { createHistory, commit, redo, undo } from "../src/history.ts";
 
 const reg = createRegistry();
 const recipe = (steps: Array<string | { step: string; enabled?: boolean }>, input?: "image" | "layers" | "geometry"): Recipe =>
@@ -242,6 +243,15 @@ describe("nudge: a keyboard move one place left or right, by the drag's rule", (
     expect(nudge(r, reg, 4, 1)).toEqual({ reason: "Stroke order is already the last step." });
   });
 
+  it("won't cross steps the strip's row doesn't show (Independent lanes), and counts only the shown places", () => {
+    // Say positions 2 and 3 are lane steps, shown in the lane rows instead.
+    const hidden = new Set([2, 3]);
+    expect(nudge(r, reg, 1, 1, hidden)).toEqual({ reason: "Levels can't move across the ink lanes: each ink's steps are in its own row, and move along it." });
+    expect(nudge(r, reg, 4, -1, hidden)).toEqual({ reason: expect.stringMatching(/^Stroke order can't move across the ink lanes/) });
+    expect([0, 1, 4].map((i) => shownPlace(i, hidden))).toEqual([0, 1, 2]);
+    expect(shownPlace(3)).toBe(3);
+  });
+
   it("the announcement names the step and its new place", () => {
     expect(movedText("Hatch", 2)).toBe("Moved Hatch to position 3.");
     expect(movedText("Pixelate", 0, "Magenta")).toBe("Moved Pixelate to position 1 in the Magenta lane.");
@@ -256,5 +266,18 @@ describe("an open + menu and Undo", () => {
     const undone = recipe(["threshold", "centerline"]);
     expect(liveMenu(menu, undone)).toBeNull();
     expect(liveMenu(null, base)).toBeNull();
+  });
+
+  it("Undo then Redo doesn't bring it back: the strip keeps what liveMenu leaves (Redo restores the very same recipe)", () => {
+    const added = recipe(["threshold", "pixelate", "centerline", "order"]);
+    let h = commit(createHistory(base), added);
+    let menu = liveMenu({ gap: 4, recipe: h.present }, h.present);
+    expect(menu).not.toBeNull();
+    h = undo(h);
+    menu = liveMenu(menu, h.present);
+    expect(menu).toBeNull();
+    h = redo(h);
+    expect(h.present).toBe(added);
+    expect(liveMenu(menu, h.present)).toBeNull();
   });
 });

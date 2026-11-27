@@ -62,13 +62,13 @@ describe("addInLane: + in lane X adds a step for that ink only", () => {
   it("refuses a step that would come after the ink is already lines, saying what to do", () => {
     const u = ok(unlinkLanes(linked(), reg)).recipe;
     const res = addInLane(u, reg, "Y", "stipple", 1);
-    expect(res).toEqual({ reason: expect.stringMatching(/Stipple needs Y as layers.*already lines.*Centerline/) });
+    expect(res).toEqual({ reason: expect.stringMatching(/Stipple needs Yellow as layers.*already lines.*Centerline/) });
   });
   it("refuses a step that doesn't work on one ink, an unknown lane and a gap that isn't there", () => {
     const u = ok(unlinkLanes(linked(), reg)).recipe;
     expect(addInLane(u, reg, "M", "order", 1)).toEqual({ reason: expect.stringMatching(/Stroke order works on every ink at once/) });
     expect(addInLane(u, reg, "Z", "pixelate", 0)).toEqual({ reason: expect.stringMatching(/no Z lane/) });
-    expect(addInLane(u, reg, "M", "pixelate", 5)).toEqual({ reason: expect.stringMatching(/no place 6 in the M lane/) });
+    expect(addInLane(u, reg, "M", "pixelate", 5)).toEqual({ reason: expect.stringMatching(/no place 6 in the Magenta lane/) });
   });
 });
 
@@ -89,8 +89,8 @@ describe("removeFromLane: narrows the selector, or removes the step", () => {
   });
   it("refuses a step that isn't in that lane", () => {
     const u = ok(addInLane(ok(unlinkLanes(linked(), reg)).recipe, reg, "M", "pixelate", 0)).recipe;
-    expect(removeFromLane(u, reg, "pixelate", "C")).toEqual({ reason: expect.stringMatching(/Pixelate isn't in the C lane/) });
-    expect(removeFromLane(u, reg, "cmyk", "C")).toEqual({ reason: expect.stringMatching(/isn't in the C lane/) });
+    expect(removeFromLane(u, reg, "pixelate", "C")).toEqual({ reason: expect.stringMatching(/Pixelate isn't in the Cyan lane/) });
+    expect(removeFromLane(u, reg, "cmyk", "C")).toEqual({ reason: expect.stringMatching(/isn't in the Cyan lane/) });
   });
 });
 
@@ -139,7 +139,7 @@ describe("moveInLane: keeps every lane's order valid", () => {
   });
   it("refuses a move that would put a layer step after the ink's lines", () => {
     const res = moveInLane(twoSteps(), reg, "pixelate", "M", 2);
-    expect(res).toEqual({ reason: expect.stringMatching(/Pixelate can't go there in the M lane/) });
+    expect(res).toEqual({ reason: expect.stringMatching(/Pixelate can't go there in the Magenta lane/) });
   });
   it("moving to where it is changes nothing", () => {
     const r = twoSteps();
@@ -182,11 +182,11 @@ describe("link: collapses every lane onto one (lossy)", () => {
 describe("laneIssues: each lane on its own", () => {
   it("finds a lines step (Fill) in a lane whose ink isn't lines yet", () => {
     const r = recipe(["cmyk", "levels", { step: "bands", layers: ["C", "M", "K"] }, "fill", "order"]);
-    expect(laneIssues(r, reg)).toEqual([{ layer: "Y", index: 3, reason: expect.stringMatching(/Fill works on Y's lines, but in the Y lane it isn't lines yet/) }]);
+    expect(laneIssues(r, reg)).toEqual([{ layer: "Y", index: 3, reason: expect.stringMatching(/Fill works on Yellow's lines, but in the Yellow lane it isn't lines yet/) }]);
   });
   it("so taking the line step out of a lane asks for Fill to go first", () => {
     const u = ok(unlinkLanes(recipe(["cmyk", "levels", "bands", "fill", "order"]), reg)).recipe;
-    expect(removeFromLane(u, reg, "bands", "Y")).toEqual({ reason: expect.stringMatching(/Taking Bands out of the Y lane would break it: Fill works on Y's lines/) });
+    expect(removeFromLane(u, reg, "bands", "Y")).toEqual({ reason: expect.stringMatching(/Taking Bands out of the Yellow lane would break it: Fill works on Yellow's lines/) });
     const r = ok(removeFromLane(ok(removeFromLane(u, reg, "fill", "Y")).recipe, reg, "bands", "Y")).recipe;
     expect(laneSteps(r, "Y")).toEqual(["levels"]);
   });
@@ -194,7 +194,7 @@ describe("laneIssues: each lane on its own", () => {
     // checkChain refuses this chain too (a whole-chain step after some lines); laneIssues names the ink.
     const base = recipe(["cmyk", { step: "stipple", layers: ["Y"] }, { step: "centerline", layers: ["C", "M", "K"] }, "order"]);
     const r = { ...base, steps: base.steps.map((s) => (s.step === "centerline" ? { ...s, layers: undefined } : s)) };
-    expect(laneIssues(r, reg)).toEqual([{ layer: "Y", index: 2, reason: expect.stringMatching(/Centerline needs Y as layers.*already lines.*Stipple/) }]);
+    expect(laneIssues(r, reg)).toEqual([{ layer: "Y", index: 2, reason: expect.stringMatching(/Centerline needs Yellow as layers.*already lines.*Stipple/) }]);
   });
 });
 
@@ -208,15 +208,15 @@ describe("whole-chain edits keep every lane working (review r1)", () => {
   });
   it("moving Fill before yellow's line step would leave Fill doing nothing for yellow", () => {
     const r = built();
-    expect(moveStep(r, at(r, "fill"), at(r, "stipple"), reg)).toEqual({ reason: expect.stringMatching(/Fill works on Y's lines, but in the Y lane it isn't lines yet/) });
+    expect(moveStep(r, at(r, "fill"), at(r, "stipple"), reg)).toEqual({ reason: expect.stringMatching(/Fill works on Yellow's lines, but in the Yellow lane it isn't lines yet/) });
   });
   it("removing a line step that a lane's Fill needs says so", () => {
     const r = built();
-    expect(removeStep(r, at(r, "centerline"), reg)).toEqual({ reason: expect.stringMatching(/Fill works on C's lines/) });
+    expect(removeStep(r, at(r, "centerline"), reg)).toEqual({ reason: expect.stringMatching(/Fill works on Cyan's lines/) });
   });
   it("adding a whole-chain Fill where some inks aren't lines yet is refused", () => {
     const r = built();
-    expect(insertStep(r, "fill", reg, at(r, "stipple"))).toEqual({ reason: expect.stringMatching(/Fill works on Y's lines/) });
+    expect(insertStep(r, "fill", reg, at(r, "stipple"))).toEqual({ reason: expect.stringMatching(/Fill works on Yellow's lines/) });
   });
   it("an issue the recipe already had doesn't block other edits", () => {
     // Fill for every ink, but Y is never lines: loads as before (the old chain rules).
@@ -240,7 +240,7 @@ describe("resetLaneStep: Defaults for this step, from a lane (review r1)", () =>
   });
   it("refuses a step that isn't in that lane", () => {
     const r = ok(unlinkLanes(linked(), reg)).recipe;
-    expect(resetLaneStep(r, reg, "order", "M")).toEqual({ reason: expect.stringMatching(/isn't in the M lane/) });
+    expect(resetLaneStep(r, reg, "order", "M")).toEqual({ reason: expect.stringMatching(/isn't in the Magenta lane/) });
   });
 });
 
@@ -281,7 +281,7 @@ describe("Applies to goes through the lane guard (final review I-2)", () => {
   it("unticking Cyan on Bands in a linked split is refused: Fill would do nothing for cyan", () => {
     const r = recipe(["cmyk", "levels", "bands", "fill", "order"]);
     const steps = r.steps.map((s) => (s.step === "bands" ? { ...s, layers: ["M", "Y", "K"] } : s));
-    expect(validated(r, steps, reg, "Bands can't apply to just those: ")).toEqual({ reason: expect.stringMatching(/Bands can't apply to just those: Fill works on C's lines, but in the C lane it isn't lines yet/) });
+    expect(validated(r, steps, reg, "Bands can't apply to just those: ")).toEqual({ reason: expect.stringMatching(/Bands can't apply to just those: Fill works on Cyan's lines, but in the Cyan lane it isn't lines yet/) });
   });
   it("a selector that keeps every lane working goes through", () => {
     const r = recipe(["cmyk", "levels", "bands", "order"]);

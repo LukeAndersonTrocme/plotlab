@@ -1,4 +1,4 @@
-import { addInLane, lanesOf, laneIssues, moveInLane, type PassOrder, type Plot, type Recipe, type StageKind, type StepRegistry } from "@plotlab/engine";
+import { addInLane, inkName, lanesOf, laneIssues, moveInLane, type PassOrder, type Plot, type Recipe, type StageKind, type StepRegistry } from "@plotlab/engine";
 import type { PlotEstimate } from "@plotlab/machines";
 import type { AddMenu, AddOption } from "./gaps.ts";
 import { movePass, orderedPasses, passBoxes } from "./plotmode.ts";
@@ -100,6 +100,19 @@ export function laneRows(recipe: Recipe, registry: StepRegistry, run: Run, plot:
 }
 
 /**
+ * The chain positions the strip's own row leaves out: with Independent inks the lane steps are
+ * in the lane rows instead (the split and the stack stay in the row). Empty otherwise.
+ */
+export function stripHidden(recipe: Recipe, registry: StepRegistry): Set<number> {
+  const v = lanesOf(recipe, registry);
+  if (v.split === null || v.linked) return new Set();
+  const merge = v.stack[0] ?? recipe.steps.length;
+  const out = new Set<number>();
+  for (let i = v.split + 1; i < merge; i++) out.add(i);
+  return out;
+}
+
+/**
  * A keyboard move inside an Independent lane: step `stepId` one place along lane `layer`,
  * through the lane guard the drag uses (`moveInLane`), so a refusal has the drag's reason.
  * `to` is its new place in the lane.
@@ -108,12 +121,11 @@ export function laneNudge(recipe: Recipe, registry: StepRegistry, stepId: string
   const v = lanesOf(recipe, registry);
   const lane = v.lanes.find((l) => l.layer === layer);
   const pos = lane?.steps.findIndex((s) => s.id === stepId) ?? -1;
-  if (!lane || pos < 0) return { reason: `That step isn't in the ${layer} lane.` };
+  if (!lane || pos < 0) return { reason: `That step isn't in the ${inkName(recipe, registry, layer)} lane.` };
   const to = pos + dir;
   if (to < 0 || to >= lane.steps.length) {
     const s = lane.steps[pos]!;
-    const name = (v.split !== null ? registry.get(recipe.steps[v.split]!.step)?.layerInks?.[layer]?.name : undefined) ?? layer;
-    return { reason: `${registry.get(s.step)?.title ?? s.step} is already ${dir < 0 ? "first" : "last"} in the ${name} lane.` };
+    return { reason: `${registry.get(s.step)?.title ?? s.step} is already ${dir < 0 ? "first" : "last"} in the ${inkName(recipe, registry, layer)} lane.` };
   }
   const res = moveInLane(recipe, registry, stepId, layer, to);
   return "reason" in res ? res : { recipe: res.recipe, to };

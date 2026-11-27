@@ -190,6 +190,6 @@ describe("toggleBypass keeps every lane working (review r1)", () => {
       },
       reg,
     ).recipe;
-    expect(toggleBypass(r, 2, reg)).toEqual({ reason: expect.stringMatching(/Turning on Fill would break the chain: Fill works on Y's lines, but in the Y lane it isn't lines yet/) });
+    expect(toggleBypass(r, 2, reg)).toEqual({ reason: expect.stringMatching(/Turning on Fill would break the chain: Fill works on Yellow's lines, but in the Yellow lane it isn't lines yet/) });
   });
 });

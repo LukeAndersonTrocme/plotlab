@@ -132,14 +132,31 @@ export function dragHint(recipe: Recipe, registry: StepRegistry, from: number): 
  * there (`moveToGap`), so a refusal carries the reason the drag shows on that gap. `to` is the
  * step's new chain position.
  */
-export function nudge(recipe: Recipe, registry: StepRegistry, from: number, dir: -1 | 1): { recipe: Recipe; gap: number; to: number } | { reason: string } {
+export function nudge(
+  recipe: Recipe,
+  registry: StepRegistry,
+  from: number,
+  dir: -1 | 1,
+  /** Chain positions the strip doesn't show in its row (Independent inks: the lane steps, `stripHidden`). */
+  hidden: ReadonlySet<number> = new Set(),
+): { recipe: Recipe; gap: number; to: number } | { reason: string } {
   const rs = recipe.steps[from];
   if (!rs) return { reason: `There is no step ${from + 1}.` };
+  const title = registry.get(rs.step)?.title ?? rs.step;
   const to = from + dir;
-  if (to < 0 || to >= recipe.steps.length) return { reason: `${registry.get(rs.step)?.title ?? rs.step} is already the ${dir < 0 ? "first" : "last"} step.` };
+  if (to < 0 || to >= recipe.steps.length) return { reason: `${title} is already the ${dir < 0 ? "first" : "last"} step.` };
+  // The drag offers no gap there either: the lanes have their own rows.
+  if (hidden.has(from) || hidden.has(to)) return { reason: `${title} can't move across the ink lanes: each ink's steps are in its own row, and move along it.` };
   const gap = dir < 0 ? from - 1 : from + 2;
   const res = moveToGap(recipe, registry, from, gap);
   return "reason" in res ? res : { recipe: res.recipe, gap, to };
+}
+
+/** A step's place as the strip's row shows it (1 less for each hidden step before it): what "position N" counts. */
+export function shownPlace(index: number, hidden: ReadonlySet<number> = new Set()): number {
+  let n = index;
+  for (const h of hidden) if (h < index) n--;
+  return n;
 }
 
 /** What a screen reader hears after a keyboard move: the step and its new place (in a lane, its place in that lane). */

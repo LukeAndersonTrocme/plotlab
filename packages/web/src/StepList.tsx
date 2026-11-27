@@ -23,8 +23,8 @@ import { ParamControl } from "./ParamControl.tsx";
 import { splitSettings } from "./settings.ts";
 import type { InspectTarget, StepInfo } from "./protocol.ts";
 import { bypassRule, removeCheck, STAGE_NAMES, toggleBypass } from "./strip.ts";
-import { allInks, laneNudge, unlinkedNotice } from "./lanes.ts";
-import { movedText, nudge } from "./gaps.ts";
+import { allInks, laneNudge, stripHidden, unlinkedNotice } from "./lanes.ts";
+import { movedText, nudge, shownPlace } from "./gaps.ts";
 
 /** Which cards the sidebar shows, by chain position (from `sidebarSteps` in view.ts). */
 export interface SidebarCards {
@@ -53,7 +53,8 @@ export function StepList(props: {
   onBranch: ((index: number) => void) | null;
   registry: StepRegistry;
   steps: StepInfo[];
-  stale: number[];
+  /** On-demand steps that need a Run, by step id (`RunState.staleIds`): follows the step through a reorder. */
+  staleIds: string[];
   error: { message: string; index?: number } | null;
   inspect: InspectTarget;
   onInspect: (t: InspectTarget) => void;
@@ -118,10 +119,18 @@ export function StepList(props: {
     const rs = recipe.steps[index]!;
     const title = registry.get(rs.step)?.title ?? rs.step;
     const lane = laneAt(index);
-    const res = lane ? laneNudge(recipe, registry, rs.id, lane.layer, dir) : nudge(recipe, registry, index, dir);
+    if (lane) {
+      const res = laneNudge(recipe, registry, rs.id, lane.layer, dir);
+      if ("reason" in res) return props.onNotice(res.reason);
+      change(res.recipe, false);
+      return setSaid(movedText(title, res.to, lane.name));
+    }
+    // As in the strip's row: not across the Independent lanes, and counting the boxes it shows.
+    const hidden = stripHidden(recipe, registry);
+    const res = nudge(recipe, registry, index, dir, hidden);
     if ("reason" in res) return props.onNotice(res.reason);
     change(res.recipe, false);
-    setSaid(movedText(title, res.to, lane?.name));
+    setSaid(movedText(title, shownPlace(res.to, hidden)));
   };
   /** Layers arriving at step `index`: the output of the last step before it that ran. */
   const inputLayers = (index: number): LayerInfo[] => [...props.steps].reverse().find((s) => s.index < index)?.layers ?? [];
@@ -159,8 +168,9 @@ export function StepList(props: {
         : props.onChange(resetParam(recipe, index, name, registry, layer ?? undefined), false);
     const stepChanged =
       Object.keys(rs.layerParams ?? {}).length > 0 || Object.entries(def.params).some(([n, d]) => isChanged(d as ParamDecl, rs.params[n]));
-    const stale = props.stale.includes(index);
-    const ran = props.steps.some((s) => s.index === index);
+    // By step id, like the strip's boxes: right after a reorder the last run's places are someone else's.
+    const stale = props.staleIds.includes(rs.id);
+    const ran = props.steps.some((s) => s.id === rs.id);
     const pinned = props.pins.includes(rs.id);
     const focused = props.cards?.looking === index;
     const bypass = bypassRule(recipe, index, registry); // the strip toggle's rule too

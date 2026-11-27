@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { addInLane, lanesOf, loadRecipe, moveInLane, unlinkLanes, type Ink, type Plot, type Recipe } from "@plotlab/engine";
 import { createRegistry } from "@plotlab/steps";
-import { allInks, unlinkedNotice, laneAddMenu, laneBoxes, laneKey, laneNudge, laneOrder, laneRows, moveLane, parseLaneKey, stackRows } from "../src/lanes.ts";
+import { allInks, unlinkedNotice, laneAddMenu, laneBoxes, laneKey, laneNudge, laneOrder, stripHidden, laneRows, moveLane, parseLaneKey, stackRows } from "../src/lanes.ts";
 
 const reg = createRegistry();
 const recipe = (steps: string[]): Recipe =>
@@ -85,7 +85,14 @@ describe("independent lanes in the strip", () => {
     expect("reason" in no).toBe(true);
     expect(laneNudge(r, reg, "pixelate", "M", 1)).toEqual(no);
     expect(laneNudge(r, reg, "levels", "M", -1)).toEqual({ reason: "Levels is already first in the Magenta lane." });
+    // One form for the lane's name in every refusal: the ink's name, like the lane guard's own.
+    expect("reason" in no && no.reason).toMatch(/in the Magenta lane/);
     expect(laneNudge(r, reg, "centerline", "M", 1)).toEqual({ reason: "Centerline is already last in the Magenta lane." });
+  });
+  it("the strip's own row leaves out the lane steps only while the inks are independent", () => {
+    expect([...stripHidden(mixed(), reg)]).toEqual([1, 2]);
+    expect([...stripHidden(recipe(["cmyk", "centerline", "order"]), reg)]).toEqual([]);
+    expect([...stripHidden(recipe(["threshold", "centerline", "order"]), reg)]).toEqual([]);
   });
   it("each lane's boxes are keyed by step and ink, with their chain position", () => {
     const r = mixed();

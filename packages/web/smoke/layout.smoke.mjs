@@ -269,6 +269,19 @@ try {
     await page.keyboard.press("ControlOrMeta+z");
     await page.waitForFunction((b) => [...document.querySelectorAll(".strip .box")].map((e) => e.dataset.key).join(",") !== b, beforeUndo, { timeout: 10_000 }).catch(() => {});
     check((await keys()) !== beforeUndo && !(await page.$(".add-menu")), `Undo while the "+" menu is open closes it (${beforeUndo} → ${await keys()})`);
+    // Redo brings back the very same recipe: the closed menu stays closed.
+    await page.keyboard.press("ControlOrMeta+Shift+z");
+    await page.waitForFunction((b) => [...document.querySelectorAll(".strip .box")].map((e) => e.dataset.key).join(",") === b, beforeUndo, { timeout: 10_000 }).catch(() => {});
+    await page.waitForTimeout(300);
+    check((await keys()) === beforeUndo && !(await page.$(".add-menu")), `Redo after that doesn't bring the "+" menu back (${await keys()})`);
+    // Alt+arrow on a "+" (not a box): nothing moves, and the browser's Back doesn't happen.
+    await page.evaluate(() => {
+      window.__alt = null;
+      window.addEventListener("keydown", (e) => e.altKey && e.key.startsWith("Arrow") && (window.__alt = e.defaultPrevented));
+    });
+    await page.focus('.strip .gap[data-gap="1"] .plus');
+    await page.keyboard.press("Alt+ArrowLeft");
+    check((await page.evaluate(() => window.__alt)) === true && (await keys()) === beforeUndo, "Alt+← on a \"+\" is swallowed (no browser Back) and moves nothing");
     // Nothing fits: the reason and Close aren't inside a role=menu.
     const n2 = (await keys()).split(",").length - 1;
     await page.click(`.strip .gap[data-gap="${n2}"] .plus`);
@@ -892,11 +905,17 @@ try {
     await page.click('.add-menu [role=menuitem][data-step="pixelate"]');
     await page.waitForSelector('.lane-row[data-lane="M"] .box[data-key="pixelate@M"]', { timeout: 10_000 });
     // Alt+→ in a lane goes through the lane guard: Pixelate can't follow Centerline (it would get lines).
+    // Alt+→ on the split's box in the main row: the lane steps aren't in that row, so it can't cross them.
+    await page.focus('.strip .box[data-key="cmyk"] button.pick');
+    await page.keyboard.press("Alt+ArrowRight");
+    await page.waitForFunction(() => [...document.querySelectorAll(".notice")].some((n) => /across the ink lanes/.test(n.textContent)), null, { timeout: 5_000 }).catch(() => {});
+    const crossSaid = (await page.$$eval(".notice", (els) => els.map((e) => e.textContent).find((t) => /across the ink lanes/.test(t)))) ?? "";
+    check(/M:pixelate\+centerline/.test(await rows()) && /^Separate CMYK can't move across the ink lanes/.test(crossSaid), `Alt+→ on the split box won't cross the hidden lane steps ("${crossSaid}")`);
     await page.focus('.box[data-key="pixelate@M"] button.pick');
     await page.keyboard.press("Alt+ArrowRight");
-    await page.waitForFunction(() => [...document.querySelectorAll(".notice")].some((n) => /in the M lane/.test(n.textContent)), null, { timeout: 5_000 }).catch(() => {});
-    const laneSaid = (await page.$$eval(".notice", (els) => els.map((e) => e.textContent).find((t) => /in the M lane/.test(t)))) ?? "";
-    check(/M:pixelate\+centerline/.test(await rows()) && /Pixelate can.t go there in the M lane/.test(laneSaid), `Alt+→ in a lane is refused by the lane guard, with its reason ("${laneSaid}")`);
+    await page.waitForFunction(() => [...document.querySelectorAll(".notice")].some((n) => /in the Magenta lane/.test(n.textContent)), null, { timeout: 5_000 }).catch(() => {});
+    const laneSaid = (await page.$$eval(".notice", (els) => els.map((e) => e.textContent).find((t) => /in the Magenta lane/.test(t)))) ?? "";
+    check(/M:pixelate\+centerline/.test(await rows()) && /Pixelate can.t go there in the Magenta lane/.test(laneSaid), `Alt+→ in a lane is refused by the lane guard, with its reason ("${laneSaid}")`);
     await page.click('.box[data-key="centerline@Y"] .pick');
     await page.click("aside.side button:has-text('Take out of Yellow')");
     await page.waitForFunction(() => !document.querySelector('.box[data-key="centerline@Y"]'), null, { timeout: 10_000 });
@@ -1118,7 +1137,7 @@ try {
     await cyan.uncheck({ force: true }).catch(() => {});
     await page.waitForTimeout(300);
     const notices = await page.$$eval(".notice", (els) => els.map((e) => e.textContent).join(" "));
-    check((await cyan.isChecked()) && /Fill works on C's lines/.test(notices) && /Linked/.test(await page.textContent(".lanes-bar .seg button[aria-pressed=true]")), `unticking Cyan in Applies to on a linked split is refused with the reason (${notices.slice(0, 90)}…)`);
+    check((await cyan.isChecked()) && /Fill works on Cyan's lines/.test(notices) && /Linked/.test(await page.textContent(".lanes-bar .seg button[aria-pressed=true]")), `unticking Cyan in Applies to on a linked split is refused with the reason (${notices.slice(0, 90)}…)`);
     await page.click('.strip .box[data-key="levels"] .pick');
     await page.click('aside.side .card.step.focus .scope-row:has(.scope-label:has-text("Settings for")) button:has-text("Magenta")');
     const count = page.locator('aside.side .card.step.focus .param:has(label:has-text("Bands")) input[type=range]').first();

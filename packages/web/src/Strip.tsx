@@ -1,7 +1,7 @@
 import { Fragment, useEffect, useRef, useState, type CSSProperties, type KeyboardEvent, type PointerEvent } from "react";
 import { STAGE_WORDS, type Recipe, type StageKind, type StepRegistry } from "@plotlab/engine";
-import { addMenu, dragHint, dropGaps, liveMenu, movedText, nudge, type AddMenu, type DropGap } from "./gaps.ts";
-import { laneAddMenu, laneNudge, parseLaneKey, type LaneRow } from "./lanes.ts";
+import { addMenu, dragHint, dropGaps, liveMenu, movedText, nudge, shownPlace, type AddMenu, type DropGap } from "./gaps.ts";
+import { laneAddMenu, laneNudge, parseLaneKey, stripHidden, type LaneRow } from "./lanes.ts";
 import { LaneRows } from "./LaneRows.tsx";
 import { useBlobUrl } from "./StageView.tsx";
 import { STACK_KEY, STAGE_NAMES, STAGES, STEP_DRAG, type StripBox, type StripLanes } from "./strip.ts";
@@ -79,6 +79,9 @@ export function Strip(props: {
    */
   const [menuState, setMenu] = useState<{ gap: number; left: number; bottom: number; lane?: { layer: string; at: number }; recipe: Recipe } | null>(null);
   const menu = liveMenu(menuState, props.recipe);
+  // Forget a menu that's no longer live: Redo brings back the very same recipe object, and the
+  // closed menu must not come back with it (and take the focus).
+  if (menuState && !menu) setMenu(null);
   const [drag, setDrag] = useState<{ from: number; gaps: Map<number, DropGap>; hint: string } | null>(null);
   const [over, setOver] = useState<number | null>(null);
   /** While dragging over a dimmed gap: why the step can't go there (shown as text, not only a tooltip). */
@@ -125,20 +128,24 @@ export function Strip(props: {
     }
     const box = props.boxes.find((b) => b.key === key);
     if (!box || box.index < 0) return;
-    const res = nudge(props.recipe, props.registry, box.index, dir);
+    // Independent inks: the lane steps aren't in this row, so a move can't cross them, and
+    // "position N" counts the boxes the row shows.
+    const hidden = stripHidden(props.recipe, props.registry);
+    const res = nudge(props.recipe, props.registry, box.index, dir, hidden);
     if ("reason" in res) return props.onNotice(res.reason);
     refocus.current = key;
     props.onMove(box.index, res.gap);
-    setSaid(movedText(box.title, res.to));
+    setSaid(movedText(box.title, shownPlace(res.to, hidden)));
   };
 
   // Left/right arrows move between boxes; Enter or Space (the button's own) selects; Alt+arrows move the step.
   const onKey = (e: KeyboardEvent) => {
     if (e.key !== "ArrowLeft" && e.key !== "ArrowRight") return;
     if (e.altKey) {
+      // Anywhere in the strip (a toggle, a "+"): never the browser's Back / Forward.
+      e.preventDefault();
       const key = (document.activeElement as HTMLElement | null)?.closest<HTMLElement>(".box[data-key]")?.dataset.key;
       if (!key || !(document.activeElement as HTMLElement).matches("button.pick")) return;
-      e.preventDefault();
       return keyMove(key, e.key === "ArrowRight" ? 1 : -1);
     }
     const picks = [...(row.current?.querySelectorAll<HTMLButtonElement>("button.pick") ?? [])];
