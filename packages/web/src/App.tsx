@@ -9,13 +9,15 @@ import { PassStrip, PlotPanel, usePlayback } from "./PlotPanel.tsx";
 import { fitSolo, framePlot, passBoxes, soloPlot } from "./plotmode.ts";
 import { fmtTime, setupSummary } from "./setup.ts";
 import { ModeSwitch, SetupChip } from "./Shell.tsx";
-import { canvasTarget, clickBox, lookingBand, compareTargetsOf, fitView, fromViewBlock, initialView, isPinned, openSetup, pin, readThumbSize, resizeThumbs, RESULT, select, selectedIndex, setCompare, setMode, sidebarSteps, SOURCE, stepSelection, toggleCompare, toggleSelect, togglePin, toggleSolo, toViewBlock, writeThumbSize, type ViewState } from "./view.ts";
+import { canvasTarget, clickBox, lookingBand, compareTargetsOf, fitView, fromViewBlock, initialView, isPinned, openSetup, pin, readThumbSize, resizeThumbs, RESULT, select, selectedIndex, setCompare, setInkMix, setMode, sidebarSteps, SOURCE, stepSelection, toggleCompare, toggleSelect, togglePin, toggleSolo, toViewBlock, writeThumbSize, type ViewState } from "./view.ts";
 import { Strip } from "./Strip.tsx";
 import { addAt, moveToGap } from "./gaps.ts";
 import { STACK_KEY, STEP_DRAG, stripBoxes, thumbRenderSide, toggleBypass, type StripBox } from "./strip.ts";
 import { isSplit, linkInks, markSplit, splitIntoCmyk, undoSplit, type SplitMark } from "./split.ts";
 import { laneProps } from "./laneProps.ts";
 import { StackPanel } from "./StackPanel.tsx";
+import { FourPanels, InkViewBar, panelsTitle } from "./InkViews.tsx";
+import { inkCanvas } from "./inkview.ts";
 import { bandView, shiftRefusal, shownBands } from "./compare.ts";
 import { EMPTY_RUN, Runner, type RunState } from "./runner.ts";
 import { decodeFile, loadSample, sampleSource } from "./sample.ts";
@@ -627,6 +629,8 @@ function Editor(props: { hidden: boolean }) {
   // CMYK lanes: lane order is the pass order; Independent inks get one row per lane.
   const lp = laneProps({ recipe, registry, run, plot, view, currentView: () => viewRef.current, changeView, apply, applySelecting, setNotice, link: (l) => void link(l) });
   const lanes = lp.lanes;
+  // CMYK views: four panels, the other inks faint under one ink's step, opaque inks in pass order (only the view).
+  const inks = inkCanvas(view, recipe, registry, plot, hidden);
   const summary = setupSummary(recipe, run.estimate);
   const projectName = sourceName === "sample" ? "Sample image" : sourceName;
 
@@ -753,15 +757,16 @@ function Editor(props: { hidden: boolean }) {
             ) : viewTitle ? (
               <>
                 <span>
-                  Viewing: <strong>{viewTitle}</strong>
+                  Viewing: <strong>{inks?.panels ? panelsTitle(inks, stepTitle(selected)) : viewTitle}</strong>
                 </span>
                 <button onClick={() => changeView(select(view, RESULT))} title="Show the end result again">
                   Show final
                 </button>
               </>
             ) : (
-              <span>Result</span>
+              <span>{inks?.panels ? <>Viewing: <strong>{panelsTitle(inks, "")}</strong></> : "Result"}</span>
             )}
+            {inks && <InkViewBar canvas={inks} view={view} onView={changeView} />}
             {viewLayers.length > 1 &&
               viewLayers.map((l) => (
                 <label key={l.id} className="chip" title="Show or hide this layer">
@@ -801,6 +806,16 @@ function Editor(props: { hidden: boolean }) {
               busy={run.busy}
               onChange={(c) => changeView(setCompare(viewRef.current, c))}
             />
+          ) : inks?.panels ? (
+            <FourPanels
+              paper={recipe.paper}
+              panels={inks.panels}
+              rasters={inspected ? inspected.rasters : run.rasterLayers}
+              plot={viewPlot}
+              hidden={hidden}
+              showTravel={showTravel && recipe.target.kind === "plotter" && (!inspected || inspected.kind === "plot")}
+              underlay={showSource && inspect !== "source" ? run.underlay : null}
+            />
           ) : (
           <StageView
             paper={recipe.paper}
@@ -809,6 +824,7 @@ function Editor(props: { hidden: boolean }) {
             showTravel={showTravel && recipe.target.kind === "plotter" && (!inspected || inspected.kind === "plot")}
             underlay={showSource && inspect !== "source" ? run.underlay : null}
             hidden={hidden}
+            inks={inks ? { focus: inks.focus, otherInks: inks.otherInks, opaque: inks.opaque, order: inks.order } : undefined}
             empty={run.busy ? "Working…" : "Nothing to show at this stage"}
             head={head}
           />
@@ -879,6 +895,8 @@ function Editor(props: { hidden: boolean }) {
                     setHidden(h);
                   }}
                   onPassOrder={(order) => apply({ ...recipe, passOrder: order }, false)}
+                  mix={view.inkMix}
+                  onMix={(m) => changeView(setInkMix(viewRef.current, m))}
                 />
               )}
               <StepList

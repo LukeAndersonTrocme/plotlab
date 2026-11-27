@@ -3,12 +3,14 @@ import type { PlotEstimate } from "@plotlab/machines";
 import { stackRows } from "./lanes.ts";
 import { movePass } from "./plotmode.ts";
 import { fmtTime } from "./setup.ts";
+import type { InkMix } from "./view.ts";
 
 /**
  * The Stack panel (#66): where the lanes merge into one plot. Each ink in pass order (the lane
  * order), with its lines and plotting time; ↑ / ↓ change the pass order (Plot mode's
  * `movePass`, a recipe edit), and Show hides an ink from the canvas to judge the others alone
- * (only the view: the export keeps every ink).
+ * (only the view: the export keeps every ink). See-through / Opaque changes how the canvas
+ * mixes the inks (`inkview.ts`), so the pass order's effect shows.
  */
 export function StackPanel(props: {
   layers: string[];
@@ -19,6 +21,9 @@ export function StackPanel(props: {
   hidden: ReadonlySet<string>;
   onHide: (id: string, hide: boolean) => void;
   onPassOrder: (order: string[]) => void;
+  /** How the canvas mixes the inks (only the view: the export is unchanged). */
+  mix: InkMix;
+  onMix: (mix: InkMix) => void;
 }) {
   const rows = stackRows(props.layers, props.names, props.plot, props.estimate, props.passOrder);
   const plot = props.plot;
@@ -52,6 +57,17 @@ export function StackPanel(props: {
           );
         })}
       </ol>
+      <div className="stack-mix">
+        <span className="seg" role="group" aria-label="Inks on the canvas">
+          <button aria-pressed={props.mix === "see-through"} onClick={() => props.onMix("see-through")} title="Inks mix where they cross, like transparent ink">
+            See-through
+          </button>
+          <button aria-pressed={props.mix === "opaque"} onClick={() => props.onMix("opaque")} title="Each ink covers the ones plotted before it">
+            Opaque
+          </button>
+        </span>
+        <span className="hint">With opaque inks the last ink plotted covers the others where they cross, so the order changes the picture. Only the preview: the export is unchanged.</span>
+      </div>
     </div>
   );
 }
