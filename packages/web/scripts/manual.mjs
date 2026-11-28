@@ -80,7 +80,7 @@ function build() {
   execFileSync(
     "pandoc",
     [combined, "-o", html, "--standalone", "--embed-resources", "--toc", "--toc-depth=2", "--number-sections",
-     `--resource-path=${dir}:${manual}`, `--css=${join(manual, "manual.css")}`,
+     `--resource-path=${dir}:${manual}`, `--css=${join(manual, "manual.css")}`, `--include-after-body=${join(manual, "manual.js.html")}`,
      "-M", `subtitle=Version ${version}, for plotlab ${version}`, "-M", `version=${version}`],
     { stdio: "inherit" },
   );
@@ -93,6 +93,8 @@ async function pdf(html) {
   const browser = await chromium.launch();
   const page = await browser.newPage();
   await page.goto(pathToFileURL(html).href);
+  // The web page folds the contents on narrow screens; the PDF always shows them.
+  await page.evaluate(() => document.querySelectorAll("details").forEach((d) => { d.open = true; }));
   const file = join(out, `plotlab-manual-v${version}.pdf`);
   await page.pdf({
     path: file,

@@ -5,6 +5,8 @@ lang: en
 
 # About this manual {-}
 
+[Download this manual as a PDF, to print or to read offline.](plotlab-manual-v0.1.pdf){.pdf-link}
+
 plotlab turns an image into lines for a pen plotter, or into files for print or screen. It
 runs in your browser at
 [lukeandersontrocme.github.io/plotlab](https://lukeandersontrocme.github.io/plotlab/).
