@@ -11,6 +11,8 @@
 - Changing a step's output for the same params → bump its `version`. Renaming a param → add `migrate`.
 - After editing any `help.md`: `pnpm --filter @plotlab/steps gen:help` (a test checks it).
 - Golden output changed on purpose? `pnpm golden:approve` and say so in the commit message.
+- Changed a UI label, setting, step or preset? Update `docs/manual/en/` too (step text lives in
+  `help.md`, preset text in `presets.ts`; both flow into the manual). See `docs/manual/README.md`.
 - Before claiming done: `pnpm typecheck && pnpm test && pnpm build`.
 - Every screen must make sense to a non-programmer (Nick). Numbers get a slider *and* a
   numeric field; help opens on click.

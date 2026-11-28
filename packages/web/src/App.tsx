@@ -722,6 +722,10 @@ function Editor(props: { hidden: boolean }) {
         <button className="reset" onClick={startOver} title="Start over from the default recipe. Keeps your image. Back undoes it." aria-label="Reset">
           ↺ <span className="label">Reset</span>
         </button>
+        <a className="manual-link" href={`${import.meta.env.BASE_URL}manual/`} target="_blank" rel="noopener" title="The plotlab user manual, in a new tab" aria-label="Manual">
+          <span className="short" aria-hidden="true">?</span>
+          <span className="label">Manual</span>
+        </a>
       </header>
 
       <main className="work">

@@ -1,0 +1,33 @@
+/* The manual's one stylesheet: the web page and the PDF (printed from the same page). */
+html { font: 16px/1.5 Georgia, "Iowan Old Style", serif; color: #1a1a1a; }
+body { max-width: 46rem; margin: 0 auto; padding: 2rem 1.25rem 4rem; }
+h1, h2, h3, #TOC { font-family: -apple-system, "Helvetica Neue", Arial, sans-serif; line-height: 1.25; }
+header#title-block-header { margin: 3rem 0 2.5rem; }
+h1.title { font-size: 2.2rem; margin: 0; }
+p.subtitle { font-size: 1.1rem; color: #555; margin: 0.25rem 0 0; }
+h1 { font-size: 1.6rem; margin-top: 3rem; border-bottom: 1px solid #ccc; padding-bottom: 0.25rem; }
+h2 { font-size: 1.2rem; margin-top: 2rem; }
+h3 { font-size: 1.02rem; margin-top: 1.5rem; }
+.header-section-number { color: #888; margin-right: 0.4em; }
+#TOC ul { list-style: none; padding-left: 1.2rem; }
+#TOC > ul { padding-left: 0; }
+@media print { #TOC > ul { columns: 2; } #TOC li { break-inside: avoid; } }
+#TOC a { color: inherit; text-decoration: none; }
+a { color: #1d5fa8; }
+table { border-collapse: collapse; width: 100%; margin: 1rem 0; font-size: 0.92rem; }
+th, td { border-bottom: 1px solid #ddd; padding: 0.35rem 0.5rem; text-align: left; vertical-align: top; }
+th { border-bottom: 2px solid #999; }
+img { max-width: 100%; height: auto; border: 1px solid #ddd; }
+figure { margin: 1.25rem 0; }
+figcaption { font-size: 0.85rem; color: #555; }
+code { font-size: 0.9em; }
+
+@media print {
+  html { font-size: 10.5pt; }
+  body { max-width: none; padding: 0; }
+  a { color: inherit; }
+  #TOC { break-after: page; }
+  body > h1 { break-before: page; }
+  h1, h2, h3 { break-after: avoid; }
+  figure, table, tr { break-inside: avoid; }
+}

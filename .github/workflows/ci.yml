@@ -27,3 +27,7 @@ jobs:
           path: golden/received/
           if-no-files-found: ignore
       - run: pnpm build
+      - name: Build the user manual (HTML only)
+        run: |
+          sudo apt-get update && sudo apt-get install -y pandoc
+          pnpm --filter @plotlab/web manual --no-pdf

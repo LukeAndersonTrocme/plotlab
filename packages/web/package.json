@@ -7,6 +7,8 @@
     "dev": "vite",
     "build": "vite build",
     "preview": "vite preview",
+    "manual": "node scripts/manual.mjs",
+    "manual:shots": "node scripts/manual-shots.mjs",
     "smoke": "BASE=/plotlab/ vite build && node smoke/layout.smoke.mjs"
   },
   "dependencies": {
