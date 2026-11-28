@@ -12,7 +12,8 @@ Source of the manual published at `https://lukeandersontrocme.github.io/plotlab/
 - `img/`: screenshots, made by `pnpm --filter @plotlab/web manual:shots` (add
   `--aria <dir>` to also dump each screen's labels for checking the text).
 - `VERSION`: the app version this manual describes. Bump it with each release.
-- `manual.css`: one stylesheet for the page and the PDF.
+- `manual.css`: one stylesheet for the page and the PDF. `manual.js.html`: folds the contents
+  under a "Contents" button on phones and pins them as a sidebar on wide screens.
 
 Build locally (needs pandoc; the PDF needs `pnpm --filter @plotlab/web exec playwright install chromium`):
 

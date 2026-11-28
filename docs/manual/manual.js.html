@@ -1,0 +1,23 @@
+<script>
+// Small page behaviour for the web manual (not used in the PDF's layout).
+// The contents fold under a "Contents" button on narrow screens and sit in a sticky
+// sidebar on wide ones; tapping an entry on a phone folds it away again.
+(function () {
+  var toc = document.getElementById("TOC");
+  if (!toc) return;
+  var d = document.createElement("details");
+  d.className = "toc";
+  var s = document.createElement("summary");
+  s.textContent = "Contents";
+  toc.parentNode.insertBefore(d, toc);
+  d.appendChild(s);
+  d.appendChild(toc);
+  var wide = window.matchMedia("(min-width: 1100px)");
+  function sync() { if (!window.matchMedia("print").matches) d.open = wide.matches; }
+  sync();
+  wide.addEventListener("change", sync);
+  toc.addEventListener("click", function (e) {
+    if (e.target.closest("a") && !wide.matches) d.open = false;
+  });
+})();
+</script>
